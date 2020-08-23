@@ -57,3 +57,16 @@ class SVDatabase(h5py.File):
         """
 
         raise NotImplementedError
+
+
+    def loadTrueValues(self):
+        """Return {structName: {'energy': eng, 'forces': fcs}}"""
+
+        trueValues = {}
+        for structName in self:
+            eng = self[structName].attrs['energy']
+            fcs = self[structName].attrs['forces']
+
+            trueValues[structName] = {'energy': eng, 'forces': fcs}
+
+        return trueValues

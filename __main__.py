@@ -92,6 +92,8 @@ def main():
                         if 'paramRange' in group[svName].attrs else None
                 )
             )
+
+        trueValues = database.loadTrueValues()
     
     # Prepare regressor
     if settings['optimizer'] == 'CMA':
@@ -118,7 +120,9 @@ def main():
 
     # Begin optimization
     for regStep in range(settings['numRegressorSteps']):
+        print(regStep)
         for optStep in range(settings['numOptimizerSteps']):
+            print('\t', optStep)
             if isMaster:
                 rawPopulations = [
                     np.array(opt.ask(N)) for opt in regressor.optimizers
@@ -151,14 +155,61 @@ def main():
             values = evaluator.evaluate(populationDict, evalType='forces')
             forces = regressor.evaluateTrees(values, N)
 
-            # Eneriges/forces = {structName: [val for tree in regressor.trees]}
+            # Eneriges/forces = {structName: [pop for tree in regressor.trees]}
+            costs = cost(energies, forces, trueValues)
 
-            # TODO: convert to errors
-            # TODO: compute cost function
-            # TODO: update optimizers for each tree
-
+            for treeIdx in range(len(regressor.optimizers)):
+                opt = regressor.optimizers[treeIdx]
+                opt.tell(rawPopulations[treeIdx], costs[treeIdx])
 
     print('Done')
+
+
+def cost(energies, forces, trueValues):
+    """
+    Takes in dictionaries of energies and forces and returns a single-value cost
+    function. Currently uses MAE.
+
+    Args:
+        energies (dict):
+            {structName: [(P,) for tree in trees]} where P is population size.
+
+        energies (dict):
+            {structName: [(P, 3, N) for tree in trees]} where P is population
+            size and N is number of atoms.
+
+        trueValues (dict):
+            {structName: {'energy': eng, 'forces':fcs}}
+
+    Returns:
+        costs (list):
+            A list of the total costs for the populations of each tree.
+    """
+
+    keys = list(energies.keys())
+    numTrees   = len(energies[keys[0]])
+    numPots    = energies[keys[0]][0].shape[0]
+    numStructs = len(keys)
+
+    keys = list(energies.keys())
+    costs = []
+
+    for treeNum in range(numTrees):
+        treeCosts = np.zeros((numPots, 2*numStructs))
+        for i, structName in enumerate(keys):
+            eng = energies[structName][treeNum]
+            fcs =   forces[structName][treeNum]
+
+            engErrors = eng - trueValues[structName]['energy']
+            fcsErrors = fcs - trueValues[structName]['forces']
+
+            treeCosts[:,   i] = abs(engErrors)
+            treeCosts[:, 2*i] = np.average(np.abs(fcsErrors), axis=(1, 2))
+
+        costs.append(treeCosts.sum(axis=1))
+
+    return costs
+
 
 if __name__ == '__main__':
     main()

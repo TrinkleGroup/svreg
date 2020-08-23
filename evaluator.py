@@ -18,7 +18,7 @@ a different type of parallel structure for some reason.
 import numpy as np
 from mpi4py import MPI
 
-# store structure vectors at the module level to enable memory sharing
+# store databases at the module level to enable memory sharing
 database = {}
 natoms = {}
 
@@ -63,6 +63,7 @@ class Manager:
         for structName in database:
             values[structName] = {}
             for svName in database[structName]:
+                n = int(natoms[structName])
                 listOfPops = population[svName]
                 values[structName][svName] = []
                 for pop in listOfPops:
@@ -73,12 +74,11 @@ class Manager:
                         val = (sv @ pop.T).T
 
                         if evalType == 'energy':
-                            val = val.sum(axis=1)
+                            val = val.sum(axis=1)/n
 
                         if evalType == 'forces':
-                            n = int(natoms[structName])
-
                             val = val.reshape(pop.shape[0], 3, n, n)
+                            val = val.sum(axis=-1).swapaxes(1, 2)
 
                         intermediates.append(val)
                     
