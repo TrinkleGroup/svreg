@@ -1,4 +1,5 @@
 import random
+import numpy as np
 from copy import deepcopy
 
 from nodes import FunctionNode, SVNode, _node_types
@@ -20,26 +21,22 @@ class SVTree(list):
         nodes (list):
             The tree itself is represented by a 1D list of nodes.
 
-        popsize (int):
-            The number of parameter sets to generate for each SVNode. Used
-            during fitting.
-
         svNodes (list):
             A list that points to the SVNodes in the tree; used for
             easily accessing the parameters of the SV nodes.
     """
 
-    def __init__(self, nodes=None, popSize=10):
+    def __init__(self, nodes=None):
+
         if nodes is None:
             nodes = []
         self.nodes = nodes
 
-        self.popSize = popSize
         self.svNodes = [node for node in nodes if isinstance(node, SVNode)]
 
 
     @classmethod
-    def random(cls, svNodePool, maxDepth=1, singleNodeTreeProb=0.1):
+    def random(cls, svNodePool, maxDepth=1):
         """
         Generates a random tree with a maximum depth of maxDepth by randomly
         adding nodes from a pool of function nodes and the given svNodes list.
@@ -50,27 +47,19 @@ class SVTree(list):
 
             svNodePool (list):
                 The collection of svNodes that can be used to generate the tree.
-
-            singleNodeTreeProb (float):
-                The probability of generating a tree that is a single SVNode.
         """
 
         if maxDepth < 1:
             raise RuntimeError("maxDepth must be >= 1")
-
-        if (singleNodeTreeProb == 1) and (maxDepth > 1):
-            raise RuntimeError(
-                "Can't specify singleNodeTreeProb=1 and maxDepth != 1"
-            )
-        
+       
         tree = cls()
 
         numSVNodes = len(svNodePool)
         numFuncs = FunctionNode._num_avail_functions
         numNodeChoices = numFuncs + numSVNodes
 
-        # first node shold either be a function or an SVNode
-        if random.random() < singleNodeTreeProb:
+        # choose a random depth from [1, maxDepth]
+        if maxDepth == 1:
             # choose random SVNode to use as the only term in the tree
             newSVNode = deepcopy(random.choice(svNodePool))
             tree.nodes.append(newSVNode)
@@ -113,7 +102,7 @@ class SVTree(list):
         raise RuntimeError("Something went wrong in tree construction")
 
 
-    def eval(self, forces=False):
+    def eval(self):
         """
         Evaluates the tree. Assumes that each SVNode has already been updated to
         contain the SV of the desired structure. If forces=True, computes the
@@ -127,17 +116,16 @@ class SVTree(list):
 
         Returns:
             results (np.arr):
-                An array of results for self.popSize different
-                parameterizations. If forces=False, this will be an array of
-                energies of size (self.popSize,). If forces=True, it will
-                be an array of forces of size (self.popSize, N, 3) where N is
-                the number of atoms in the currently-loaded structure.
+                An array of results for P different parameterizations, where P
+                depeneds on the most recent self.populate() call. If
+                forces=False, this will be an array of energies of size (P,).
+                If forces=True, it will be an array of forces of size (P, N, 3)
+                where N is the number of atoms in the current structure.
         """
 
         # Check for single-node tree
         if isinstance(self.nodes[0], SVNode):
             return self.nodes[0].values
-
 
         # Constructs a list-of-lists where each sub-list is a sub-tree for a
         # function at a given recursion depth. The first node of a sub-tree
@@ -174,23 +162,31 @@ class SVTree(list):
 
     def populate(self, N):
         """
-        Assign random populations to all ParameterNode objects in the tree, then
-        return a 2D array of all of these parameters concatenated together.
+        Generate a random population from all SVNode objects in the tree, then
+        return an ordered horizontal array of shape (N, ?) where the second
+        dimension depends on the structure of the tree.
+
+        Note that an array form is useful for working with Optimizer objects. It
+        will be parsed into a dictionary form when passing to an Evaluator.
 
         Args:
             N (int):
-                Number of parameter sets to generate for each ParameterNode
+                Number of parameter sets to generate for each SVNode
 
         Return:
             population (np.arr):
-                2D array of all ParameterNode parameters
+                {svName: population}
         """
 
-        raise NotImplementedError
+        population = []
+        for svNode in self.svNodes:
+            population.append(svNode.populate(N))
+
+        return np.hstack(population)
 
 
     def getPopulation(self):
-        """Return a 2D array of all ParameterNode parameters"""
+        """Return a 2D array of all SVNode parameters"""
 
         raise NotImplementedError
     
@@ -202,16 +198,54 @@ class SVTree(list):
 
         Args:
             population (np.arr):
-                The population to be assigned to the ParameterNode objects
+                The population to be assigned to the SVNode objects
         """
 
         raise NotImplementedError
 
 
-    def parsePopulation(self, population):
+    def parseDict2Arr(self, population, N):
+        """
+        Converts a dictionary of {svName: np.vstack-ed array of parameters} to
+        a 2D array form. Useful for passing to Optimizer objects.
+
+        Args:
+            population (dict):
+                {svName: np.vstack-ed array of parameters}
+
+            N (int):
+                The number of parameter sets generated for each node.
+        """
+
+        # Split the populations for each SV type
+        for svName in population:
+            population[svName] = np.split(population[svName], N)
+
+        # Now build an ordered horizontal array of shape (N, ?)
+        # where the second dimension depends on the structure of the tree.
+        array = []
+        for svNode in self.svNodes:
+            array.append(population[svNode.description].pop())
+
+        # Error checking to see if something went wrong
+        for svName in population:
+            leftovers = len(population[svName])
+            if leftovers > 0:
+                raise RuntimeError(
+                    'SV {} had {} extra parameter set(s)'.format(
+                        svName, leftovers
+                    )
+                )
+
+        return np.hstack(array)
+
+
+    def parseArr2Dict(self, population):
         """
         Convert a 2D array of parameters into a dictionary, where the key is the
-        unique node identifier, and the value is an array of parameters.
+        structure vector type, and the value is an array of parameters of all
+        SVNode objects of that type in self.svNodes. Useful for storing in an
+        organized manner.
 
         Args:
             population (np.arr):
@@ -219,10 +253,25 @@ class SVTree(list):
 
         Returns:
             parameters (dict):
-                {Node.id: array of parameters}
+                {svName: np.vstack-ed array of parameters}
         """
 
-        raise NotImplementedError
+        # Split by node
+        splitIndices = np.cumsum([n.numParams for n in self.svNodes])[:-1]
+        splitPop = np.split(population, splitIndices, axis=1)
+
+        # Group by SV type
+        parameters = {
+            svName: [] for svName in set([n.description for n in self.svNodes])
+        }
+
+        for svNode, pop in zip(self.svNodes, splitPop):
+            parameters[svNode.description].append(pop)
+
+        for svName in parameters:
+            parameters[svName] = np.vstack(parameters[svName])
+
+        return parameters
 
 
     def getSVParams(self):
@@ -277,3 +326,78 @@ class SVTree(list):
                     output += ', '
 
         return output
+
+
+    def getSubtree(self):
+        """
+        Get a random sub-tree. As in gplearn, uses Koza's (1992) approach.
+
+        Returns:
+            start, end (tuple):
+                Indices of start/end of sub-tree.
+        """
+
+        probs = np.array([
+            0.9 if isinstance(node, FunctionNode) else 0.1
+            for node in self.nodes
+        ])
+
+        probs = np.cumsum(probs/probs.sum())
+        start = np.searchsorted(probs, random.random())
+
+        stack = 1
+        end = start
+        while stack > end - start:
+            node = self.nodes[end]
+            if isinstance(node, FunctionNode):
+                stack += node.function.arity
+            end += 1
+        
+        return start, end
+
+
+    def crossover(self, donor):
+        """
+        Performs a crossover operation between self and `donor`.
+
+        Args:
+            donor (SVTree):
+                The tree to cross self with.
+
+        Returns:
+            The list of nodes for the new tree.
+        """
+
+        # Choose sub-tree for removal
+        start, end = self.getSubtree()
+        # removed = range(start, end)
+
+        # Choose sub-tree from donor to donate
+        donorStart, donorEnd = donor.getSubtree()
+        # donorRemoved = list(
+        #     set(range(len(donor.nodes))) - set(range(donorStart, donorEnd))
+        # )
+
+        return (
+            self.nodes[:start]
+            + donor.nodes[donorStart:donorEnd]
+            + self.nodes[end:]
+        )
+
+    
+    def mutate(self, svNodePool, maxDepth=1):
+        """Does an in-place mutation of the current tree."""
+
+        randomDonor = self.random(svNodePool, maxDepth)
+
+        self.nodes = self.crossover(randomDonor)
+
+
+    def hoistMutate(self):
+        """Implemented in gplearn. Supposedly helps to avoid bloat."""
+        raise NotImplementedError
+
+
+    def pointMutate(self):
+        """Implemented in gplearn. Doesn't change tree size."""
+        raise NotImplementedError

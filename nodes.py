@@ -54,7 +54,7 @@ class FunctionNode(Node):
 
     @classmethod
     def random(cls):
-        key, func = random.sample(_function_map.items(), 1)[0]
+        key = random.sample(_function_map.keys(), 1)[0]
         return cls(key=key)
 
 
@@ -67,12 +67,12 @@ class SVNode(Node):
         numParams (int):
             The number of fitting parameters for the corresponding SV.
 
-        popSize (int):
-            The number of parameter sets to generate when prompted.
-
         population (np.arr):
-            An array of shape (self.popSize, self.numParams) where each row
-            corresponds to a different parameter set.
+            An array of shape (P, self.numParams) where each row
+            corresponds to a different parameter set. P depends on the most
+            recent populate() call.
+
+        TODO: there's no reason for a node to store its population
 
         paramRange (tuple):
             A length-2 tuple of the (low, high) range of allowed parameters.
@@ -90,22 +90,26 @@ class SVNode(Node):
         def __init__(self):
             Exception.__init__(self, "Trying to use stale SV value.")
 
-    def __init__(self, description, numParams, popSize=10, paramRange=(0, 1)):
+    def __init__(self, description, numParams, paramRange=None):
         Node.__init__(self, description)
         self.numParams = numParams
-        self.popSize = popSize
-        self.population = None
+
         self.paramRange = paramRange
+        if self.paramRange is None:
+            self.paramRange = (0, 1)
+
         self._values = None
 
     
-    def populate(self):
-        """Fill self.population with a random population"""
-        self.population = np.random.random(size=(self.popSize, self.numParams))
+    def populate(self, popSize):
+        """Generate a random population of `popSize` parameter sets"""
+        pop = np.random.random(size=(popSize, self.numParams))
 
         # shift into expected range
-        self.population *= (self.paramRange[1] - self.paramRange[0])
-        self.population += self.paramRange[0]
+        pop *= (self.paramRange[1] - self.paramRange[0])
+        pop += self.paramRange[0]
+
+        return pop
 
     @property
     def values(self):

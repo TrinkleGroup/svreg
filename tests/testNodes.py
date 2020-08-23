@@ -48,7 +48,7 @@ class Test_SVNode(unittest.TestCase):
     def setUp(self):
         try:
             self.node = SVNode(
-                'dummy_sv_node', numParams=10, popSize=100, paramRange=(1, 2)
+                'dummy_sv_node', numParams=10, paramRange=(1, 2)
             )
         except:
             self.fail("Something went wrong in SVNode.__init__()")
@@ -57,19 +57,17 @@ class Test_SVNode(unittest.TestCase):
     def test_verify_constructor(self):
         self.assertEquals(self.node.description, 'dummy_sv_node')
         self.assertEqual(self.node.numParams, 10)
-        self.assertEqual(self.node.popSize, 100)
-        self.assertIsNone(self.node.population)
 
         with self.assertRaises(SVNode.StaleValueException):
             self.node.values
 
 
     def test_generate_population(self):
-        self.node.populate()
+        pop = self.node.populate(100)
 
-        self.assertEqual(self.node.population.shape, (100, 10))
-        self.assertTrue(np.min(self.node.population) >= 1)
-        self.assertTrue(np.max(self.node.population) <= 2)
+        self.assertEqual(pop.shape, (100, 10))
+        self.assertTrue(np.min(pop) >= 1)
+        self.assertTrue(np.max(pop) <= 2)
 
     def test_value_invalidation(self):
         newValues = np.random.random(size=10)

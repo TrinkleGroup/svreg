@@ -1,0 +1,23 @@
+################################################################################
+# An example input script with typical settings for svreg_data. Available
+# settings, descriptions, and default values can be found in the
+# svreg.settings.Settings class
+################################################################################
+# Database settings
+################################################################################
+
+refStruct           Ground_state_crystal
+databasePath        ../svreg_data/mlearn/Mo/Mo.hdf5
+
+################################################################################
+#  Regressor settings
+################################################################################
+
+optimizer           CMA
+numberOfTrees       7
+optimizerPopSize    13
+maxTreeDepth        3
+numRegressorSteps   100
+numOptimizerSteps   10
+
+################################################################################
