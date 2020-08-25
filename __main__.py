@@ -161,10 +161,10 @@ def main():
             svEng = evaluator.evaluate(populationDict, evalType='energy')
             svFcs = evaluator.evaluate(populationDict, evalType='forces')
 
-            # Eneriges/forces = {structName: [pop for tree in regressor.trees]}
-            energies, forces = regressor.evaluateTrees(svEng, svFcs, N)
-
             if isMaster:
+                # Eneriges/forces = {structName: [pop for tree in trees]}
+                energies, forces = regressor.evaluateTrees(svEng, svFcs, N)
+
                 costs = cost(energies, forces, trueValues)
 
                 # Print the cost of the best paramaterization of the best tree
@@ -183,6 +183,8 @@ def main():
 
             for t in sorted(regressor.trees, key=lambda t: t.cost):
                 print('\t{:.2f}'.format(t.cost), t)
+
+            print(flush=True)
 
             if regStep + 1 < settings['numRegressorSteps']:
                 regressor.evolvePopulation(svNodePool)
