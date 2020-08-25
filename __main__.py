@@ -1,9 +1,12 @@
 """
 The main entry point for the svreg module.
+
+TODO: change this into a GA class, then make a new __main__.py
 """
 ################################################################################
 # Imports
 
+import time
 import random
 import numpy as np
 
@@ -105,7 +108,7 @@ def main():
     else:
         raise NotImplementedError(
             'The only available optimizer is CMA.'\
-                'Modify __main__.py to add one.'
+                'Modify ga.py to add one.'
         )
 
     if isMaster:
@@ -114,15 +117,22 @@ def main():
         )
 
         regressor.initializeTrees()
-        regressor.initializeOptimizers()
 
     N = settings['optimizerPopSize']
 
     # Begin optimization
+    print()
+    start = time.time()
     for regStep in range(settings['numRegressorSteps']):
         print(regStep)
+
+        if isMaster:
+            # Optimizers need to be re-initialized when trees change
+            regressor.initializeOptimizers()
+
+
         for optStep in range(settings['numOptimizerSteps']):
-            print('\t', optStep)
+            # TODO: is it an issue that this can give diff fits for same tree?
             if isMaster:
                 rawPopulations = [
                     np.array(opt.ask(N)) for opt in regressor.optimizers
@@ -148,27 +158,43 @@ def main():
                 populationDict = None
 
             # Energies
-            values = evaluator.evaluate(populationDict, evalType='energy')
-            energies = regressor.evaluateTrees(values, N)
-
-            # Forces
-            values = evaluator.evaluate(populationDict, evalType='forces')
-            forces = regressor.evaluateTrees(values, N)
+            svEng = evaluator.evaluate(populationDict, evalType='energy')
+            svFcs = evaluator.evaluate(populationDict, evalType='forces')
 
             # Eneriges/forces = {structName: [pop for tree in regressor.trees]}
-            costs = cost(energies, forces, trueValues)
+            energies, forces = regressor.evaluateTrees(svEng, svFcs, N)
 
-            for treeIdx in range(len(regressor.optimizers)):
-                opt = regressor.optimizers[treeIdx]
-                opt.tell(rawPopulations[treeIdx], costs[treeIdx])
+            if isMaster:
+                costs = cost(energies, forces, trueValues)
+
+                # Print the cost of the best paramaterization of the best tree
+                # print('\t', optStep, min([min(c) for c in costs]))
+
+                # Update optimizers
+                for treeIdx in range(len(regressor.optimizers)):
+                    opt = regressor.optimizers[treeIdx]
+                    opt.tell(rawPopulations[treeIdx], costs[treeIdx])
+
+        if isMaster:
+            # Set tree costs as the lowest costs at the final Optimizer step
+            bestCosts = [min(c) for c in costs]
+            for tree, c in zip(regressor.trees, bestCosts):
+                tree.cost = c
+
+            for t in sorted(regressor.trees, key=lambda t: t.cost):
+                print('\t{:.2f}'.format(t.cost), t)
+
+            if regStep + 1 < settings['numRegressorSteps']:
+                regressor.evolvePopulation(svNodePool)
+
 
     print('Done')
 
 
 def cost(energies, forces, trueValues):
     """
-    Takes in dictionaries of energies and forces and returns a single-value cost
-    function. Currently uses MAE.
+    Takes in dictionaries of energies and forces and returns a single cost
+    value. Currently uses MAE.
 
     Args:
         energies (dict):

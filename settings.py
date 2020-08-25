@@ -68,6 +68,21 @@ class Settings(dict):
                 'each step. Too few, and the regression may fail to converge;'\
                     'too many, and the regressor may be slow.'
         ),
+        'tournamentSize': Option(
+            'tournamentSize', int, (1,), [10, 50],
+            'The number of individuals from the current set of trees to use'\
+                'for tournament selection. Usually 10%-20% of population size'
+        ),
+        'crossoverProb': Option(
+            'crossoverProb', float, (0, 1), 0.2,
+            'The probability of performing a crossover operation when evolving'\
+                'trees.'
+        ),
+        'pointMutateProb': Option(
+            'pointMutateProb', float, (0, 1), 0.2,
+            'The probability of performing a point mutation when evolving each'\
+                'node in a tree.'
+        ),
         'optimizerPopSize': Option(
             'optimizerPopSize', int, None, [10, 100],
             'The number of parameter sets to generate for each tree when'\
@@ -195,6 +210,12 @@ class Settings(dict):
                 if type(value) == list:
                     # Choose the smallest suggested value if given a range
                     value = value[0]
+
+                settings[expectedKey] = value
+
+        # Final checks
+        if settings['tournamentSize'] > settings['numberOfTrees']:
+            raise RuntimeError("tournamentSize must be <= numberOfTrees")
 
         return settings
 

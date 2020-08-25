@@ -33,6 +33,7 @@ class SVTree(list):
         self.nodes = nodes
 
         self.svNodes = [node for node in nodes if isinstance(node, SVNode)]
+        self.cost = np.inf
 
 
     @classmethod
@@ -105,19 +106,12 @@ class SVTree(list):
     def eval(self):
         """
         Evaluates the tree. Assumes that each SVNode has already been updated to
-        contain the SV of the desired structure. If forces=True, computes the
-        value of the tree using the derivatives of each node (analytical
-        derivatives for FunctionNode objects, force SVs for SVNode objects).
-
-        Args:
-            forces (bool):
-                If True, computes the derivative of the tree (i.e. the forces).
-                Default=False.
+        contain the SV of the desired structure.
 
         Returns:
-            results (np.arr):
-                An array of results for P different parameterizations, where P
-                depeneds on the most recent self.populate() call. If
+            energies, forces (tuple):
+                A tuple of arrays of results for P different parameterizations,
+                where P depeneds on the most recent self.populate() call. If
                 forces=False, this will be an array of energies of size (P,).
                 If forces=True, it will be an array of forces of size (P, N, 3)
                 where N is the number of atoms in the current structure.
@@ -144,18 +138,21 @@ class SVTree(list):
             # if the sub-tree is complete, evaluate its function
             while len(subTrees[-1]) == subTrees[-1][0].function.arity + 1:
                 args = [
-                    n.values if isinstance(n, SVNode) # terminal is SVNode
+                    n.values if isinstance(n, SVNode)
                     else n  # terminal is intermediate result
                     for n in subTrees[-1][1:]
                 ]
 
-                intermediateResult = subTrees[-1][0].function(*args)
+                intermediateEng = subTrees[-1][0].function(*args)
+                intermediateFcs = subTrees[-1][0].function.derivative(*args)
 
                 if len(subTrees) != 1:  # still some left to evaluate
                     subTrees.pop()
-                    subTrees[-1].append(intermediateResult)
+                    subTrees[-1].append(
+                        (intermediateEng, intermediateFcs)
+                    )
                 else:  # done evaluating all sub-trees
-                    return intermediateResult
+                    return intermediateEng, intermediateFcs
 
         raise RuntimeError("Something went wrong in tree evaluation")
 
@@ -274,35 +271,6 @@ class SVTree(list):
         return parameters
 
 
-    def getSVParams(self):
-        """
-        A helper function for extracting only the parameters that
-        correspond to the SVNode objects in the tree. Returns a dictionary where
-        the key is the unique node identifier of the SVNode objects in the tree,
-        and the value is the populations of each node.
-
-        Returns:
-            svParams (dict):
-                {Node.id: population of parameters}
-        """
-
-        raise NotImplementedError
-
-
-    def updateSVValues(self, values):
-        """
-        A helper function for updating the `value` attributes of all SVNode
-        objthe tree. 
-
-        Args:
-            values (list):
-                A list of values to be passed to the SVNode objects the tree.
-                Assumed to be ordered the same as self.svNodes.
-        """
-
-        raise NotImplementedError
-
-
     def __str__(self):
         """Improve print functionality"""
 
@@ -358,7 +326,9 @@ class SVTree(list):
 
     def crossover(self, donor):
         """
-        Performs a crossover operation between self and `donor`.
+        Performs an in-place crossover operation between self and `donor`.
+
+        TODO: this can also result in trees with depths > maxDepth
 
         Args:
             donor (SVTree):
@@ -370,23 +340,21 @@ class SVTree(list):
 
         # Choose sub-tree for removal
         start, end = self.getSubtree()
-        # removed = range(start, end)
 
         # Choose sub-tree from donor to donate
         donorStart, donorEnd = donor.getSubtree()
-        # donorRemoved = list(
-        #     set(range(len(donor.nodes))) - set(range(donorStart, donorEnd))
-        # )
 
-        return (
-            self.nodes[:start]
-            + donor.nodes[donorStart:donorEnd]
-            + self.nodes[end:]
-        )
+        self.nodes = self.nodes[:start]\
+            + donor.nodes[donorStart:donorEnd]\
+                + self.nodes[end:]
 
     
     def mutate(self, svNodePool, maxDepth=1):
         """Does an in-place mutation of the current tree."""
+
+        raise NotImplementedError
+
+        # TODO: will likely grow deeper than max depth...
 
         randomDonor = self.random(svNodePool, maxDepth)
 
@@ -398,6 +366,34 @@ class SVTree(list):
         raise NotImplementedError
 
 
-    def pointMutate(self):
-        """Implemented in gplearn. Doesn't change tree size."""
-        raise NotImplementedError
+    def pointMutate(self, svNodePool, mutProb):
+        """
+        Perform an in-place mutation of the current set of nodes.
+
+        Args:
+            svNodePool (list):
+                The collection of SVNode pools used to generate trees.
+
+            mutProb (float):
+                The probability of mutating each node.
+        """
+        
+        # Randomly choose nodes to mutate
+        mutantIndices = np.where(
+            np.random.random(size=len(self.nodes)) < mutProb
+        )[0]
+
+        for mutIdx in mutantIndices:
+            node = self.nodes[mutIdx]
+            if isinstance(node, FunctionNode):
+                # Choose a function with the same arity
+                arity = node.function.arity
+                self.nodes[mutIdx] = FunctionNode.random(arity=arity)
+            else:
+                # Choose a random SV node
+                self.nodes[mutIdx] = deepcopy(random.choice(svNodePool))
+
+    
+    def updateSVNodes(self):
+        """Updates self.svNodes. Useful after crossovers/mutations."""
+        self.svNodes = [node for node in self.nodes if isinstance(node, SVNode)]

@@ -1,7 +1,11 @@
 import random
 import numpy as np
+from copy import deepcopy
+
 from tree import SVTree
 
+# TODO: may be able to merge this into ga.py, it really only initializes
+# trees/optimizers and evaluates the trees.
 
 class SVRegressor:
     """
@@ -67,42 +71,13 @@ class SVRegressor:
             ) for _ in range(self.settings['numberOfTrees'])
         ]
 
-    
-    def populateTrees(self, N):
-        """
-        Returns a list of populations for the trees. Note that they can't be
-        stacked because the each tree's population may have a different shape.
-
-        # TODO: rename? I don't think trees actually need to save their pops.
-        # TODO: also rename tree.populate()
-
-        # TODO: I think this function is obsolete. Optimizers should generate.
-        """
-
-        treePopulations = {}
-        for tree in self.trees:
-            # Each tree returns {svName: population}
-            treePop = tree.populate(N)
-
-            # Combine into full dictionary
-            for svName in treePop:
-                if svName in treePopulations:
-                    treePopulations[svName].append(treePop)
-        
-        # Stack the populations for batch evaluation
-        for svName in treePopulations:
-            treePopulations[svName] = np.vstack(treePopulations[svName])
-
-        return treePopulations
-
-
-    def evaluateTrees(self, values, N):
+    def evaluateTrees(self, svEng, svFcs, N):
         """
         Updates the SVNode objects in the trees with the given values, then
         evaluate the trees
 
         Args:
-            values (dict):
+            svEng, svFcs (dict):
                 {structName: {svName: list of values for each tree}}
 
             N (int):
@@ -110,30 +85,33 @@ class SVRegressor:
                 the population of results.
 
         Return:
-            results (dict):
+            energies, forces(dict):
                 {structName: [tree.eval() for tree in self.trees]}
         """
 
-        results = {struct:[] for struct in values.keys()}
-        for structName in values:
-            for svName in values[structName]:
+        energies = {struct:[] for struct in svEng.keys()}
+        forces   = {struct:[] for struct in svFcs.keys()}
+        for structName in energies:
+            for svName in svEng[structName]:
                 # The list of stacked values for each tree for a given SV type
-                listOfValues = values[structName][svName]
+                listOfEng = svEng[structName][svName]
+                listOfFcs = svFcs[structName][svName]
 
                 # Un-stack any stacked values
                 unstackedValues = []
-                for val in listOfValues:
-                    unstackedValues += np.split(val, val.shape[0]//N, axis=0)
+                for val1, val2 in zip(listOfEng, listOfFcs):
+                    unstackedValues += list(zip(
+                        np.split(val1, val1.shape[0]//N, axis=0),
+                        np.split(val2, val2.shape[0]//N, axis=0)
+                    ))
 
                 # Loop over the list of values
                 # for tree, treeVals in zip(self.trees, listOfValues):
                 for tree in self.trees:
                     # Each node has the same population size, so just split
-                    # splitValues = np.split(treeVals, N)
                     for svNode in tree.svNodes:
                         # Only update the SVNode objects of the current type
                         if svNode.description == svName:
-                            # svNode.values = splitValues.pop()
                             svNode.values = unstackedValues.pop()
 
                 # Error check to see if there are leftovers
@@ -143,9 +121,11 @@ class SVRegressor:
 
             # If here, all of the nodes have been updated with their values
             for tree in self.trees:
-                results[structName].append(tree.eval())
+                eng, fcs = tree.eval()
+                energies[structName].append(eng)
+                forces[structName].append(fcs)
 
-        return results
+        return energies, forces
 
 
     def initializeOptimizers(self):
@@ -156,6 +136,54 @@ class SVRegressor:
             )
             for tree in self.trees
         ]
+    
+
+    def tournament(self):
+        """
+        Finds the lowest cost individual from the current set of trees
+
+        Return:
+            A deep copy (to avoid multiple trees pointing to the same nodes) of
+            the best individual.
+        """
+
+        contenders = random.sample(
+            range(self.settings['numberOfTrees']),
+            self.settings['tournamentSize']
+        )
+
+        costs = [self.trees[idx].cost for idx in contenders]
+
+        return deepcopy(self.trees[np.argmin(costs)])
+
+    
+    def evolvePopulation(self, svNodePool):
+        """
+        Performs an in-place evolution of self.trees using tournament selection,
+        crossover, and mutation.
+        """
+
+        newTrees = []
+        for _ in range(self.settings['numberOfTrees']):
+            parent = self.tournament()
+
+
+            # For handling only allowing crossover OR point mutation
+            pmProb = self.settings['crossoverProb']\
+                + self.settings['pointMutateProb']
+
+            rand = random.random()
+            if rand < self.settings['crossoverProb']:
+                # Randomly perform crossover operation
+                donor = self.tournament()
+                parent.crossover(donor)
+            elif rand < pmProb:
+                parent.pointMutate(svNodePool, self.settings['pointMutateProb'])
+
+            parent.updateSVNodes()
+            newTrees.append(parent)
+        
+        self.trees = newTrees
 
 
     def mate(self):

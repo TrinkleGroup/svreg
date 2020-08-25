@@ -14,7 +14,10 @@ databasePath        ../svreg_data/mlearn/Mo/Mo.hdf5
 ################################################################################
 
 optimizer           CMA
-numberOfTrees       7
+numberOfTrees       20
+tournamentSize      10
+crossoverProb       0.2
+pointMutateProb     0.2
 optimizerPopSize    13
 maxTreeDepth        3
 numRegressorSteps   100

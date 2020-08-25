@@ -4,15 +4,9 @@ Module for Node objects, which are the elements in an equation tree.
 
 import random
 import numpy as np
-from gplearn.functions import _function_map as _gp_function_map
 
-
-# choose the allowed functions
-_function_map = {
-    key: _gp_function_map[key] for key in [
-        'add', 'mul', 'sqrt', 'log', 'inv', 'sin', 'cos', 'tan'
-    ]
-}
+from functions import _function_map, _arities
+from exceptions import StaleValueException
 
 # collection of types of nodes that can be added; used for growing trees
 _node_types = ['function', 'parameter', 'sv']
@@ -33,15 +27,10 @@ class Node:
 
 class FunctionNode(Node):
     """
-    A node sub-class that is used for function operators. Leverages the
-    gplearn.functions module to handle function 'closure' (handling bad inputs)
-    and function arity (number of inputs).
-
-    gplearn.functions documentation:
-    https://gplearn.readthedocs.io/en/stable/_modules/gplearn/functions.html
+    A node sub-class that is used for function operators.
 
     Attributes:
-        function (gplearn.functions._Function):
+        function (_Function):
             The function to use for evaluation; handles closure and arity
     """
 
@@ -53,10 +42,13 @@ class FunctionNode(Node):
 
 
     @classmethod
-    def random(cls):
-        key = random.sample(_function_map.keys(), 1)[0]
-        return cls(key=key)
+    def random(cls, arity=None):
+        if arity is None:
+            key = random.sample(_function_map.keys(), 1)[0]
+        else:
+            key = random.sample(_arities[arity], 1)[0]
 
+        return cls(key=key)
 
 class SVNode(Node):
     """
@@ -84,12 +76,6 @@ class SVNode(Node):
             to avoid using stale values.
     """
 
-    class StaleValueException(Exception):
-        """Used to avoid pullling SVNode values that have already been used"""
-
-        def __init__(self):
-            Exception.__init__(self, "Trying to use stale SV value.")
-
     def __init__(self, description, numParams, paramRange=None):
         Node.__init__(self, description)
         self.numParams = numParams
@@ -115,13 +101,13 @@ class SVNode(Node):
     def values(self):
         """
         Return current values and reset to None to avoid using stale values in
-        the future.
+        the future. Expected to be a 2-tuple of (value, derivative).
         """
 
         prev = self._values
 
         if prev is None:
-            raise self.StaleValueException()
+            raise StaleValueException()
 
         self._values = None
         return prev
