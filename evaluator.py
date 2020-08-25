@@ -141,6 +141,8 @@ class Manager:
             fcsBytes = np.prod(fcsShape)*mpiDoubleSize
         else:
             # Everyone else doesn't need to allocate anything
+            engShape = None
+            fcsShape = None
             engBytes = 0
             fcsBytes = 0
 
@@ -229,19 +231,26 @@ class SVEvaluator:
         self.structNames = structNames
         self.settings = settings
 
-        # Build a communicator between master process and Manager heads
-        self.managerComm = self.buildManagerComm()
-        self.numManagers = self.managerComm.Get_size()
-
-        # It's also important to know if we're in charge of a Manager object
+        # It's important to know if we're in charge of a Manager object
         self.isManager = ((self.rank % settings['PROCS_PER_MANAGER']) == 0)
 
         # Build Manager object
         managerId = self.rank // settings['PROCS_PER_MANAGER']
         localRank = self.rank  % settings['PROCS_PER_MANAGER']
 
+        # Build a communicator between master process and Manager heads
+        self.managerComm = self.buildManagerComm()
+
+        if self.isManager:
+            print(
+                'Manager {}/{} comm: {}'.format(
+                    localRank, managerId, self.managerComm
+                )
+            )
+
         managerStructs = np.array_split(
-            self.structNames, self.numManagers
+            self.structNames,
+            self.comm.Get_size() // settings['PROCS_PER_MANAGER']
         )[managerId]
 
         # Build a communicator between Manager head and its farm of processors
@@ -251,9 +260,9 @@ class SVEvaluator:
 
 
     def buildManagerComm(self):
-        # Build a communicator between each Manager
-        managerRanks = list(
-            range(0, self.comm.Get_size(), self.settings['PROCS_PER_PHYS_NODE'])
+        """Build a communicator between each Manager"""
+        managerRanks = np.arange(
+            0, self.comm.Get_size(), self.settings['PROCS_PER_MANAGER']
         )
 
         worldGroup = self.comm.Get_group()
