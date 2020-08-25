@@ -124,9 +124,9 @@ def main():
     print()
     start = time.time()
     for regStep in range(settings['numRegressorSteps']):
-        print(regStep)
-
         if isMaster:
+            print(regStep)
+
             # Optimizers need to be re-initialized when trees change
             regressor.initializeOptimizers()
 

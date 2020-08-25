@@ -241,13 +241,6 @@ class SVEvaluator:
         # Build a communicator between master process and Manager heads
         self.managerComm = self.buildManagerComm()
 
-        if self.isManager:
-            print(
-                'Manager {}/{} comm: {}'.format(
-                    localRank, managerId, self.managerComm
-                )
-            )
-
         managerStructs = np.array_split(
             self.structNames,
             self.comm.Get_size() // settings['PROCS_PER_MANAGER']
