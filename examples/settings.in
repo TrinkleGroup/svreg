@@ -7,7 +7,7 @@
 ################################################################################
 
 refStruct           Ground_state_crystal
-databasePath        ../svreg_data/mlearn/Mo/Mo.hdf5
+databasePath        ./examples/Mo.hdf5
 
 ################################################################################
 #  Regressor settings
