@@ -6,18 +6,13 @@ TODO: change this into a GA class, then make a new __main__.py
 ################################################################################
 # Imports
 
-import time
-import random
-import numpy as np
-
-seed = 42
-random.seed(seed)
-np.random.seed(seed)
-
 import sys
 import cma
+import time
 import h5py
+import random
 import argparse
+import numpy as np
 from mpi4py import MPI
 
 from settings import Settings
@@ -25,6 +20,7 @@ from database import SVDatabase
 from regressor import SVRegressor
 from evaluator import SVEvaluator
 from nodes import SVNode
+
 
 ################################################################################
 # Parse all command-line arguments
@@ -53,6 +49,7 @@ args = parser.parse_args()
 ################################################################################
 
 
+# @profile
 def main():
     # Prepare usual MPI stuff
     worldComm = MPI.COMM_WORLD
@@ -62,6 +59,9 @@ def main():
     settings = Settings.from_file(args.settings)
     settings['PROCS_PER_PHYS_NODE'] = args.procs_per_node
     settings['PROCS_PER_MANAGER'] = args.procs_per_manager
+
+    random.seed(settings['seed'])
+    np.random.seed(settings['seed'])
 
     # Load database, build evaluator, and prepare list of structNames
     with SVDatabase(settings['databasePath'], 'r') as database:
@@ -117,15 +117,15 @@ def main():
         )
 
         regressor.initializeTrees()
+        print()
 
     N = settings['optimizerPopSize']
 
     # Begin optimization
-    print()
     start = time.time()
     for regStep in range(settings['numRegressorSteps']):
         if isMaster:
-            print(regStep)
+            print(regStep, flush=True)
 
             # Optimizers need to be re-initialized when trees change
             regressor.initializeOptimizers()

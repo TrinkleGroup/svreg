@@ -115,9 +115,10 @@ _function_map = {'add': add2,
                  'sin': sin1,
                  'cos': cos1,
                  'tan': tan1,
-                 'exp': exp,}
+                #  'exp': exp,
+                 }
 
 _arities = {
-    1: ['sqrt', 'log', 'inv', 'sin', 'cos', 'tan', 'exp'],
+    1: ['sqrt', 'log', 'inv', 'sin', 'cos', 'tan'],#, 'exp'],
     2: ['add', 'mul']
 }

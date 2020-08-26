@@ -2,6 +2,9 @@
 An SVEvaluator object is designed to manage the distributed evaluation of
 multiple structure vectors for multiple different atomic structures.
 
+A Manager object manages farms of physical compute nodes to compute results on a
+subset of the full database.
+
 The currently-implemented MPI data flow can be described as follows:
     - A master process passes a population of parameters to an Evaluator.
     - The Evaluator transmits the population to each Manager.
@@ -36,9 +39,10 @@ class Manager:
         self.structures = structures
 
         self.isHead = (self.rank == 0)
-        self.size = self.comm.Get_size()
+        self.numWorkers = self.comm.Get_size()
 
     
+    # @profile
     def evaluate(self, population, evalType):
         """
         Evaluates the population by splitting it across the farm of processors.
@@ -51,40 +55,100 @@ class Manager:
                 'energy' or 'forces'
 
         Returns:
-            values (dict):
+            managerValues (dict):
                 {structName: {svName: list of results}}. Since each SVNode
                 may not necessarily have the same number of each evaluations for
                 each svName, the results need to be kept as lists.
         """
 
-        population = self.comm.bcast(population, root=0)
+        if self.isHead:
+            # Group the populations, but track how to un-group them for later
+            splits = {}
+            batchedPopulations = {}
+            for svName, listOfPops in population.items():
+                splitIndices = np.cumsum(
+                    [pop.shape[0] for pop in listOfPops]
+                )[:-1]
 
-        values = {}
-        for structName in database:
-            values[structName] = {}
+                # Record how to un-group the populations for each tree
+                splits[svName] = splitIndices
+                
+                # Split the full population across the workers
+                batchedPopulations[svName] = np.array_split(
+                    np.vstack(listOfPops), self.numWorkers
+                )
+
+            localPopulations = [
+                {svName: batchedPopulations[svName][i] for svName in population}
+                for i in range(self.numWorkers)
+            ]
+        else:
+            localPopulations = None
+
+
+        localPop = self.comm.scatter(localPopulations, root=0)
+
+        # logstr = ''
+        # for svName in localPop:
+        #     logstr += '\n\t\t{}: {}'.format(svName, localPop[svName].shape)
+
+        # print(
+        #     '\tWorker {}/{}: {}\n'.format(self.rank, self.id, logstr),
+        #     flush=True
+        # )
+
+
+        localValues = {}
+        for structName in database:  # Loop over all locally-loaded structures
+            n = int(natoms[structName])
+            localValues[structName] = {}
+
             for svName in database[structName]:
-                n = int(natoms[structName])
-                listOfPops = population[svName]
-                values[structName][svName] = []
-                for pop in listOfPops:
-                    # The current model sums over bond types
-                    intermediates = []
-                    for bondType in database[structName][svName]:
-                        sv = database[structName][svName][bondType][evalType]
-                        val = (sv @ pop.T).T
 
-                        if evalType == 'energy':
-                            val = val.sum(axis=1)/n
+                intermediates = []  # for summing over bond types
+                for bondType in database[structName][svName]:
+                    sv = database[structName][svName][bondType][evalType]
+                    val = (sv @ localPop[svName].T).T
 
-                        if evalType == 'forces':
-                            val = val.reshape(pop.shape[0], 3, n, n)
-                            val = val.sum(axis=-1).swapaxes(1, 2)
+                    if evalType == 'energy':
+                        val = val.sum(axis=1)/n
+                    elif evalType == 'forces':
+                        # TODO: nodemanager had to apply U' because the
+                        # embedding function could be different for each atom
+                        # type. Since the embedding functions are now just
+                        # simple algebraic functions, and are constant across
+                        # all bond types, this can be summed safely here. In
+                        # fact, the ffg splines don't need their 4th dimension.
+                        # Make sure to address this in database.py when you
+                        # the functions for constructing splines.
 
-                        intermediates.append(val)
-                    
-                    values[structName][svName].append(sum(intermediates))
+                        val = val.reshape(localPop[svName].shape[0], 3, n, n)
+                        val = val.sum(axis=-1).swapaxes(1, 2)
 
-        return values
+                    intermediates.append(val)
+
+                localValues[structName][svName] = sum(intermediates)
+
+        workerValues = self.comm.gather(localValues, root=0)
+
+        # Gather results on head
+        if self.isHead:
+            # workerValues = [{structName: {svName: sub-population}}]
+            managerValues = {structName: {} for structName in database}
+            for structName in database:
+                for svName in database[structName]:
+                    # Stack over worker results, then split by tree pop sizes
+                    managerValues[structName][svName] = np.split(
+                        np.concatenate([
+                            v[structName][svName] for v in workerValues
+                        ]),
+                        splits[svName]
+                    )
+
+        else:
+            managerValues = None
+
+        return managerValues
 
 
     def loadDatabase(self, h5pyFile):
@@ -290,11 +354,39 @@ class SVEvaluator:
                 'energy' or 'forces'
 
         Return:
-            resuls (dict):
+            values (dict):
                 {structName: {svName: <result array>}}
         """
 
         if self.isManager:
             population = self.managerComm.bcast(population, root=0)
 
-        return self.manager.evaluate(population, evalType)
+            # logstr = ''
+            # for svName in population:
+            #     logstr += '\n\t{}: ({}, {})'.format(
+            #         svName, str(sum([p.shape[0] for p in population[svName]])),
+            #         population[svName][0].shape[1]
+            #     )
+
+            # print(
+            #     'Manager {}: {}\n'.format(self.manager.id, logstr),
+            #     flush=True
+            # )
+
+        managerValues = self.manager.evaluate(population, evalType)
+
+        if self.isManager:
+            # Now gather all manager values back to the master process
+            allValues = self.managerComm.gather(managerValues, root=0)
+
+        if self.isMaster:
+            # allValues = [{structName: list of values for subset of structs}]
+            values = {}
+            for mgrVal in allValues:
+                for structName, vals in mgrVal.items():
+                    values[structName] = vals
+        else:
+            values = None
+
+        return values
+        

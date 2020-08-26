@@ -1,7 +1,13 @@
 ################################################################################
 # An example input script with typical settings for svreg_data. Available
-# settings, descriptions, and default values can be found in the
-# svreg.settings.Settings class
+# settings, descriptions, and default values can be seen by running
+# "python settings.py"                    
+################################################################################
+# Misc. settings
+################################################################################
+
+seed    42
+
 ################################################################################
 # Database settings
 ################################################################################
@@ -16,11 +22,11 @@ databasePath        ./examples/Mo.hdf5
 optimizer           CMA
 numberOfTrees       20
 tournamentSize      10
+optimizerPopSize    50
 crossoverProb       0.2
 pointMutateProb     0.2
-optimizerPopSize    13
 maxTreeDepth        3
-numRegressorSteps   100
+numRegressorSteps   10
 numOptimizerSteps   10
 
 ################################################################################
