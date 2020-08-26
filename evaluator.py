@@ -42,7 +42,7 @@ class Manager:
         self.numWorkers = self.comm.Get_size()
 
     
-    # @profile
+    @profile
     def evaluate(self, population, evalType):
         """
         Evaluates the population by splitting it across the farm of processors.
@@ -73,10 +73,13 @@ class Manager:
                 # Record how to un-group the populations for each tree
                 splits[svName] = splitIndices
                 
-                # Split the full population across the workers
-                batchedPopulations[svName] = np.array_split(
-                    np.vstack(listOfPops), self.numWorkers
-                )
+                if len(listOfPops) > 0:
+                    # Split the full population across the workers
+                    batchedPopulations[svName] = np.array_split(
+                        np.vstack(listOfPops), self.numWorkers
+                    )
+                else:
+                    batchedPopulations[svName] = [None]*self.numWorkers
 
             localPopulations = [
                 {svName: batchedPopulations[svName][i] for svName in population}
@@ -88,22 +91,15 @@ class Manager:
 
         localPop = self.comm.scatter(localPopulations, root=0)
 
-        # logstr = ''
-        # for svName in localPop:
-        #     logstr += '\n\t\t{}: {}'.format(svName, localPop[svName].shape)
-
-        # print(
-        #     '\tWorker {}/{}: {}\n'.format(self.rank, self.id, logstr),
-        #     flush=True
-        # )
-
-
         localValues = {}
         for structName in database:  # Loop over all locally-loaded structures
             n = int(natoms[structName])
             localValues[structName] = {}
 
             for svName in database[structName]:
+                if localPop[svName] is None:
+                    # Possible if a tree doesn't use a given SV
+                    continue
 
                 intermediates = []  # for summing over bond types
                 for bondType in database[structName][svName]:
@@ -360,18 +356,6 @@ class SVEvaluator:
 
         if self.isManager:
             population = self.managerComm.bcast(population, root=0)
-
-            # logstr = ''
-            # for svName in population:
-            #     logstr += '\n\t{}: ({}, {})'.format(
-            #         svName, str(sum([p.shape[0] for p in population[svName]])),
-            #         population[svName][0].shape[1]
-            #     )
-
-            # print(
-            #     'Manager {}: {}\n'.format(self.manager.id, logstr),
-            #     flush=True
-            # )
 
         managerValues = self.manager.evaluate(population, evalType)
 

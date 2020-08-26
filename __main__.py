@@ -49,7 +49,7 @@ args = parser.parse_args()
 ################################################################################
 
 
-# @profile
+@profile
 def main():
     # Prepare usual MPI stuff
     worldComm = MPI.COMM_WORLD
