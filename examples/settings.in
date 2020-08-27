@@ -7,7 +7,7 @@
 ################################################################################
 
 seed        42
-runType     DEBUG
+runType     GA
 
 ################################################################################
 # Database settings
@@ -15,6 +15,7 @@ runType     DEBUG
 
 refStruct           Ground_state_crystal
 databasePath        ./examples/Mo.hdf5
+outputPath          ./results
 
 ################################################################################
 #  Regressor settings

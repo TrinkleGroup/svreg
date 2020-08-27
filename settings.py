@@ -49,6 +49,11 @@ _valid_options = {
         'databasePath', str, None, None,
         'The full path to the HDF5 database file.'
     ),
+    'outputPath': Option(
+        'outputPath', str, None, './results',
+        'The path to the folder for storing any outputs. Defaults to'\
+        ' `./results`. Creates folder if it does not exist yet.'
+    ),
     'optimizer': Option(
         'optimizer', str, None, 'CMA',
         'The name of the optimizer object to use for optimizing strings.'

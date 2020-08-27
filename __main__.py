@@ -6,10 +6,13 @@ TODO: change this into a GA class, then make a new __main__.py
 ################################################################################
 # Imports
 
+import os
 import sys
 import cma
 import time
 import h5py
+import shutil
+import pickle
 import random
 import argparse
 import numpy as np
@@ -175,6 +178,18 @@ def main(settings):
             for tree, c in zip(regressor.trees, bestCosts):
                 tree.cost = c
 
+            outfilePath = os.path.join(
+                settings['outputPath'], 'tree_{}.pkl'.format(regStep)
+            )
+
+            bestTree = np.argmin(bestCosts)
+            bestParams = np.argmin(costs[bestTree])
+            saveTree = deepcopy(regressor.trees[bestTree])
+            saveTree.bestParams = rawPopulations[bestTree][bestParams]
+            with open(outfilePath, 'wb') as outfile:
+                pickle.dump(saveTree, outfile)
+
+            print()
             for t in sorted(regressor.trees, key=lambda t: t.cost):
                 print('\t{:.2f}'.format(t.cost), t)
 
@@ -306,6 +321,18 @@ def fixedExample(settings):
                 opt = regressor.optimizers[treeIdx]
                 opt.tell(rawPopulations[treeIdx], costs[treeIdx])
 
+            if optStep % 100 == 0:
+                outfilePath = os.path.join(
+                    settings['outputPath'], 'tree_{}.pkl'.format(optStep)
+                )
+
+                bestParams = np.argmin(costs)
+                bestTree = bestParams // N
+                saveTree = deepcopy(regressor.trees[bestTree])
+                saveTree.bestParams = rawPopulations[bestTree][bestParams]
+                with open(outfilePath, 'wb') as outfile:
+
+                    pickle.dump(saveTree, outfile)
 
 
 def cost(energies, forces, trueValues):
@@ -363,6 +390,11 @@ if __name__ == '__main__':
 
     random.seed(settings['seed'])
     np.random.seed(settings['seed'])
+
+    if os.path.isdir(settings['outputPath']):
+        shutil.rmtree(settings['outputPath'])
+
+    os.mkdir(settings['outputPath'])
 
     if settings['runType'] == 'GA':
         main(settings)
