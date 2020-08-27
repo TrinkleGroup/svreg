@@ -42,7 +42,7 @@ class Manager:
         self.numWorkers = self.comm.Get_size()
 
     
-    @profile
+    # @profile
     def evaluate(self, population, evalType):
         """
         Evaluates the population by splitting it across the farm of processors.

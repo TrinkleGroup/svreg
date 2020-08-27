@@ -14,12 +14,14 @@ import random
 import argparse
 import numpy as np
 from mpi4py import MPI
+from copy import deepcopy
 
 from settings import Settings
 from database import SVDatabase
 from regressor import SVRegressor
 from evaluator import SVEvaluator
-from nodes import SVNode
+from nodes import SVNode, FunctionNode
+from tree import SVTree
 
 
 ################################################################################
@@ -49,19 +51,11 @@ args = parser.parse_args()
 ################################################################################
 
 
-@profile
-def main():
+# @profile
+def main(settings):
     # Prepare usual MPI stuff
     worldComm = MPI.COMM_WORLD
     isMaster = (worldComm.Get_rank() == 0)
-
-    # Load settings
-    settings = Settings.from_file(args.settings)
-    settings['PROCS_PER_PHYS_NODE'] = args.procs_per_node
-    settings['PROCS_PER_MANAGER'] = args.procs_per_manager
-
-    random.seed(settings['seed'])
-    np.random.seed(settings['seed'])
 
     # Load database, build evaluator, and prepare list of structNames
     with SVDatabase(settings['databasePath'], 'r') as database:
@@ -157,7 +151,7 @@ def main():
             else:
                 populationDict = None
 
-            # Energies
+            # Distribute energy/force calculations across compute nodes
             svEng = evaluator.evaluate(populationDict, evalType='energy')
             svFcs = evaluator.evaluate(populationDict, evalType='forces')
 
@@ -191,6 +185,127 @@ def main():
 
 
     print('Done')
+
+
+def fixedExample(settings):
+    """A function for running basic tests on example trees."""
+
+    # Prepare usual MPI stuff
+    worldComm = MPI.COMM_WORLD
+    isMaster = (worldComm.Get_rank() == 0)
+
+    # Load database, build evaluator, and prepare list of structNames
+    with SVDatabase(settings['databasePath'], 'r') as database:
+        if args.names:
+            # Read in structure names if available
+            with open(args.names, 'r') as f:
+                lines = f.readlines()
+                structNames = [line.strip() for line in lines]
+        else:
+            # Otherwise just use all structures in the database
+            structNames = list(database.keys())
+        
+        if settings['refStruct'] not in structNames:
+            raise RuntimeError(
+                "The reference structure must be included in structNames."
+            )
+
+        evaluator = SVEvaluator(worldComm, structNames, settings)
+        evaluator.distributeDatabase(database)
+
+        # Prepare svNodePool for use in tree construction
+        svNodePool = []
+        group = database[settings['refStruct']]
+        for svName in ['rho', 'ffg']:
+            svGroup = group[svName]
+            svNodePool.append(
+                SVNode(
+                    description=svName,
+                    numParams=svGroup.attrs['numParams'],
+                    paramRange=svGroup.attrs['paramRange']\
+                        if 'paramRange' in group[svName].attrs else None
+                )
+            )
+
+        trueValues = database.loadTrueValues()
+    
+    # Prepare regressor
+    if settings['optimizer'] == 'CMA':
+        optimizer = cma.CMAEvolutionStrategy
+        optimizerArgs = [
+            1.0,  # defaulted sigma0 value
+            {'verb_disp': 0, 'popsize':settings['optimizerPopSize']}
+        ]
+    else:
+        raise NotImplementedError(
+            'The only available optimizer is CMA.'\
+                'Modify ga.py to add one.'
+        )
+
+    if isMaster:
+        tree = SVTree()
+
+        rhoNode = deepcopy(svNodePool[0])
+        ffgNode = deepcopy(svNodePool[1])
+
+        tree.nodes = [FunctionNode('add'), rhoNode, ffgNode]
+        tree.svNodes = [rhoNode, ffgNode]
+
+        regressor = SVRegressor(
+            settings, svNodePool, optimizer, optimizerArgs
+        )
+
+        regressor.trees = [tree]
+        regressor.initializeOptimizers()
+
+        print('Tree:\n\t', regressor.trees[0])
+
+    N = settings['optimizerPopSize']
+
+    for optStep in range(settings['numOptimizerSteps']):
+        # TODO: is it an issue that this can give diff fits for same tree?
+        if isMaster:
+            rawPopulations = [
+                np.array(opt.ask(N)) for opt in regressor.optimizers
+            ]
+
+            # Need to parse populations so that they can be grouped easily
+            # treePopulation = [{svName: population} for tree in trees]
+            treePopulations = []
+            for pop, tree in zip(rawPopulations, regressor.trees):
+                treePopulations.append(tree.parseArr2Dict(pop))
+
+            # Group all dictionaries into one
+            # {svName: [tree populations for tree in trees]}
+            populationDict = {
+                svName: [] for svName in [n.description for n in svNodePool]
+            }
+
+            for treeDict in treePopulations:
+                for svName, pop in treeDict.items():
+                    populationDict[svName].append(pop)
+
+        else:
+            populationDict = None
+
+        # Distribute energy/force calculations across compute nodes
+        svEng = evaluator.evaluate(populationDict, evalType='energy')
+        svFcs = evaluator.evaluate(populationDict, evalType='forces')
+
+        if isMaster:
+            # Eneriges/forces = {structName: [pop for tree in trees]}
+            energies, forces = regressor.evaluateTrees(svEng, svFcs, N)
+
+            costs = cost(energies, forces, trueValues)
+
+            # Print the cost of the best paramaterization of the best tree
+            print('\t', optStep, min([min(c) for c in costs]))
+
+            # Update optimizers
+            for treeIdx in range(len(regressor.optimizers)):
+                opt = regressor.optimizers[treeIdx]
+                opt.tell(rawPopulations[treeIdx], costs[treeIdx])
+
 
 
 def cost(energies, forces, trueValues):
@@ -240,4 +355,16 @@ def cost(energies, forces, trueValues):
 
 
 if __name__ == '__main__':
-    main()
+
+    # Load settings
+    settings = Settings.from_file(args.settings)
+    settings['PROCS_PER_PHYS_NODE'] = args.procs_per_node
+    settings['PROCS_PER_MANAGER'] = args.procs_per_manager
+
+    random.seed(settings['seed'])
+    np.random.seed(settings['seed'])
+
+    if settings['runType'] == 'GA':
+        main(settings)
+    else:
+        fixedExample(settings)

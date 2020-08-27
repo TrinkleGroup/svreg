@@ -33,6 +33,12 @@ _valid_options = {
         'seed', int, None, 42,
         'The seed to pass to the random number generators.'
     ),
+    'runType': Option(
+        'runType', str, None, ['GA', 'DEBUG'],
+        'Used for debugging. Default is `GA`, which starts a symbolic'\
+            ' regression run. `DEBUG` runs the debug function set in'\
+                ' __main__.py.'
+    ),
     'refStruct': Option(
         'refStruct', str, None, 'Ground_state_crystal',
         'The database key corresponding to the name of the structure that'\
