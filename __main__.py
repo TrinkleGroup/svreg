@@ -25,6 +25,7 @@ from regressor import SVRegressor
 from evaluator import SVEvaluator
 from nodes import SVNode, FunctionNode
 from tree import SVTree
+from archive import Archive, Entry
 
 
 ################################################################################
@@ -109,11 +110,14 @@ def main(settings):
         )
 
     if isMaster:
+        archive = Archive(os.path.join(settings['outputPath'], 'archive'))
+
         regressor = SVRegressor(
             settings, svNodePool, optimizer, optimizerArgs
         )
 
         regressor.initializeTrees()
+        regressor.initializeOptimizers()
         print()
 
     N = settings['optimizerPopSize']
@@ -123,10 +127,6 @@ def main(settings):
     for regStep in range(settings['numRegressorSteps']):
         if isMaster:
             print(regStep, flush=True)
-
-            # Optimizers need to be re-initialized when trees change
-            regressor.initializeOptimizers()
-
 
         for optStep in range(settings['numOptimizerSteps']):
             # TODO: is it an issue that this can give diff fits for same tree?
@@ -165,7 +165,6 @@ def main(settings):
                 costs = cost(energies, forces, trueValues)
 
                 # Print the cost of the best paramaterization of the best tree
-                # print('\t', optStep, min([min(c) for c in costs]))
 
                 # Update optimizers
                 for treeIdx in range(len(regressor.optimizers)):
@@ -173,30 +172,56 @@ def main(settings):
                     opt.tell(rawPopulations[treeIdx], costs[treeIdx])
 
         if isMaster:
-            # Set tree costs as the lowest costs at the final Optimizer step
-            bestCosts = [min(c) for c in costs]
-            for tree, c in zip(regressor.trees, bestCosts):
-                tree.cost = c
-
-            outfilePath = os.path.join(
-                settings['outputPath'], 'tree_{}.pkl'.format(regStep)
+            archive.update(
+                regressor.trees, costs, rawPopulations, regressor.optimizers
             )
 
-            bestTree = np.argmin(bestCosts)
-            bestParams = np.argmin(costs[bestTree])
-            saveTree = deepcopy(regressor.trees[bestTree])
-            saveTree.bestParams = rawPopulations[bestTree][bestParams]
-            with open(outfilePath, 'wb') as outfile:
-                pickle.dump(saveTree, outfile)
-
             print()
-            for t in sorted(regressor.trees, key=lambda t: t.cost):
-                print('\t{:.2f}'.format(t.cost), t)
+            printNames = list(archive.keys())
+            printCosts = [archive[n].cost for n in printNames]
 
+            for idx in np.argsort(printCosts):
+                print(
+                    '\t{:.2f}'.format(printCosts[idx]),
+                    printNames[idx],
+                )
             print(flush=True)
 
             if regStep + 1 < settings['numRegressorSteps']:
-                regressor.evolvePopulation(svNodePool)
+
+                # Sample tournamentSize number of trees to use as parents
+                trees, opts = archive.sample(settings['tournamentSize'])
+                regressor.trees = trees
+
+                # Finish populating trees by mating/mutating
+                newTrees = regressor.evolvePopulation(svNodePool)
+
+                # Check if each tree is in the archive
+                currentTreeNames = [str(t) for t in trees]
+
+                uniqueTrees = trees
+                uniqueOptimizers = opts
+                for tree in newTrees:
+                    treeName = str(tree)
+                    if treeName not in currentTreeNames:
+                        # Not a duplicate
+                        uniqueTrees.append(tree)
+
+                        if treeName in archive:
+                            # Load archived optimizer
+                            uniqueOptimizers.append(archive[treeName].optimizer)
+                        else:
+                            # Create new optimizer
+                            uniqueOptimizers.append(
+                                regressor.optimizer(
+                                    tree.populate(N=1)[0],
+                                    *regressor.optimizerArgs
+                                )
+                            )
+
+                regressor.trees = uniqueTrees
+                regressor.optimizers = uniqueOptimizers
+
 
 
     print('Done')

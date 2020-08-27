@@ -23,7 +23,7 @@ outputPath          ./results
 
 optimizer           CMA
 numberOfTrees       20
-tournamentSize      10
+tournamentSize      5
 optimizerPopSize    50
 crossoverProb       0.2
 pointMutateProb     0.2
