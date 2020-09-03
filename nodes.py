@@ -55,18 +55,42 @@ class SVNode(Node):
     A Node that is specifically designed to represent structure vector (SV)
     operations. Doesn't have anything new yet.
 
+    TODO: a node needs a way to understand how to parse/produce its own
+    parameter sets. For example, a rho node just directly uses them, but an ffg
+    node should be convolving the parameters first.
+
+    TODO: this ^ requires an easy way for having a user be able to specify how
+    many unique splines compose the given node. For example, a single-element
+    FFG spline only has 2 splines, but a multi-component one could have 3. Maybe
+    you could use a template input that specifies how the parameters are
+    embedded into each node
+
     Attributes:
         numParams (int):
             The number of fitting parameters for the corresponding SV.
+
+        components (list):
+            A list of names of components that make up the SV.
+
+        numParams (list):
+            A list integers corresponding to the number of parameters for each
+            component. It's assumed that this does NOT take into account any
+            non-free knots specified by `restrictions`.
+
+        bonds (list):
+            A list of lists, where each sub-list is a set of component names to
+            be used for the given bond type.
 
         population (np.arr):
             An array of shape (P, self.numParams) where each row
             corresponds to a different parameter set. P depends on the most
             recent populate() call.
 
-        TODO: there's no reason for a node to store its population
+        restrictions (list):
+            A list of tuples for each component specifying any non-free knots,
+            and their values. [[(knotIdx, value), ...] for each component]
 
-        paramRange (tuple):
+        paramRanges (tuple):
             A length-2 tuple of the (low, high) range of allowed parameters.
             Default is (0, 1).
 
@@ -76,26 +100,96 @@ class SVNode(Node):
             to avoid using stale values.
     """
 
-    def __init__(self, description, numParams, paramRange=None):
-        Node.__init__(self, description)
-        self.numParams = numParams
+    def __init__(
+        self, description, components, numParams, bonds,
+        restrictions=None, paramRanges=None
+        ):
 
-        self.paramRange = paramRange
-        if self.paramRange is None:
-            self.paramRange = (0, 1)
+        Node.__init__(self, description)
+        self.components = components
+        self.bonds = bonds
+
+        # Load any restricted knot values
+        tmp = restrictions
+        if tmp is None:
+            tmp = [[]]*len(self.components)
+
+        self.restrictions = {comp: res for comp, res in zip(components, tmp)}
+
+        # Store number of free parameters
+        self.numParams = {}
+        for compName, num in zip(components, numParams):
+            numFixed = len(self.restrictions[compName])
+            self.numParams[compName] = num - numFixed
+
+        self.totalNumParams = sum(self.numParams.values())
+
+        # Load any limits on the parameter ranges for each component type
+        self.paramRanges = paramRanges
+        if self.paramRanges is None:
+            paramRanges = [(0, 1)]*len(components)
+            self.paramRanges = {
+                comp: rng for comp, rng in zip(components, paramRanges)
+            }
 
         self._values = None
 
+        self.convolutions = 0
+
     
     def populate(self, popSize):
-        """Generate a random population of `popSize` parameter sets"""
-        pop = np.random.random(size=(popSize, self.numParams))
+        """
+        Generate a random population of `popSize` fitting parameters. Since
+        bonds should share parameters if they use the same SV components, this
+        builds a single population for each component type.
 
-        # shift into expected range
-        pop *= (self.paramRange[1] - self.paramRange[0])
-        pop += self.paramRange[0]
+        Args:
+            popSize (int):
+                The number of parameter sets to generate
 
-        return pop
+        Return:
+            population (np.arr):
+                (P, np.mul(self.numParams)). Parameters are ordered according
+                to the order of self.components.
+        """
+
+        population = []
+        for componentName in self.components:
+            numParams = self.numParams[componentName]
+
+            pop = np.random.random(size=(popSize, numParams))
+
+            # shift into expected range
+            paramRange = self.paramRanges[componentName]
+            pop *= (paramRange[1] - paramRange[0])
+            pop += paramRange[0]
+
+            population.append(pop)
+
+        return np.hstack(population)
+
+    
+    def fillFixedKnots(self, pop, compName):
+        if len(self.restrictions[compName]) < 1:
+            return pop
+
+        restrictedKnots, specifiedValues = zip(
+            *self.restrictions[compName]
+        )
+
+        # Shape including number of fixed knots
+        fullShape = (pop.shape[0], pop.shape[1]+len(restrictedKnots))
+        knotMask = np.array([
+            True if k in restrictedKnots else False
+            for k in range(fullShape[1])
+        ])
+
+        fullPop = np.empty(fullShape)
+        fullPop[:, ~knotMask] = pop
+        fullPop[:,  knotMask] = specifiedValues
+
+        return fullPop
+
 
     @property
     def values(self):

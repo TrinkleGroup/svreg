@@ -147,10 +147,8 @@ class SVRegressor:
             the best individual.
         """
 
-        contenders = random.sample(
-            range(self.settings['numberOfTrees']),
-            self.settings['tournamentSize']
-        )
+        # contenders = random.sample(range(len(self.trees)), len(self.trees))
+        contenders = [random.choice(range(len(self.trees)))]
 
         costs = [self.trees[idx].cost for idx in contenders]
 
@@ -160,13 +158,14 @@ class SVRegressor:
     def evolvePopulation(self, svNodePool):
         """
         Performs an in-place evolution of self.trees using tournament selection,
-        crossover, and mutation.
+        crossover, and mutation. Assumes that self.trees is the current set of
+        parent trees.
         """
 
         newTrees = []
-        for _ in range(self.settings['numberOfTrees']):
-            parent = self.tournament()
-
+        for _ in range(self.settings['numberOfTrees'] - len(self.trees)):
+            # parent = self.tournament()
+            parent = deepcopy(random.choice(self.trees))
 
             # For handling only allowing crossover OR point mutation
             pmProb = self.settings['crossoverProb']\
@@ -183,7 +182,7 @@ class SVRegressor:
             parent.updateSVNodes()
             newTrees.append(parent)
         
-        self.trees = newTrees
+        return newTrees
 
 
     def mate(self):

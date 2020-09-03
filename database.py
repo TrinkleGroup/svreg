@@ -20,14 +20,29 @@ class SVDatabase(h5py.File):
                     The true forces of the structure.
 
                 <sv_name>
-                    .attrs['numParams'] (int):
-                        The number of fitting parameters for this type of SV.
+                    .attrs['components'] (list):
+                        A list of component names (e.g. ['rho_A', 'rho_B'])
 
-                    .attrs['paramRange'] (tuple, list):
-                        Optional range of (low, high) allowed values. If left
-                        unspecified, uses the default range of (0, 1).
+                    .attrs['numParams'] (int):
+                        The number of fitting parameters for each component of
+                        this type of SV.
+
+                    .attrs['restrictions'] (list):
+                        A list of tuples for each component, setting fixed
+                        values for any desired knots.
+
+                    .attrs['paramRanges'] (list):
+                        Optional list of (low, high) ranges of allowed values
+                        for each component. If left unspecified, uses the
+                        default range of (0, 1) for all components.
 
                     <bond_type>
+                        .attrs['components'] (list):
+                            A list of components that are used for the given
+                            bond type. If multiple, assumes that the SV is
+                            constructed by computing outer products of the
+                            parameters for each of the components of the bond.
+
                         <eval_type> ('energy' or 'forces')
     """
 
