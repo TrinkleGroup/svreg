@@ -54,6 +54,10 @@ _valid_options = {
         'The path to the folder for storing any outputs. Defaults to'\
         ' `./results`. Creates folder if it does not exist yet.'
     ),
+    'overwrite': Option(
+        'overwrite', bool, (False, True), False,
+        'True if the files in `outputPath` should be overwritten.'
+    ),
     'optimizer': Option(
         'optimizer', str, None, 'CMA',
         'The name of the optimizer object to use for optimizing strings.'
@@ -155,7 +159,10 @@ class Settings(dict):
                         value = lineSplit[1]
 
                         try:
-                            value = option.allowedType(value)
+                            if option.allowedType is bool:
+                                value = (value == 'True')
+                            else:
+                                value = option.allowedType(value)
                             settingsStringDict[key] = value
                         except:
                             raise RuntimeError(

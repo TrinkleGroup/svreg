@@ -59,19 +59,19 @@ class SVTree(list):
         numFuncs = FunctionNode._num_avail_functions
         numNodeChoices = numFuncs + numSVNodes
 
-        # choose a random depth from [1, maxDepth]
+        # Choose a random depth from [1, maxDepth]
         if maxDepth == 1:
-            # choose random SVNode to use as the only term in the tree
+            # Choose random SVNode to use as the only term in the tree
             newSVNode = deepcopy(random.choice(svNodePool))
             tree.nodes.append(newSVNode)
             tree.svNodes.append(newSVNode)
             return tree
         else:
-            # choose a random function as the head, then continue with building
+            # Choose a random function as the head, then continue with building
             tree.nodes.append(FunctionNode.random())
 
-        # track how many children need to be added to the current node
-        # the tree is complete once this list is empty
+        # Track how many children need to be added to the current node. The tree
+        # is complete once this list is empty
         nodesToAdd = [tree.nodes[0].function.arity]
 
         while nodesToAdd:
@@ -80,26 +80,26 @@ class SVTree(list):
             choice = random.randint(0, numNodeChoices)
 
             if (depth < maxDepth) and (choice <= numFuncs):
-                # chose to add a FunctionNode
+                # Chose to add a FunctionNode
                 tree.nodes.append(FunctionNode.random())
                 nodesToAdd.append(tree.nodes[-1].function.arity)
             else:
-                # add an SVNode
+                # Add an SVNode
                 sv = random.choice(deepcopy(svNodePool))
                 tree.nodes.append(sv)
                 tree.svNodes.append(sv)
 
-                # see if you need to add any more nodes to the sub-tree
+                # See if you need to add any more nodes to the sub-tree
                 nodesToAdd[-1] -= 1
                 while nodesToAdd[-1] == 0:
-                    # pop counters from the stack if sub-trees are complete
+                    # Pop counters from the stack if sub-trees are complete
                     nodesToAdd.pop()
                     if not nodesToAdd:
                         return tree
                     else:
                         nodesToAdd[-1] -= 1
 
-        # impossible to get here; should always return in while-loop
+        # Impossible to get here; should always return in while-loop
         raise RuntimeError("Something went wrong in tree construction")
 
 
@@ -129,29 +129,29 @@ class SVTree(list):
 
         for node in self.nodes:
             if isinstance(node, FunctionNode):
-                # start a new sub-tree
+                # Start a new sub-tree
                 subTrees.append([node])
             else:
-                # grow the current deepest sub-tree
+                # Grow the current deepest sub-tree
                 subTrees[-1].append(node)
 
-            # if the sub-tree is complete, evaluate its function
+            # If the sub-tree is complete, evaluate its function
             while len(subTrees[-1]) == subTrees[-1][0].function.arity + 1:
                 args = [
                     n.values if isinstance(n, SVNode)
-                    else n  # terminal is intermediate result
+                    else n  # Terminal is intermediate result
                     for n in subTrees[-1][1:]
                 ]
 
                 intermediateEng = subTrees[-1][0].function(*args)
                 intermediateFcs = subTrees[-1][0].function.derivative(*args)
 
-                if len(subTrees) != 1:  # still some left to evaluate
+                if len(subTrees) != 1:  # Still some left to evaluate
                     subTrees.pop()
                     subTrees[-1].append(
                         (intermediateEng, intermediateFcs)
                     )
-                else:  # done evaluating all sub-trees
+                else:  # Done evaluating all sub-trees
                     return intermediateEng, intermediateFcs
 
         raise RuntimeError("Something went wrong in tree evaluation")
@@ -172,9 +172,11 @@ class SVTree(list):
 
         Return:
             population (np.arr):
-                {svName: population}
+                Array of shape (N, ?), where the length of the second dimension
+                depends on the number of SVNode objects in the tree.
         """
 
+        # Get raw per-component parameters for each svNode
         population = []
         for svNode in self.svNodes:
             population.append(svNode.populate(N))
@@ -236,37 +238,106 @@ class SVTree(list):
 
         return np.hstack(array)
 
+    
+    def fillFixedKnots(self, population):
+        """Inserts any specified values into correct columns of `population`."""
 
-    def parseArr2Dict(self, population):
+        population = np.atleast_2d(population)
+
+        fullShape = (
+            population.shape[0],
+            population.shape[1]+sum([len(n.restrictions) for n in self.svNodes])
+        )
+
+        fullPop = np.empty(fullShape)
+
+        splitPop = np.array_split(
+            population, np.cumsum([n.totalNumParams for n in self.svNodes]),
+            axis=1
+        )
+
+        fullPop = []
+
+        start = 0
+        for svNode, nodePopSplit in zip(self.svNodes, splitPop):
+            compPopSplit = np.array_split(
+                nodePopSplit,
+                np.cumsum([svNode.numParams[k] for k in svNode.components]),
+                axis=1
+            )
+            for compName, pop in zip(svNode.components, compPopSplit):
+                fullPop.append(svNode.fillFixedKnots(pop, compName))
+
+        return np.hstack(fullPop)
+    
+
+    def parseArr2Dict(self, rawPopulation):
         """
         Convert a 2D array of parameters into a dictionary, where the key is the
-        structure vector type, and the value is an array of parameters of all
-        SVNode objects of that type in self.svNodes. Useful for storing in an
-        organized manner.
+        structure vector type, and the value is a dictionary of array of
+        parameters of all bond types for each SVNode object of that type in
+        self.svNodes. Useful for storing in an organized manner.
+
+        Populates any fixed knots with specified values.
 
         Args:
-            population (np.arr):
+            rawPopulation (np.arr):
                 The population to be parsed
 
         Returns:
             parameters (dict):
-                {svName: np.vstack-ed array of parameters}
+                {svName: {bondType: np.vstack-ed array of parameters}}
         """
 
-        # Split by node
-        splitIndices = np.cumsum([n.numParams for n in self.svNodes])[:-1]
-        splitPop = np.split(population, splitIndices, axis=1)
+        splitIndices = np.cumsum([n.totalNumParams for n in self.svNodes])[:-1]
+        splitPop = np.split(rawPopulation, splitIndices, axis=1)
 
-        # Group by SV type
-        parameters = {
-            svName: [] for svName in set([n.description for n in self.svNodes])
-        }
+        # Convert raw parameters into SV node parameters (using outer products)
+        parameters = {}
+        for svNode, rawParams in zip(self.svNodes, splitPop):
 
-        for svNode, pop in zip(self.svNodes, splitPop):
-            parameters[svNode.description].append(pop)
+            if svNode.description not in parameters:
+                parameters[svNode.description] = {
+                    bondType: [] for bondType in svNode.bonds
+                }
 
+            # Split the parameters for each component type
+            splitParams = np.array_split(
+                rawParams, np.cumsum(
+                    [svNode.numParams[c] for c in svNode.components]
+                )[:-1],
+                axis=1
+            )
+
+            # Organize parameters by component type for easy indexing
+            # Fill any fixed values
+            componentParams = {}
+            for compName, pop in zip(svNode.components, splitParams):
+                componentParams[compName] = svNode.fillFixedKnots(pop, compName)
+
+            for bondType, bondComponents in svNode.bonds.items():
+                # Take outer products to form SV params out of bond components
+
+                cart = None
+                for componentName in bondComponents:
+                    tmp = componentParams[componentName]
+
+                    if cart is None:
+                        cart = tmp
+                    else:
+                        cart = np.einsum('ij,ik->ijk', cart, tmp)
+                        cart = cart.reshape(
+                            cart.shape[0], cart.shape[1]*cart.shape[2]
+                        )
+
+                parameters[svNode.description][bondType].append(cart)
+
+        # Stack populations of same bond type; can be split by N later
         for svName in parameters:
-            parameters[svName] = np.vstack(parameters[svName])
+            for bondType in parameters[svName]:
+                parameters[svName][bondType] = np.vstack(
+                    parameters[svName][bondType]
+                )
 
         return parameters
 

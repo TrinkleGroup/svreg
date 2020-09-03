@@ -7,28 +7,30 @@
 ################################################################################
 
 seed        42
-runType     GA
+runType     DEBUG
 
 ################################################################################
 # Database settings
 ################################################################################
 
 refStruct           Ground_state_crystal
-databasePath        ./examples/Mo.hdf5
+# databasePath        ./examples/Mo.hdf5
+databasePath        ../svreg_data/mlearn/Mo/Mo.hdf5
 outputPath          ./results
+overwrite           False
 
 ################################################################################
 #  Regressor settings
 ################################################################################
 
 optimizer           CMA
-numberOfTrees       20
-tournamentSize      5
-optimizerPopSize    50
+numberOfTrees       30
+tournamentSize      15
+optimizerPopSize    100
 crossoverProb       0.2
 pointMutateProb     0.2
 maxTreeDepth        3
-numRegressorSteps   10
-numOptimizerSteps   10
+numRegressorSteps   100
+numOptimizerSteps   10000
 
 ################################################################################

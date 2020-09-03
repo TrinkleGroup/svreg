@@ -26,6 +26,7 @@ from evaluator import SVEvaluator
 from nodes import SVNode, FunctionNode
 from tree import SVTree
 from archive import Archive, Entry
+from optimizers import GAWrapper
 
 
 ################################################################################
@@ -56,11 +57,7 @@ args = parser.parse_args()
 
 
 # @profile
-def main(settings):
-    # Prepare usual MPI stuff
-    worldComm = MPI.COMM_WORLD
-    isMaster = (worldComm.Get_rank() == 0)
-
+def main(settings, worldComm, isMaster):
     # Load database, build evaluator, and prepare list of structNames
     with SVDatabase(settings['databasePath'], 'r') as database:
         if args.names:
@@ -71,6 +68,11 @@ def main(settings):
         else:
             # Otherwise just use all structures in the database
             structNames = list(database.keys())
+
+        if isMaster:
+            print("Loaded structures:")
+            for n in structNames:
+                print('\t', n)
         
         if settings['refStruct'] not in structNames:
             raise RuntimeError(
@@ -80,20 +82,7 @@ def main(settings):
         evaluator = SVEvaluator(worldComm, structNames, settings)
         evaluator.distributeDatabase(database)
 
-        # Prepare svNodePool for use in tree construction
-        svNodePool = []
-        group = database[settings['refStruct']]
-        for svName in group:
-            svGroup = group[svName]
-            svNodePool.append(
-                SVNode(
-                    description=svName,
-                    numParams=svGroup.attrs['numParams'],
-                    paramRange=svGroup.attrs['paramRange']\
-                        if 'paramRange' in group[svName].attrs else None
-                )
-            )
-
+        svNodePool = buildSVNodePool(database[settings['refStruct']])
         trueValues = database.loadTrueValues()
     
     # Prepare regressor
@@ -103,11 +92,17 @@ def main(settings):
             1.0,  # defaulted sigma0 value
             {'verb_disp': 0, 'popsize':settings['optimizerPopSize']}
         ]
+    elif settings['optimizer'] == 'GA':
+        optimizer = GAWrapper
+        optimizerArgs = [
+            {
+                'verb_disp': 0,
+                'popsize': settings['optimizerPopSize'],
+                'pointMutateProb': settings['pointMutateProb']
+            }
+        ]
     else:
-        raise NotImplementedError(
-            'The only available optimizer is CMA.'\
-                'Modify ga.py to add one.'
-        )
+        raise NotImplementedError('Only `CMA` and `GA` have been implemented')
 
     if isMaster:
         archive = Archive(os.path.join(settings['outputPath'], 'archive'))
@@ -142,14 +137,23 @@ def main(settings):
                     treePopulations.append(tree.parseArr2Dict(pop))
 
                 # Group all dictionaries into one
-                # {svName: [tree populations for tree in trees]}
-                populationDict = {
-                    svName: [] for svName in [n.description for n in svNodePool]
-                }
+                # {svName: {bondType: [tree populations for tree in trees]}}
+                # populationDict = {
+                #     svName: {
+                #         [] for svName in [n.description for n in svNodePool]
+                #     }
+                # }
+
+                populationDict = {}
+                for svNode in svNodePool:
+                    populationDict[svNode.description] = {}
+                    for bondType in svNode.bonds:
+                        populationDict[svNode.description][bondType] = []
 
                 for treeDict in treePopulations:
-                    for svName, pop in treeDict.items():
-                        populationDict[svName].append(pop)
+                    for svName in treeDict.keys():
+                        for bondType, pop in treeDict[svName].items():
+                            populationDict[svName][bondType].append(pop)
 
             else:
                 populationDict = None
@@ -162,9 +166,17 @@ def main(settings):
                 # Eneriges/forces = {structName: [pop for tree in trees]}
                 energies, forces = regressor.evaluateTrees(svEng, svFcs, N)
 
-                costs = cost(energies, forces, trueValues)
+                # Save the (per-struct) errors and the single-value costs
+                errors = computeErrors(
+                    settings['refStruct'], energies, forces, trueValues
+                )
+
+                costs = [el.sum(axis=1) for el in errors]
 
                 # Print the cost of the best paramaterization of the best tree
+                print(
+                    '\t', optStep, min([np.min(c) for c in costs]), flush=True
+                )
 
                 # Update optimizers
                 for treeIdx in range(len(regressor.optimizers)):
@@ -173,16 +185,24 @@ def main(settings):
 
         if isMaster:
             archive.update(
-                regressor.trees, costs, rawPopulations, regressor.optimizers
+                regressor.trees, costs, errors, rawPopulations,
+                regressor.optimizers
             )
+
+            archive.log()
 
             print()
             printNames = list(archive.keys())
             printCosts = [archive[n].cost for n in printNames]
+            regressorNames = [str(t) for t in regressor.trees]
 
             for idx in np.argsort(printCosts):
+                indicator = ''
+                if printNames[idx] in regressorNames:
+                    indicator = '->'
+
                 print(
-                    '\t{:.2f}'.format(printCosts[idx]),
+                    '\t{}{:.2f}'.format(indicator, printCosts[idx]),
                     printNames[idx],
                 )
             print(flush=True)
@@ -222,17 +242,11 @@ def main(settings):
                 regressor.trees = uniqueTrees
                 regressor.optimizers = uniqueOptimizers
 
-
-
     print('Done')
 
 
-def fixedExample(settings):
+def fixedExample(settings, worldComm, isMaster):
     """A function for running basic tests on example trees."""
-
-    # Prepare usual MPI stuff
-    worldComm = MPI.COMM_WORLD
-    isMaster = (worldComm.Get_rank() == 0)
 
     # Load database, build evaluator, and prepare list of structNames
     with SVDatabase(settings['databasePath'], 'r') as database:
@@ -253,20 +267,7 @@ def fixedExample(settings):
         evaluator = SVEvaluator(worldComm, structNames, settings)
         evaluator.distributeDatabase(database)
 
-        # Prepare svNodePool for use in tree construction
-        svNodePool = []
-        group = database[settings['refStruct']]
-        for svName in ['rho', 'ffg']:
-            svGroup = group[svName]
-            svNodePool.append(
-                SVNode(
-                    description=svName,
-                    numParams=svGroup.attrs['numParams'],
-                    paramRange=svGroup.attrs['paramRange']\
-                        if 'paramRange' in group[svName].attrs else None
-                )
-            )
-
+        svNodePool = buildSVNodePool(database[settings['refStruct']])
         trueValues = database.loadTrueValues()
     
     # Prepare regressor
@@ -274,13 +275,19 @@ def fixedExample(settings):
         optimizer = cma.CMAEvolutionStrategy
         optimizerArgs = [
             1.0,  # defaulted sigma0 value
-            {'verb_disp': 0, 'popsize':settings['optimizerPopSize']}
+            {'verb_disp': 1, 'popsize':settings['optimizerPopSize']}
+        ]
+    elif settings['optimizer'] == 'GA':
+        optimizer = GAWrapper
+        optimizerArgs = [
+            {
+                'verb_disp': 1,
+                'popsize': settings['optimizerPopSize'],
+                'pointMutateProb': settings['pointMutateProb']
+            }
         ]
     else:
-        raise NotImplementedError(
-            'The only available optimizer is CMA.'\
-                'Modify ga.py to add one.'
-        )
+        raise NotImplementedError('Only `CMA` and `GA` have been implemented')
 
     if isMaster:
         tree = SVTree()
@@ -288,8 +295,24 @@ def fixedExample(settings):
         rhoNode = deepcopy(svNodePool[0])
         ffgNode = deepcopy(svNodePool[1])
 
-        tree.nodes = [FunctionNode('add'), rhoNode, ffgNode]
+        tree.nodes = [
+            FunctionNode('sqrt'),
+            FunctionNode('inv'),
+            FunctionNode('mul'),
+            FunctionNode('inv'), ffgNode,
+            FunctionNode('sqrt'), rhoNode
+        ]
+
         tree.svNodes = [rhoNode, ffgNode]
+
+        # archive = pickle.load(
+        #     open(
+        #         os.path.join(settings['outputPath'], 'archive', 'archive.pkl'),
+        #         'rb'
+        #     )
+        # )
+
+        # entry = archive['sqrt(inv(mul(inv(ffg), sqrt(rho))))']
 
         regressor = SVRegressor(
             settings, svNodePool, optimizer, optimizerArgs
@@ -298,12 +321,13 @@ def fixedExample(settings):
         regressor.trees = [tree]
         regressor.initializeOptimizers()
 
-        print('Tree:\n\t', regressor.trees[0])
+        # regressor.optimizers[0].opts.set('verb_disp', 1)
+
+        print('Tree:\n\t', regressor.trees[0], flush=True)
 
     N = settings['optimizerPopSize']
 
     for optStep in range(settings['numOptimizerSteps']):
-        # TODO: is it an issue that this can give diff fits for same tree?
         if isMaster:
             rawPopulations = [
                 np.array(opt.ask(N)) for opt in regressor.optimizers
@@ -316,14 +340,16 @@ def fixedExample(settings):
                 treePopulations.append(tree.parseArr2Dict(pop))
 
             # Group all dictionaries into one
-            # {svName: [tree populations for tree in trees]}
-            populationDict = {
-                svName: [] for svName in [n.description for n in svNodePool]
-            }
+            populationDict = {}
+            for svNode in svNodePool:
+                populationDict[svNode.description] = {}
+                for bondType in svNode.bonds:
+                    populationDict[svNode.description][bondType] = []
 
             for treeDict in treePopulations:
-                for svName, pop in treeDict.items():
-                    populationDict[svName].append(pop)
+                for svName in treeDict.keys():
+                    for bondType, pop in treeDict[svName].items():
+                        populationDict[svName][bondType].append(pop)
 
         else:
             populationDict = None
@@ -336,36 +362,98 @@ def fixedExample(settings):
             # Eneriges/forces = {structName: [pop for tree in trees]}
             energies, forces = regressor.evaluateTrees(svEng, svFcs, N)
 
-            costs = cost(energies, forces, trueValues)
+            errors = computeErrors(
+                settings['refStruct'], energies, forces, trueValues
+            )
+
+
+            costs = np.array([el.sum(axis=1) for el in errors])
+
+            # Add ridge regression penalty
+            penalties = np.array([
+                np.linalg.norm(pop, axis=1) for pop in rawPopulations
+            ])
 
             # Print the cost of the best paramaterization of the best tree
-            print('\t', optStep, min([min(c) for c in costs]))
+            # print('\t', optStep, min([min(c) for c in costs]), flush=True)
 
             # Update optimizers
             for treeIdx in range(len(regressor.optimizers)):
-                opt = regressor.optimizers[treeIdx]
-                opt.tell(rawPopulations[treeIdx], costs[treeIdx])
+                fullCost = costs[treeIdx] + penalties[treeIdx]
 
-            if optStep % 100 == 0:
-                outfilePath = os.path.join(
+                opt = regressor.optimizers[treeIdx]
+                opt.tell(rawPopulations[treeIdx], fullCost)
+                opt.disp()
+
+            if optStep % 10 == 0:
+                treeOutfilePath = os.path.join(
                     settings['outputPath'], 'tree_{}.pkl'.format(optStep)
                 )
 
-                bestParams = np.argmin(costs)
-                bestTree = bestParams // N
+                bestIdx = np.argmin(costs)
+                bestTree = bestIdx//N
                 saveTree = deepcopy(regressor.trees[bestTree])
-                saveTree.bestParams = rawPopulations[bestTree][bestParams]
-                with open(outfilePath, 'wb') as outfile:
+                saveTree.bestParams = saveTree.fillFixedKnots(
+                    rawPopulations[bestTree][bestIdx]
+                )[0]
 
+                errorsOutfilePath = os.path.join(
+                    settings['outputPath'], 'errors_{}.pkl'.format(optStep)
+                )
+
+                with open(treeOutfilePath, 'wb') as outfile:
                     pickle.dump(saveTree, outfile)
 
+                with open(errorsOutfilePath, 'wb') as outfile:
+                    pickle.dump(errors[bestTree][bestIdx], outfile)
 
-def cost(energies, forces, trueValues):
+
+def buildSVNodePool(group):
+    """Prepare svNodePool for use in tree construction"""
+
+    svNodePool = []
+
+    # `group` is a pointer to an entry for a structure in the database
+    for svName in group:
+        svGroup = group[svName]
+
+        restrictions = None
+        if 'restrictions' in svGroup.attrs:
+            restrictions = []
+            resList = svGroup.attrs['restrictions'].tolist()
+            for num in svGroup.attrs['numRestrictions']:
+                tmp = []
+                for _ in range(num):
+                    tmp.append(tuple(resList.pop()))
+                restrictions.append(tmp)
+
+        svNodePool.append(
+            SVNode(
+                description=svName,
+                components=svGroup.attrs['components'],
+                numParams=svGroup.attrs['numParams'],
+                bonds={
+                    k:svGroup[k].attrs['components'] for k in svGroup.keys()
+                },
+                restrictions=restrictions,
+                paramRanges=svGroup.attrs['paramRanges']\
+                    if 'paramRanges' in group[svName].attrs else None
+            )
+        )
+
+    return svNodePool
+
+
+def computeErrors(refStruct, energies, forces, trueValues):
     """
-    Takes in dictionaries of energies and forces and returns a single cost
-    value. Currently uses MAE.
+    Takes in dictionaries of energies and forces and returns the energy/force
+    errors for each structure for each tree. Sorts structure names first.
 
     Args:
+        refStruct (str):
+            The name of the reference structure for computing energy
+            differences.
+
         energies (dict):
             {structName: [(P,) for tree in trees]} where P is population size.
 
@@ -374,11 +462,16 @@ def cost(energies, forces, trueValues):
             size and N is number of atoms.
 
         trueValues (dict):
-            {structName: {'energy': eng, 'forces':fcs}}
+            {structName: {'energy': eng, 'forces':fcs}}. Note that it is
+            assumed that the true 'energies' are actually energy differences
+            where the energy of the reference structure has already been
+            subtracted off.
 
     Returns:
         costs (list):
-            A list of the total costs for the populations of each tree.
+            A list of the total costs for the populations of each tree. Eeach
+            entry will have a shape of (P, 2*S) where P is the population size
+            and S is the number of structures being evaluated.
     """
 
     keys = list(energies.keys())
@@ -387,26 +480,31 @@ def cost(energies, forces, trueValues):
     numStructs = len(keys)
 
     keys = list(energies.keys())
-    costs = []
+    errors = []
 
     for treeNum in range(numTrees):
-        treeCosts = np.zeros((numPots, 2*numStructs))
-        for i, structName in enumerate(keys):
-            eng = energies[structName][treeNum]
+        treeErrors = np.zeros((numPots, 2*numStructs))
+        for i, structName in enumerate(sorted(keys)):
+            eng = energies[structName][treeNum] - energies[refStruct][treeNum]
             fcs =   forces[structName][treeNum]
 
             engErrors = eng - trueValues[structName]['energy']
             fcsErrors = fcs - trueValues[structName]['forces']
 
-            treeCosts[:,   i] = abs(engErrors)
-            treeCosts[:, 2*i] = np.average(np.abs(fcsErrors), axis=(1, 2))
+            treeErrors[:,   2*i] = abs(engErrors)
+            treeErrors[:, 2*i+1] = np.average(np.abs(fcsErrors), axis=(1, 2))
 
-        costs.append(treeCosts.sum(axis=1))
+        # Could not sum here to preserve per-struct energy/force errors
+        # costs.append(treeCosts.sum(axis=1))
+        errors.append(treeErrors)
 
-    return costs
+    return errors
 
 
 if __name__ == '__main__':
+    # Prepare usual MPI stuff
+    worldComm = MPI.COMM_WORLD
+    isMaster = (worldComm.Get_rank() == 0)
 
     # Load settings
     settings = Settings.from_file(args.settings)
@@ -416,12 +514,19 @@ if __name__ == '__main__':
     random.seed(settings['seed'])
     np.random.seed(settings['seed'])
 
-    if os.path.isdir(settings['outputPath']):
-        shutil.rmtree(settings['outputPath'])
+    if isMaster:
+        if os.path.isdir(settings['outputPath']):
+            if not settings['overwrite']:
+                raise RuntimeError(
+                    'Save folder already exists,'\
+                    ' but `overwrite` is set to False'
+                )
+            else:
+                shutil.rmtree(settings['outputPath'])
 
-    os.mkdir(settings['outputPath'])
+        os.mkdir(settings['outputPath'])
 
     if settings['runType'] == 'GA':
-        main(settings)
+        main(settings, worldComm, isMaster)
     else:
-        fixedExample(settings)
+        fixedExample(settings, worldComm, isMaster)

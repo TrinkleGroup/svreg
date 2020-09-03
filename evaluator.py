@@ -49,7 +49,7 @@ class Manager:
 
         Args:
             population (dict):
-                {svName: list of populations, each maybe of different shapes}
+                {svName: {bondType: list of populations for trees}}
 
             evalType (str):
                 'energy' or 'forces'
@@ -65,26 +65,40 @@ class Manager:
             # Group the populations, but track how to un-group them for later
             splits = {}
             batchedPopulations = {}
-            for svName, listOfPops in population.items():
-                splitIndices = np.cumsum(
-                    [pop.shape[0] for pop in listOfPops]
-                )[:-1]
+            for svName in population.keys():
+                batchedPopulations[svName] = {}
+                for bondType, listOfPops in population[svName].items():
+                    splitIndices = np.cumsum(
+                        [pop.shape[0] for pop in listOfPops]
+                    )[:-1]
 
-                # Record how to un-group the populations for each tree
-                splits[svName] = splitIndices
-                
-                if len(listOfPops) > 0:
-                    # Split the full population across the workers
-                    batchedPopulations[svName] = np.array_split(
-                        np.vstack(listOfPops), self.numWorkers
-                    )
-                else:
-                    batchedPopulations[svName] = [None]*self.numWorkers
+                    # Record how to un-group the populations for each tree
+                    # Note: don't need to save for all bondTypes because they
+                    # should all have the same dimensions
+                    splits[svName] = splitIndices
+                    
+                    if len(listOfPops) > 0:
+                        # Split the full population across the workers
+                        batchedPopulations[svName][bondType] = np.array_split(
+                            np.vstack(listOfPops), self.numWorkers
+                        )
+                    else:
+                        batchedPopulations[svName][bondType] = \
+                             [None]*self.numWorkers
 
+
+            # Prepare the split populations for MPI scatter()
             localPopulations = [
-                {svName: batchedPopulations[svName][i] for svName in population}
+                {
+                    svName: {
+                        bondType: batchedPopulations[svName][bondType][i]
+                        for bondType in population[svName]
+                    }
+                    for svName in population
+                }
                 for i in range(self.numWorkers)
             ]
+            
         else:
             localPopulations = None
 
@@ -103,8 +117,9 @@ class Manager:
 
                 intermediates = []  # for summing over bond types
                 for bondType in database[structName][svName]:
+
                     sv = database[structName][svName][bondType][evalType]
-                    val = (sv @ localPop[svName].T).T
+                    val = (sv @ localPop[svName][bondType].T).T
 
                     if evalType == 'energy':
                         val = val.sum(axis=1)/n
@@ -118,7 +133,9 @@ class Manager:
                         # Make sure to address this in database.py when you
                         # the functions for constructing splines.
 
-                        val = val.reshape(localPop[svName].shape[0], 3, n, n)
+                        val = val.reshape(
+                            localPop[svName][bondType].shape[0], 3, n, n
+                        )
                         val = val.sum(axis=-1).swapaxes(1, 2)
 
                     intermediates.append(val)
@@ -185,7 +202,7 @@ class Manager:
             provided HDF5 database.
         """
 
-        mpiDoubleSize = MPI.DOUBLE.Get_size()
+        mpiDoubleSize = MPI.FLOAT.Get_size()
 
         if self.isHead:
             # Have the head node figure out how much memory to allocate
@@ -222,8 +239,8 @@ class Manager:
         engBuf, _ = engShmemWin.Shared_query(0)
         fcsBuf, _ = fcsShmemWin.Shared_query(0)
 
-        engShmemArr = np.ndarray(buffer=engBuf, dtype='d', shape=engShape)
-        fcsShmemArr = np.ndarray(buffer=fcsBuf, dtype='d', shape=fcsShape)
+        engShmemArr = np.ndarray(buffer=engBuf, dtype='f4', shape=engShape)
+        fcsShmemArr = np.ndarray(buffer=fcsBuf, dtype='f4', shape=fcsShape)
 
         # Add natoms to shmem too
         natomsBytes = mpiDoubleSize  # should be enough
@@ -231,7 +248,7 @@ class Manager:
             natomsBytes, mpiDoubleSize, comm=self.comm
         )
         natomsBuf, _ = natomsShmemWin.Shared_query(0)
-        natomsShmemArr = np.ndarray(buffer=natomsBuf, dtype='d', shape=(1,))
+        natomsShmemArr = np.ndarray(buffer=natomsBuf, dtype='f4', shape=(1,))
 
         # Iteratively build Manager-level database, then insert buffer
         pointer = database

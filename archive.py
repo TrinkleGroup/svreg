@@ -19,8 +19,9 @@ class Entry:
         self.cost       = np.inf
         self.converged  = False
         self.bestParams = None
+        self.bestErrors = None
 
-    
+
     # Use getters/setters to read/write objects from pickle files
     @property
     def tree(self):
@@ -58,6 +59,14 @@ class Entry:
             pickle.dump(opt, saveFile)
 
 
+    def __getstate__(self):
+        self_dict = self.__dict__.copy()
+
+        del self_dict['_tree']
+
+        # TODO: I think this is saving the Optimizers still
+
+        return self_dict
 
 # TODO: this could probably be merged with regressor somehow
 
@@ -78,8 +87,8 @@ class Archive(dict):
         os.mkdir(self.savePath)
 
 
-    def update(self, trees, costs, params, optimizers):
-        for tree, c, p, o in zip(trees, costs, params, optimizers):
+    def update(self, trees, costs, errors, params, optimizers):
+        for tree, c, e, p, o in zip(trees, costs, errors, params, optimizers):
             # Check if tree in archive, otherwise create a new entry for it
             key = str(tree)
             # entry = self.get(key, Entry(tree, self.savePath))
@@ -97,6 +106,7 @@ class Archive(dict):
             if c[bestIdx] < entry.cost:
                 entry.cost = c[bestIdx]
                 entry.bestParams = p[bestIdx]
+                entry.bestErrors = e[bestIdx]
 
             self[key] = entry
 
@@ -128,3 +138,13 @@ class Archive(dict):
         opts  = [self[k].optimizer for k in sampleNames]
 
         return trees, opts
+
+    def log(self):
+        """
+        Saves the current state of the archive. Note that since the trees and
+        optimizers have already been saved, this method only logs the errors,
+        costs, and optimal parameters.
+        """
+
+        with open(os.path.join(self.savePath, 'archive.pkl'), 'wb') as outfile:
+            pickle.dump(self, outfile)
