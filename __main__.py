@@ -110,7 +110,8 @@ def main(settings, worldComm, isMaster):
             'paretoDimensionality': 2,
             'CMApopSize': settings['optimizerPopSize'],
             'SofomorePopSize': settings['numberOfTrees'],  # Placeholder
-            'threads_per_node': settings['PROCS_PER_PHYS_NODE'],
+            # 'threads_per_node': settings['PROCS_PER_PHYS_NODE'],
+            'threads_per_node': None,
         }
     else:
         raise NotImplementedError('Must be one of `GA`, `CMA`, or `Sofomore`.')

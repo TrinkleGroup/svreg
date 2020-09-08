@@ -18,7 +18,7 @@ refStruct           Ground_state_crystal
 databasePath        ../svreg_data/mlearn/Mo/Mo.hdf5
 # outputPath          ./results
 outputPath          ./results/polish_rho_rho_sof
-overwrite           False
+overwrite           True
 
 ################################################################################
 #  Regressor settings
@@ -29,14 +29,14 @@ optimizer           Sofomore
 numberOfTrees       10
 tournamentSize      3
 
-optimizerPopSize    1000
+optimizerPopSize    100
 
 crossoverProb       0.2
 pointMutateProb     0.2
 maxTreeDepth        3
 
 numRegressorSteps   100
-numOptimizerSteps   1000
+numOptimizerSteps   10000
 
 energyWeight        10
 forcesWeight        1
