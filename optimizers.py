@@ -199,7 +199,7 @@ class SofomoreWrapper(comocma.Sofomore):
         """
 
         groupConditions = [
-                lambda n: 1 if 'strain' in n else 0,
+                # lambda n: 1 if 'strain' in n else 0,
                 lambda n: 1 if 'surface' in n else 0,
                 # lambda n: 1 if 'Vacancy' in n else 0,
                 # lambda n: 1 if ('6000_K' in n) and ('Vacancy' not in n) else 0,

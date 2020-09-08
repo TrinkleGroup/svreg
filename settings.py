@@ -118,6 +118,10 @@ _valid_options = {
         'forcesWeight', float, (0,), 1,
         'The weight of forces errors.'
     ),
+    'ridgePenalty': Option(
+        'ridgePenalty', float, (0,), 1,
+        'The penalty magnitude for ridge regression.'
+    )
 }
 
 

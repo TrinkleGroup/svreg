@@ -401,7 +401,8 @@ def fixedExample(settings, worldComm, isMaster):
 
             # Add ridge regression penalty
             penalties = np.array([
-                np.linalg.norm(pop, axis=1) for pop in rawPopulations
+                np.linalg.norm(pop, axis=1)*settings['ridgePenalty']
+                for pop in rawPopulations
             ])
 
             # Print the cost of the best paramaterization of the best tree

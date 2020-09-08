@@ -6,7 +6,7 @@
 # Misc. settings
 ################################################################################
 
-seed        42
+seed        1123
 runType     DEBUG
 
 ################################################################################
@@ -16,21 +16,31 @@ runType     DEBUG
 refStruct           Ground_state_crystal
 # databasePath        ./examples/Mo.hdf5
 databasePath        ../svreg_data/mlearn/Mo/Mo.hdf5
-outputPath          ./results
+# outputPath          ./results
+outputPath          ./results/polish_rho_rho_sof
 overwrite           False
 
 ################################################################################
 #  Regressor settings
 ################################################################################
 
-optimizer           CMA
-numberOfTrees       30
-tournamentSize      15
-optimizerPopSize    100
+optimizer           Sofomore
+
+numberOfTrees       10
+tournamentSize      3
+
+optimizerPopSize    1000
+
 crossoverProb       0.2
 pointMutateProb     0.2
 maxTreeDepth        3
+
 numRegressorSteps   100
-numOptimizerSteps   10000
+numOptimizerSteps   1000
+
+energyWeight        10
+forcesWeight        1
+
+ridgePenalty        1e-3
 
 ################################################################################
