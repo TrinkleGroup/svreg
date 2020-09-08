@@ -1,8 +1,15 @@
-import cma
+import cma, comocma
 import time
 from cma.evolution_strategy import CMAEvolutionStrategy
 import numpy as np
 from deap import base, creator, tools
+
+
+"""
+All optimizer obects will be instantiated by calling
+optimizer(tree.populate(N=1)[0], **optimizerArgs) for each tree in the
+regressor. They must also implement an ask()/tell() interface.
+"""
 
 
 class Timer:
@@ -145,3 +152,139 @@ def buildToolbox(numParams):
 
     return toolbox, creator
 
+
+class SofomoreWrapper(comocma.Sofomore):
+
+    def __init__(self, parameters, settings):
+
+        # `parameters` is unused; just a dummy to satisfy Optimizer API
+        # TODO: need a good way to 
+        allParameters = np.random.normal(
+            loc=parameters,
+            size=(settings['SofomorePopSize'], parameters.shape[0])
+        )
+
+        self.groupIndices = self.buildErrorIndices(settings['structNames'])
+
+        # Prepare Sofomore MOES optimizer
+        reference_point = [1]*2*len(self.groupIndices)
+        ideal_hypervolume = np.prod(settings['paretoDimensionality'])
+
+        solvers = [
+            comocma.como.CmaKernel(
+                sol,
+                1.0,
+                {
+                    'popsize': settings['CMApopSize'],
+                    'verb_disp': 0,
+                }
+            )
+            for sol in allParameters
+        ]
+
+        comocma.Sofomore.__init__(
+            self,
+            solvers,
+            reference_point=reference_point,
+            opts=settings['opts'],
+            threads_per_node=settings['threads_per_node']
+        )
+
+    
+    def buildErrorIndices(self, structNames):
+        """
+        It is expected that error vectors will be of length numStructs. In
+        order to convert that into the proper dimensionality, groups of indices
+        must be defined based on the names of the structures.
+        """
+
+        groupConditions = [
+                lambda n: 1 if 'strain' in n else 0,
+                lambda n: 1 if 'surface' in n else 0,
+                # lambda n: 1 if 'Vacancy' in n else 0,
+                # lambda n: 1 if ('6000_K' in n) and ('Vacancy' not in n) else 0,
+        ]
+
+        groupIndices = []
+
+        for cond in groupConditions:
+            indices = np.array([
+                # 1 if group_name in n else 0 for n in all_struct_names
+                cond(n) for n in structNames
+            ])
+
+            indices = np.where(indices)[0].tolist()
+
+            groupIndices.append(indices)
+
+
+        everythingElse = np.arange(len(structNames)).tolist()
+
+        delIndices = []
+        for group in groupIndices:
+            delIndices += group
+
+        delIndices = sorted(delIndices)
+
+        for ind in delIndices[::-1]:
+            del everythingElse[ind]
+
+        groupIndices.append(everythingElse)
+
+        return groupIndices
+
+
+
+    
+    def tell(self, population, errors, penalties=None):
+        """
+        Convert full database errors into correct dimensionality, then update
+        kernels.
+
+        Args:
+            population (np.arr):
+                The list of parameter sets corresponding to each error vector.
+
+            errors (np.arr):
+                The full (P, 2*M) array of errors for each P parameter set and M
+                structures.
+
+            penalties (np.arr):
+                Optional array of P penalties.
+        """
+
+        energyCosts  = np.atleast_2d(errors[:, ::2])
+        forcesCosts  = np.atleast_2d(errors[:, 1::2])
+
+        energyCostGroups = []
+        forcesCostGroups = []
+
+        for group in self.groupIndices:
+            groupEngCosts = energyCosts[:, group]
+            groupFcsCosts = forcesCosts[:, group]
+
+            energyCostGroups.append(np.average(groupEngCosts, axis=1))
+            forcesCostGroups.append(np.average(groupFcsCosts, axis=1))
+
+        energyCostGroups = [
+            np.atleast_2d(grpCost) for grpCost in energyCostGroups
+        ]
+
+        forcesCostGroups = [
+            np.atleast_2d(grpCost) for grpCost in forcesCostGroups
+        ]
+
+        energyCostGroups = np.vstack(energyCostGroups)
+        forcesCostGroups = np.vstack(forcesCostGroups)
+
+        newCosts = np.vstack([
+           energyCostGroups, forcesCostGroups
+        ]).T
+
+        comocma.Sofomore.tell(
+            self, population, newCosts, penalties=penalties[0]
+        )
+
+    
+    def ask(self, N):
+        return comocma.Sofomore.ask(self, 'all')

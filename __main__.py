@@ -8,7 +8,7 @@ TODO: change this into a GA class, then make a new __main__.py
 
 import os
 import sys
-import cma
+import cma, comocma
 import time
 import h5py
 import shutil
@@ -26,7 +26,7 @@ from evaluator import SVEvaluator
 from nodes import SVNode, FunctionNode
 from tree import SVTree
 from archive import Archive, Entry
-from optimizers import GAWrapper
+from optimizers import GAWrapper, SofomoreWrapper
 
 
 ################################################################################
@@ -84,6 +84,8 @@ def main(settings, worldComm, isMaster):
 
         svNodePool = buildSVNodePool(database[settings['refStruct']])
         trueValues = database.loadTrueValues()
+
+        numStructs = len(trueValues)
     
     # Prepare regressor
     if settings['optimizer'] == 'CMA':
@@ -101,8 +103,17 @@ def main(settings, worldComm, isMaster):
                 'pointMutateProb': settings['pointMutateProb']
             }
         ]
+    elif settings['optimizer'] == 'Sofomore':
+        optimizer = SofomoreWrapper
+        optimizerArgs = {
+            'numStructs': numStructs,
+            'paretoDimensionality': 2,
+            'CMApopSize': settings['optimizerPopSize'],
+            'SofomorePopSize': settings['numberOfTrees'],  # Placeholder
+            'threads_per_node': settings['PROCS_PER_PHYS_NODE'],
+        }
     else:
-        raise NotImplementedError('Only `CMA` and `GA` have been implemented')
+        raise NotImplementedError('Must be one of `GA`, `CMA`, or `Sofomore`.')
 
     if isMaster:
         archive = Archive(os.path.join(settings['outputPath'], 'archive'))
@@ -270,6 +281,8 @@ def fixedExample(settings, worldComm, isMaster):
         svNodePool = buildSVNodePool(database[settings['refStruct']])
         trueValues = database.loadTrueValues()
     
+        numStructs = len(trueValues)
+
     # Prepare regressor
     if settings['optimizer'] == 'CMA':
         optimizer = cma.CMAEvolutionStrategy
@@ -286,33 +299,47 @@ def fixedExample(settings, worldComm, isMaster):
                 'pointMutateProb': settings['pointMutateProb']
             }
         ]
+    elif settings['optimizer'] == 'Sofomore':
+        optimizer = SofomoreWrapper
+        optimizerArgs = {
+            'numStructs': numStructs,
+            'structNames': structNames,
+            'paretoDimensionality': 2,
+            'CMApopSize': settings['optimizerPopSize'],
+            'SofomorePopSize': settings['numberOfTrees'],  # Placeholder
+            'threads_per_node': settings['PROCS_PER_PHYS_NODE'],
+            'opts': {'verb_disp': 1}
+        }
     else:
-        raise NotImplementedError('Only `CMA` and `GA` have been implemented')
+        raise NotImplementedError('Must be one of `GA`, `CMA`, or `Sofomore`.')
 
     if isMaster:
         tree = SVTree()
 
-        rhoNode = deepcopy(svNodePool[0])
-        ffgNode = deepcopy(svNodePool[1])
+        ffgNode = svNodePool[0]
+        rhoNode = svNodePool[1]
 
         tree.nodes = [
-            FunctionNode('sqrt'),
-            FunctionNode('inv'),
             FunctionNode('mul'),
-            FunctionNode('inv'), ffgNode,
-            FunctionNode('sqrt'), rhoNode
+            FunctionNode('sqrt'),
+            FunctionNode('sqrt'), deepcopy(rhoNode), deepcopy(rhoNode)
+            # FunctionNode('inv'), deepcopy(ffgNode),
+            # FunctionNode('log'), deepcopy(rhoNode),
+            # FunctionNode('add'), deepcopy(rhoNode),
+            # FunctionNode('mul'), deepcopy(rhoNode), deepcopy(ffgNode)
         ]
 
-        tree.svNodes = [rhoNode, ffgNode]
+        tree.svNodes = [n for n in tree.nodes if isinstance(n, SVNode)]
 
         # archive = pickle.load(
         #     open(
-        #         os.path.join(settings['outputPath'], 'archive', 'archive.pkl'),
+        #         os.path.join('results', 'archive', 'archive.pkl'),
         #         'rb'
         #     )
         # )
 
-        # entry = archive['sqrt(inv(mul(inv(ffg), sqrt(rho))))']
+        # entry = archive['mul(add(inv(ffg), log(rho)), add(rho, mul(rho, ffg)))']
+        # tree = entry.tree
 
         regressor = SVRegressor(
             settings, svNodePool, optimizer, optimizerArgs
@@ -321,11 +348,14 @@ def fixedExample(settings, worldComm, isMaster):
         regressor.trees = [tree]
         regressor.initializeOptimizers()
 
-        # regressor.optimizers[0].opts.set('verb_disp', 1)
-
         print('Tree:\n\t', regressor.trees[0], flush=True)
 
-    N = settings['optimizerPopSize']
+    if settings['optimizer'] == 'Sofomore':
+        # Sofomore.ask() returns the incumbents of each kernels,
+        # plus the populations of each kernel
+        N = settings['numberOfTrees']*(1 + settings['optimizerPopSize'])
+    else:
+        N = settings['optimizerPopSize']
 
     for optStep in range(settings['numOptimizerSteps']):
         if isMaster:
@@ -382,7 +412,14 @@ def fixedExample(settings, worldComm, isMaster):
                 fullCost = costs[treeIdx] + penalties[treeIdx]
 
                 opt = regressor.optimizers[treeIdx]
-                opt.tell(rawPopulations[treeIdx], fullCost)
+
+                if settings['optimizer'] == 'Sofomore':
+                    opt.tell(
+                        rawPopulations[treeIdx], errors[treeIdx], penalties
+                    )
+                else:
+                    opt.tell(rawPopulations[treeIdx], fullCost)
+
                 opt.disp()
 
             if optStep % 10 == 0:
@@ -414,7 +451,7 @@ def buildSVNodePool(group):
     svNodePool = []
 
     # `group` is a pointer to an entry for a structure in the database
-    for svName in group:
+    for svName in sorted(group):
         svGroup = group[svName]
 
         restrictions = None
@@ -494,9 +531,13 @@ def computeErrors(refStruct, energies, forces, trueValues):
             treeErrors[:,   2*i] = abs(engErrors)
             treeErrors[:, 2*i+1] = np.average(np.abs(fcsErrors), axis=(1, 2))
 
+        treeErrors[:, ::2]  *= settings['energyWeight']
+        treeErrors[:, 1::2] *= settings['forcesWeight']
+
         # Could not sum here to preserve per-struct energy/force errors
         # costs.append(treeCosts.sum(axis=1))
         errors.append(treeErrors)
+
 
     return errors
 
@@ -518,8 +559,10 @@ if __name__ == '__main__':
         if os.path.isdir(settings['outputPath']):
             if not settings['overwrite']:
                 raise RuntimeError(
-                    'Save folder already exists,'\
-                    ' but `overwrite` is set to False'
+                    'Save folder "{}" already exists,'\
+                    ' but `overwrite` is set to False'.format(
+                        settings['outputPath']
+                        )
                 )
             else:
                 shutil.rmtree(settings['outputPath'])

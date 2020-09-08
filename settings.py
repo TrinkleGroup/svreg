@@ -109,7 +109,15 @@ _valid_options = {
             'Should be kept relatively small. The final tree should be '\
                 're-parameterized anyways, so "sloppy" trees are okay '\
                     'during regression.'
-    )
+    ),
+    'energyWeight': Option(
+        'energyWeight', float, (0,), 1,
+        'The weight of energy errors.'
+    ),
+    'forcesWeight': Option(
+        'forcesWeight', float, (0,), 1,
+        'The weight of forces errors.'
+    ),
 }
 
 

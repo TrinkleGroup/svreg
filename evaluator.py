@@ -111,12 +111,11 @@ class Manager:
             localValues[structName] = {}
 
             for svName in database[structName]:
-                if localPop[svName] is None:
-                    # Possible if a tree doesn't use a given SV
-                    continue
-
                 intermediates = []  # for summing over bond types
                 for bondType in database[structName][svName]:
+                    if localPop[svName][bondType] is None:
+                        # Possible if a tree doesn't use a given SV
+                        continue
 
                     sv = database[structName][svName][bondType][evalType]
                     val = (sv @ localPop[svName][bondType].T).T
@@ -140,7 +139,10 @@ class Manager:
 
                     intermediates.append(val)
 
-                localValues[structName][svName] = sum(intermediates)
+                if len(intermediates) > 0:
+                    localValues[structName][svName] = sum(intermediates)
+                else:
+                    localValues[structName][svName] = None
 
         workerValues = self.comm.gather(localValues, root=0)
 
@@ -150,6 +152,9 @@ class Manager:
             managerValues = {structName: {} for structName in database}
             for structName in database:
                 for svName in database[structName]:
+                    if workerValues[0][structName][svName] is None:
+                        continue
+
                     # Stack over worker results, then split by tree pop sizes
                     managerValues[structName][svName] = np.split(
                         np.concatenate([
