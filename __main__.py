@@ -288,7 +288,7 @@ def fixedExample(settings, worldComm, isMaster):
     if settings['optimizer'] == 'CMA':
         optimizer = cma.CMAEvolutionStrategy
         optimizerArgs = [
-            1.0,  # defaulted sigma0 value
+            100.0,  # defaulted sigma0 value
             {'verb_disp': 1, 'popsize':settings['optimizerPopSize']}
         ]
     elif settings['optimizer'] == 'GA':

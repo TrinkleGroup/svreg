@@ -24,12 +24,12 @@ overwrite           True
 #  Regressor settings
 ################################################################################
 
-optimizer           Sofomore
+optimizer           CMA
 
 numberOfTrees       10
 tournamentSize      3
 
-optimizerPopSize    100
+optimizerPopSize    200
 
 crossoverProb       0.2
 pointMutateProb     0.2
