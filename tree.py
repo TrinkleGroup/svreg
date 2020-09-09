@@ -366,6 +366,35 @@ class SVTree(list):
 
         return output
 
+    
+    # def latex(self):
+
+    #     # TODO: finish this
+
+    #     terminals = [0]
+    #     output = ''
+
+    #     for i, node in enumerate(self.nodes):
+    #         if isinstance(node, FunctionNode):
+    #             tmp = node.latex
+    #             terminals.append(node.function.arity)
+    #             # output += node.description + '('
+    #         else:
+    #             output += node.description
+
+    #             terminals[-1] -= 1
+    #             while terminals[-1] == 0:
+    #                 terminals.pop()
+    #                 terminals[-1] -= 1
+    #                 output += ')'
+
+    #             if i != len(self.nodes) - 1:
+    #                 output += ', '
+
+    #     return output
+
+
+
 
     def getSubtree(self):
         """

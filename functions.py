@@ -90,6 +90,7 @@ class _Function(_gp_Function):
     def __init__(self, function, name, arity):
         _gp_Function.__init__(self, function, name, arity)
         self.derivative = _derivative_map[name]
+        # self.latex = _latex[name]
 
     def __call__(self, *args):
         args0 = [a[0] for a in args]
@@ -132,4 +133,16 @@ _arities = {
         'add',
         'mul'
     ],
+}
+
+_latex = {
+    'add': '{}+{}',
+    'mul': '{}*{}',
+    'sqrt': '\\sqrt{}',
+    'log': '\\log{}',
+    'inv': '\\frac{1}{}',
+    'sin': '\\sin{}',
+    'cos': '\\cos{}',
+    'tan': '\\tan{}',
+    'exp': '\\exp{}',
 }

@@ -26,21 +26,21 @@ overwrite           True
 
 optimizer           Sofomore
 
-numberOfTrees       10
+numberOfTrees       50
 tournamentSize      3
 
-optimizerPopSize    100
+optimizerPopSize    50
 
 crossoverProb       0.2
 pointMutateProb     0.2
 maxTreeDepth        3
 
-numRegressorSteps   100
+numRegressorSteps   25
 numOptimizerSteps   10000
 
 energyWeight        10
 forcesWeight        1
 
-ridgePenalty        1e-3
+ridgePenalty        1e-4
 
 ################################################################################
