@@ -107,9 +107,9 @@ class SVRegressor:
 
                 # Loop over the list of values
                 # for tree, treeVals in zip(self.trees, listOfValues):
-                for tree in self.trees:
+                for tree in self.trees[::-1]:
                     # Each node has the same population size, so just split
-                    for svNode in tree.svNodes:
+                    for svNode in tree.svNodes[::-1]:
                         # Only update the SVNode objects of the current type
                         if svNode.description == svName:
                             svNode.values = unstackedValues.pop()

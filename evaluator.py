@@ -114,7 +114,9 @@ class Manager:
                 intermediates = []  # for summing over bond types
                 for bondType in database[structName][svName]:
                     if localPop[svName][bondType] is None:
-                        # Possible if a tree doesn't use a given SV
+                        # Possible if a tree doesn't use a given SV;
+                        # localPop[svName] will have [bondType] entries, so it
+                        # won't be None
                         continue
 
                     sv = database[structName][svName][bondType][evalType]

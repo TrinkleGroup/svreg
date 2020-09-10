@@ -135,6 +135,10 @@ def main(settings, worldComm, isMaster):
         if isMaster:
             print(regStep, flush=True)
 
+            for treeNum, t in enumerate(regressor.trees):
+                print(treeNum, t)
+
+
         for optStep in range(settings['numOptimizerSteps']):
             # TODO: is it an issue that this can give diff fits for same tree?
             if isMaster:
@@ -186,9 +190,7 @@ def main(settings, worldComm, isMaster):
                 costs = [el.sum(axis=1) for el in errors]
 
                 # Print the cost of the best paramaterization of the best tree
-                print(
-                    '\t', optStep, min([np.min(c) for c in costs]), flush=True
-                )
+                printTreeCosts(optStep, costs)
 
                 # Update optimizers
                 for treeIdx in range(len(regressor.optimizers)):
@@ -542,6 +544,20 @@ def computeErrors(refStruct, energies, forces, trueValues):
 
 
     return errors
+
+
+printedHeader = False
+def printTreeCosts(optStep, costs):
+    first10 = costs[:10]
+    
+    global printedHeader
+    if not printedHeader:
+        print('\t\t', ''.join(['{:<10}'.format(i) for i in range(10)]))
+        printedHeader = True
+
+    print('\t\t', ''.join(['{:<10.2f}'.format(np.min(c)) for c in first10]))
+
+    print(end='', flush=True)
 
 
 if __name__ == '__main__':
