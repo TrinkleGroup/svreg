@@ -62,6 +62,14 @@ def _derivative_exp(x):
     return np.exp(x[1])
 
 
+def sigmoid(x):
+    return 1/(1+np.exp(-x))
+
+
+def _derivative_sigmoid(x):
+    return sigmoid(x[1])*(1-sigmoid(x[1]))
+
+
 _derivative_map = {
     'add': _derivative_add,
     'mul': _derivative_mul,
@@ -72,6 +80,7 @@ _derivative_map = {
     'sin': _derivative_sin,
     'tan': _derivative_tan,
     'exp': _derivative_exp,
+    'sig': _derivative_sigmoid,
 }
 
 
@@ -105,28 +114,34 @@ inv1  = _Function(function=_protected_inverse, name='inv', arity=1)
 sin1  = _Function(function=np.sin, name='sin', arity=1)
 cos1  = _Function(function=np.cos, name='cos', arity=1)
 tan1  = _Function(function=np.tan, name='tan', arity=1)
+# arctan1  = _Function(function=np.arctan, name='arctan', arity=1)
 exp   = _Function(function=np.exp, name='exp', arity=1)
+sig   = _Function(function=sigmoid, name='sig', arity=1)
 
 _function_map = {'add': add2,
                  'mul': mul2,
                  'sqrt': sqrt1,
-                 'log': log1,
-                 'inv': inv1,
+                 # 'log': log1,
+                 # 'inv': inv1,
                 #  'sin': sin1,
-                #  'cos': cos1,
-                #  'tan': tan1,
-                #  'exp': exp,
+                'cos': cos1,
+                # 'tan': tan1,
+                # 'arctan': arctan1,
+                # 'exp': exp,
+                'sig': sig,
                  }
 
 _arities = {
     1: [
         'sqrt',
-        'log',
-        'inv',
+        # 'log',
+        # 'inv',
         # 'sin',
-        # 'cos',
+        'cos',
         # 'tan',
+        # 'arctan',
         # 'exp',
+        'sig',
     ],
     2: [
         'add',
