@@ -258,7 +258,6 @@ class SVTree(list):
 
         fullPop = []
 
-        start = 0
         for svNode, nodePopSplit in zip(self.svNodes, splitPop):
             compPopSplit = np.array_split(
                 nodePopSplit,
@@ -269,7 +268,7 @@ class SVTree(list):
                 fullPop.append(svNode.fillFixedKnots(pop, compName))
 
         return np.hstack(fullPop)
-    
+
 
     def parseArr2Dict(self, rawPopulation):
         """

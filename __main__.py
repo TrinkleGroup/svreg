@@ -137,13 +137,19 @@ def main(settings, worldComm, isMaster):
 
             for treeNum, t in enumerate(regressor.trees):
                 print(treeNum, t)
-
+    
+            print('\t\t', ''.join(['{:<10}'.format(i) for i in range(10)]))
 
         for optStep in range(settings['numOptimizerSteps']):
-            # TODO: is it an issue that this can give diff fits for same tree?
             if isMaster:
+                for ii, opt in enumerate(regressor.optimizers):
+                    if opt.stop():
+                        print('Opt {} is done.'.format(ii))
+
                 rawPopulations = [
-                    np.array(opt.ask(N)) for opt in regressor.optimizers
+                    np.array(opt.ask(N))# if not opt.stop()
+                    # else np.tile(opt.best.x, reps=(N,1))
+                    for opt in regressor.optimizers
                 ]
 
                 # Need to parse populations so that they can be grouped easily
@@ -153,13 +159,6 @@ def main(settings, worldComm, isMaster):
                     treePopulations.append(tree.parseArr2Dict(pop))
 
                 # Group all dictionaries into one
-                # {svName: {bondType: [tree populations for tree in trees]}}
-                # populationDict = {
-                #     svName: {
-                #         [] for svName in [n.description for n in svNodePool]
-                #     }
-                # }
-
                 populationDict = {}
                 for svNode in svNodePool:
                     populationDict[svNode.description] = {}
@@ -290,7 +289,7 @@ def fixedExample(settings, worldComm, isMaster):
     if settings['optimizer'] == 'CMA':
         optimizer = cma.CMAEvolutionStrategy
         optimizerArgs = [
-            100.0,  # defaulted sigma0 value
+            1.0,  # defaulted sigma0 value
             {'verb_disp': 1, 'popsize':settings['optimizerPopSize']}
         ]
     elif settings['optimizer'] == 'GA':
@@ -323,13 +322,9 @@ def fixedExample(settings, worldComm, isMaster):
         rhoNode = svNodePool[1]
 
         tree.nodes = [
-            FunctionNode('mul'),
-            FunctionNode('sqrt'),
-            FunctionNode('sqrt'), deepcopy(rhoNode), deepcopy(rhoNode)
-            # FunctionNode('inv'), deepcopy(ffgNode),
-            # FunctionNode('log'), deepcopy(rhoNode),
-            # FunctionNode('add'), deepcopy(rhoNode),
-            # FunctionNode('mul'), deepcopy(rhoNode), deepcopy(ffgNode)
+            FunctionNode('add'),
+            deepcopy(ffgNode), deepcopy(ffgNode)
+            # FunctionNode('sqrt'), deepcopy(rhoNode), deepcopy(rhoNode)
         ]
 
         tree.svNodes = [n for n in tree.nodes if isinstance(n, SVNode)]
@@ -546,18 +541,14 @@ def computeErrors(refStruct, energies, forces, trueValues):
     return errors
 
 
-printedHeader = False
 def printTreeCosts(optStep, costs):
     first10 = costs[:10]
-    
-    global printedHeader
-    if not printedHeader:
-        print('\t\t', ''.join(['{:<10}'.format(i) for i in range(10)]))
-        printedHeader = True
 
-    print('\t\t', ''.join(['{:<10.2f}'.format(np.min(c)) for c in first10]))
-
-    print(end='', flush=True)
+    print(
+        optStep,
+        '\t\t', ''.join(['{:<10.2f}'.format(np.min(c)) for c in first10]),
+        flush=True
+    )
 
 
 if __name__ == '__main__':
