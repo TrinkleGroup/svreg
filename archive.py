@@ -3,6 +3,7 @@ import pickle
 import shutil
 import random
 import numpy as np
+from scipy.special import erf
 
 from tree import SVTree
 
@@ -126,7 +127,7 @@ class Archive(dict):
 
         keys = list(self.keys())
         costs = np.array([self[k].cost for k in keys])
-        costs = 1/np.log(costs)
+        costs = 1-erf(np.log(costs))
         costs[np.where(np.isnan(costs))] = 0
         costs /= np.sum(costs)
 
