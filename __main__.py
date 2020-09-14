@@ -143,10 +143,6 @@ def main(settings, worldComm, isMaster):
 
         for optStep in range(settings['numOptimizerSteps']):
             if isMaster:
-                for ii, opt in enumerate(regressor.optimizers):
-                    if opt.stop():
-                        print('Opt {} is done.'.format(ii))
-
                 rawPopulations = [
                     np.array(opt.ask(N))# if not opt.stop()
                     # else np.tile(opt.best.x, reps=(N,1))
@@ -189,13 +185,21 @@ def main(settings, worldComm, isMaster):
 
                 costs = costFxn(errors)
 
+                # Add ridge regression penalty
+                penalties = np.array([
+                    np.linalg.norm(pop, axis=1)*settings['ridgePenalty']
+                    for pop in rawPopulations
+                ])
+
                 # Print the cost of the best paramaterization of the best tree
                 printTreeCosts(optStep, costs)
 
                 # Update optimizers
                 for treeIdx in range(len(regressor.optimizers)):
+                    fullCost = costs[treeIdx] + penalties[treeIdx]
+
                     opt = regressor.optimizers[treeIdx]
-                    opt.tell(rawPopulations[treeIdx], costs[treeIdx])
+                    opt.tell(rawPopulations[treeIdx], fullCust)
 
         if isMaster:
             archive.update(
