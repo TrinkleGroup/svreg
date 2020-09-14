@@ -490,8 +490,6 @@ class SVTree(list):
 
         randomDonor = self.random(svNodePool, maxDepth)
 
-        self.nodes = self.crossover(randomDonor)
-
 
     def hoistMutate(self):
         """Implemented in gplearn. Supposedly helps to avoid bloat."""

@@ -129,6 +129,8 @@ def main(settings, worldComm, isMaster):
 
     N = settings['optimizerPopSize']
 
+    costFxn = buildCostFunction(settings)
+
     # Begin optimization
     for regStep in range(settings['numRegressorSteps']):
         if isMaster:
@@ -185,7 +187,7 @@ def main(settings, worldComm, isMaster):
                     settings['refStruct'], energies, forces, trueValues
                 )
 
-                costs = [el.sum(axis=1) for el in errors]
+                costs = costFxn(errors)
 
                 # Print the cost of the best paramaterization of the best tree
                 printTreeCosts(optStep, costs)
@@ -338,8 +340,6 @@ def fixedExample(settings, worldComm, isMaster):
         # entry = archive['mul(add(inv(ffg), log(rho)), add(rho, mul(rho, ffg)))']
         # tree = entry.tree
 
-        output = tree.latex()
-
         regressor = SVRegressor(
             settings, svNodePool, optimizer, optimizerArgs
         )
@@ -355,6 +355,8 @@ def fixedExample(settings, worldComm, isMaster):
         N = settings['numberOfTrees']*(1 + settings['optimizerPopSize'])
     else:
         N = settings['optimizerPopSize']
+
+    costFxn = buildCostFunction(settings)
 
     for optStep in range(settings['numOptimizerSteps']):
         if isMaster:
@@ -397,6 +399,7 @@ def fixedExample(settings, worldComm, isMaster):
 
 
             costs = np.array([el.sum(axis=1) for el in errors])
+            costs = costFxn(errors)
 
             # Add ridge regression penalty
             penalties = np.array([
@@ -550,6 +553,32 @@ def printTreeCosts(optStep, costs):
         '\t\t', ''.join(['{:<10.2f}'.format(np.min(c)) for c in first10]),
         flush=True
     )
+
+
+def buildCostFunction(settings):
+    """
+    A function factory for building different types of cost functions. Assumes
+    that the cost function will take in a list of (P, S) arrays, where P is the
+    population size and S is the number of structures. The cost function will
+    return a single value for each entry in the list.
+
+    It is assumed that energy errors are absolute values, and tree errors are
+    MAE values (to reduce each structure to a single value regarless of the
+    number of atoms).
+    """
+
+    def mae(errors):
+        return np.array([np.average(err, axis=1) for err in errors])
+
+    def rmse(errors):
+        return np.array([np.sqrt(np.average(err**2, axis=1)) for err in errors])
+
+    if settings['costFxn'] == 'MAE':
+        return mae
+    elif settings['costFxn'] == 'RMSE':
+        return rmse
+    else:
+        raise RuntimeError("costFxn must be 'MAE' or 'RMSE'.")
 
 
 if __name__ == '__main__':

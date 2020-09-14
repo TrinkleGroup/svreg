@@ -58,6 +58,10 @@ _valid_options = {
         'overwrite', bool, (False, True), False,
         'True if the files in `outputPath` should be overwritten.'
     ),
+    'costFxn': Option(
+        'costFxn', str, None, 'MAE',
+        'The type of cost function to use for single-valued optimization.'
+    ),
     'optimizer': Option(
         'optimizer', str, None, 'CMA',
         'The name of the optimizer object to use for optimizing strings.'

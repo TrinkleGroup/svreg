@@ -24,6 +24,8 @@ overwrite           True
 #  Regressor settings
 ################################################################################
 
+costFxn             MAE
+
 optimizer           CMA
 
 numberOfTrees       30
