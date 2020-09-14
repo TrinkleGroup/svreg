@@ -199,7 +199,7 @@ def main(settings, worldComm, isMaster):
                     fullCost = costs[treeIdx] + penalties[treeIdx]
 
                     opt = regressor.optimizers[treeIdx]
-                    opt.tell(rawPopulations[treeIdx], fullCust)
+                    opt.tell(rawPopulations[treeIdx], fullCost)
 
         if isMaster:
             archive.update(

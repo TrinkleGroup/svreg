@@ -17,14 +17,14 @@ refStruct           Ground_state_crystal
 # databasePath        ./examples/Mo.hdf5
 databasePath        ../svreg_data/mlearn/Mo/Mo.hdf5
 # outputPath          ./results
-outputPath          ./results/mo_bugfix2_add_ffg_ffg_100
+outputPath          ./results/smeam_dup
 overwrite           True
 
 ################################################################################
 #  Regressor settings
 ################################################################################
 
-costFxn             MAE
+costFxn             RMSE
 
 optimizer           CMA
 
