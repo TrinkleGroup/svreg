@@ -5,7 +5,7 @@ Module for Node objects, which are the elements in an equation tree.
 import random
 import numpy as np
 
-from functions import _function_map, _arities
+from functions import _function_map, _arities, _latex
 from exceptions import StaleValueException
 
 # collection of types of nodes that can be added; used for growing trees
@@ -39,6 +39,7 @@ class FunctionNode(Node):
     def __init__(self, key):
         Node.__init__(self, description=key)
         self.function = _function_map[key]
+        self.latex = _latex[key]
 
 
     @classmethod

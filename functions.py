@@ -148,3 +148,17 @@ _arities = {
         'mul'
     ],
 }
+
+_latex = {
+    'add': '{} + {}',
+    'mul': '({})*({})',
+    'sqrt': 'sqrt({})',
+    'log': 'log({})',
+    'inv': '1/{}',
+    'sin': 'sin({})',
+    'cos': 'cos({})',
+    'tan': 'tan({})',
+    'arctan': 'arctan({})',
+    'exp': 'exp({})',
+    'sig': 'sig({})',
+}

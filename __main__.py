@@ -130,7 +130,6 @@ def main(settings, worldComm, isMaster):
     N = settings['optimizerPopSize']
 
     # Begin optimization
-    start = time.time()
     for regStep in range(settings['numRegressorSteps']):
         if isMaster:
             print(regStep, flush=True)
@@ -338,6 +337,8 @@ def fixedExample(settings, worldComm, isMaster):
 
         # entry = archive['mul(add(inv(ffg), log(rho)), add(rho, mul(rho, ffg)))']
         # tree = entry.tree
+
+        output = tree.latex()
 
         regressor = SVRegressor(
             settings, svNodePool, optimizer, optimizerArgs
