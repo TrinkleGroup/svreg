@@ -270,7 +270,7 @@ class SVTree(list):
         return np.hstack(fullPop)
 
 
-    def parseArr2Dict(self, rawPopulation):
+    def parseArr2Dict(self, rawPopulation, fillFixedKnots=True):
         """
         Convert a 2D array of parameters into a dictionary, where the key is the
         structure vector type, and the value is a dictionary of array of
@@ -283,12 +283,24 @@ class SVTree(list):
             rawPopulation (np.arr):
                 The population to be parsed
 
+            fillFixedKnots (bool):
+                If True, inserts fixed knots into rawPopulation.
+
         Returns:
             parameters (dict):
                 {svName: {bondType: np.vstack-ed array of parameters}}
         """
 
-        splitIndices = np.cumsum([n.totalNumParams for n in self.svNodes])[:-1]
+        if fillFixedKnots:
+            splitIndices = np.cumsum([
+                n.totalNumParams for n in self.svNodes
+            ])[:-1]
+        else:
+            splitIndices = np.cumsum([
+                n.totalNumParams+sum([len(r) for r in n.restrictions.values()])
+                for n in self.svNodes
+            ])[:-1]
+
         splitPop = np.split(rawPopulation, splitIndices, axis=1)
 
         # Convert raw parameters into SV node parameters (using outer products)
@@ -301,18 +313,32 @@ class SVTree(list):
                 }
 
             # Split the parameters for each component type
-            splitParams = np.array_split(
-                rawParams, np.cumsum(
-                    [svNode.numParams[c] for c in svNode.components]
-                )[:-1],
-                axis=1
-            )
+            if fillFixedKnots:
+                splitParams = np.array_split(
+                    rawParams, np.cumsum(
+                        [svNode.numParams[c] for c in svNode.components]
+                    )[:-1],
+                    axis=1
+                )
+            else:
+                splitParams = np.array_split(
+                    rawParams, np.cumsum([
+                        len(svNode.restrictions[c]) + sum([svNode.numParams[c]])
+                        for c in svNode.components
+                    ])[:-1],
+                    axis=1
+                )
 
             # Organize parameters by component type for easy indexing
             # Fill any fixed values
             componentParams = {}
             for compName, pop in zip(svNode.components, splitParams):
-                componentParams[compName] = svNode.fillFixedKnots(pop, compName)
+                if fillFixedKnots:
+                    componentParams[compName] = svNode.fillFixedKnots(
+                            pop, compName
+                        )
+                else:
+                    componentParams[compName] = pop
 
             for bondType, bondComponents in svNode.bonds.items():
                 # Take outer products to form SV params out of bond components
@@ -339,6 +365,42 @@ class SVTree(list):
                 )
 
         return parameters
+
+
+    def latex(self):
+        """Return LaTeX string"""
+
+        subTrees = []
+        output = []
+
+        for node in self.nodes:
+            if isinstance(node, FunctionNode):
+                # Start a new sub-tree
+                subTrees.append([node])
+                output.append([node.latex])
+            else:
+                # Grow the current deepest sub-tree
+                subTrees[-1].append(node)
+                output[-1].append(node.description)
+
+            # If the sub-tree is complete, evaluate its function
+            while len(output[-1]) == subTrees[-1][0].function.arity + 1:
+                # args = [
+                #     n.latex if isinstance(n, FunctionNode)
+                #     else n.description  # Terminal is intermediate result
+                #     for n in subTrees[-1][1:]
+                # ]
+
+                args = output[-1][1:]
+
+                intermediate = subTrees[-1][0].latex.format(*args)
+
+                if len(subTrees) != 1:  # Still some left to evaluate
+                    subTrees.pop()
+                    output.pop()
+                    output[-1].append(intermediate)
+                else:  # Done evaluating all sub-trees
+                    return intermediate
 
 
     def __str__(self):
