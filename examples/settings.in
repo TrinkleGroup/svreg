@@ -7,7 +7,7 @@
 ################################################################################
 
 seed        1123
-runType     DEBUG
+runType     GA
 
 ################################################################################
 # Database settings
@@ -17,7 +17,7 @@ refStruct           Ground_state_crystal
 # databasePath        ./examples/Mo.hdf5
 databasePath        ../svreg_data/mlearn/Mo/Mo.hdf5
 # outputPath          ./results
-outputPath          ./results/smeam_dup
+outputPath          ./results/debug
 overwrite           True
 
 ################################################################################
@@ -31,14 +31,14 @@ optimizer           CMA
 numberOfTrees       30
 tournamentSize      10
 
-optimizerPopSize    100
+optimizerPopSize    200
 
 crossoverProb       0.2
 pointMutateProb     0.2
 maxTreeDepth        3
 
-numRegressorSteps   100
-numOptimizerSteps   10000
+numRegressorSteps   3
+numOptimizerSteps   5
 
 energyWeight        100
 forcesWeight        1

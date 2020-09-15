@@ -56,7 +56,7 @@ args = parser.parse_args()
 ################################################################################
 
 
-# @profile
+@profile
 def main(settings, worldComm, isMaster):
     # Load database, build evaluator, and prepare list of structNames
     with SVDatabase(settings['databasePath'], 'r') as database:
@@ -185,11 +185,17 @@ def main(settings, worldComm, isMaster):
 
                 costs = costFxn(errors)
 
-                # Add ridge regression penalty
-                penalties = np.array([
-                    np.linalg.norm(pop, axis=1)*settings['ridgePenalty']
-                    for pop in rawPopulations
-                ])
+                # # Add ridge regression penalty
+                # penalties = np.array([
+                #     np.linalg.norm(pop, axis=1)*settings['ridgePenalty']
+                #     for pop in rawPopulations
+                # ])
+
+                # Add roughness penalties
+                penalties= [
+                    tree.roughnessPenalty(pop)
+                    for tree, pop in zip(regressor.trees, rawPopulations)
+                ]
 
                 # Print the cost of the best paramaterization of the best tree
                 printTreeCosts(optStep, costs)
@@ -328,7 +334,11 @@ def fixedExample(settings, worldComm, isMaster):
 
         tree.nodes = [
             FunctionNode('add'),
-            deepcopy(ffgNode), deepcopy(ffgNode)
+            deepcopy(rhoNode),
+            FunctionNode('sqrt'),
+            FunctionNode('add'),
+            deepcopy(rhoNode),
+            deepcopy(ffgNode)
             # FunctionNode('sqrt'), deepcopy(rhoNode), deepcopy(rhoNode)
         ]
 
@@ -406,10 +416,17 @@ def fixedExample(settings, worldComm, isMaster):
             costs = costFxn(errors)
 
             # Add ridge regression penalty
-            penalties = np.array([
-                np.linalg.norm(pop, axis=1)*settings['ridgePenalty']
-                for pop in rawPopulations
-            ])
+            # penalties = np.array([
+            #     np.linalg.norm(pop, axis=1)*settings['ridgePenalty']
+            #     for pop in rawPopulations
+            # ])
+
+            # Add roughness penalties
+            penalties= [
+                tree.roughnessPenalty(pop)
+                for tree, pop in zip(regressor.trees, rawPopulations)
+            ]
+
 
             # Print the cost of the best paramaterization of the best tree
             # print('\t', optStep, min([min(c) for c in costs]), flush=True)
@@ -537,9 +554,6 @@ def computeErrors(refStruct, energies, forces, trueValues):
 
             treeErrors[:,   2*i] = abs(engErrors)
             treeErrors[:, 2*i+1] = np.average(np.abs(fcsErrors), axis=(1, 2))
-
-        treeErrors[:, ::2]  *= settings['energyWeight']
-        treeErrors[:, 1::2] *= settings['forcesWeight']
 
         # Could not sum here to preserve per-struct energy/force errors
         # costs.append(treeCosts.sum(axis=1))
