@@ -193,7 +193,7 @@ def main(settings, worldComm, isMaster):
 
                 # Add roughness penalties
                 penalties= [
-                    tree.roughnessPenalty(pop)
+                    tree.roughnessPenalty(pop)*settings['ridgePenalty']
                     for tree, pop in zip(regressor.trees, rawPopulations)
                 ]
 
@@ -423,7 +423,7 @@ def fixedExample(settings, worldComm, isMaster):
 
             # Add roughness penalties
             penalties= [
-                tree.roughnessPenalty(pop)
+                tree.roughnessPenalty(pop)*settings['ridgePenalty']
                 for tree, pop in zip(regressor.trees, rawPopulations)
             ]
 
