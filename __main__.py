@@ -56,7 +56,7 @@ args = parser.parse_args()
 ################################################################################
 
 
-@profile
+# @profile
 def main(settings, worldComm, isMaster):
     # Load database, build evaluator, and prepare list of structNames
     with SVDatabase(settings['databasePath'], 'r') as database:
