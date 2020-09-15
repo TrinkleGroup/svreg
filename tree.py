@@ -1,6 +1,7 @@
 import random
 import numpy as np
 from copy import deepcopy
+from scipy.interpolate import CubicSpline
 
 from nodes import FunctionNode, SVNode, _node_types
 
@@ -367,8 +368,65 @@ class SVTree(list):
         return parameters
 
 
+    def roughnessPenalty(self, population):
+        """
+        Computes a roughness penalty for the tree by integrating the second
+        derivative of the spline over the input domain for each population.
+
+        Args:
+            population (np.arr):
+                A PxK array of P separater parameter sets. Assumed not to
+                already included any fixed knots.
+        """
+        splits = []
+
+        for svNode in self.svNodes:
+            for comp in svNode.components:
+                splits.append(
+                    svNode.numParams[comp]+len(svNode.restrictions[comp])
+                )
+
+        # Split the population by SVNode (i.e. by splines)
+        splitParams = np.array_split(
+            self.fillFixedKnots(population), np.cumsum(splits)[:-1],
+            axis=1
+        )
+
+        # Since it's assumed that all splines have the same number of knots,
+        # we can prepare for the smoothness calculations here
+        n = splitParams[0].shape[1] - 2
+        x = np.arange(n)
+        dx = 1  # because we're ignoring actual knot spacing
+        D = np.zeros((n-2, n))
+        for i in range(D.shape[0]):
+            D[i,i] = 1
+            D[i,i+1] = -2
+            D[i,i+2] = 1
+        
+        W = np.zeros((n-2, n-2))
+        for i in range(W.shape[0]):
+            W[i,i] = 2/3.
+            if i > 0:
+                W[i-1, i]=1/6.
+            if i < W.shape[0]-1:
+                W[i, i+1] = 1/6.
+
+        A = D.T @ (np.linalg.inv(W) @ D)
+
+        penalties = np.zeros(population.shape[0])
+
+        for splinePop in splitParams:
+            m = splinePop[:, :-2].T
+            penalties += (m.T @ (A @ m)).sum(axis=0)
+
+        return penalties
+
+
     def latex(self):
         """Return LaTeX string"""
+
+        if len(self.nodes) == 1:
+            return self.nodes[0].description
 
         subTrees = []
         output = []
@@ -385,12 +443,6 @@ class SVTree(list):
 
             # If the sub-tree is complete, evaluate its function
             while len(output[-1]) == subTrees[-1][0].function.arity + 1:
-                # args = [
-                #     n.latex if isinstance(n, FunctionNode)
-                #     else n.description  # Terminal is intermediate result
-                #     for n in subTrees[-1][1:]
-                # ]
-
                 args = output[-1][1:]
 
                 intermediate = subTrees[-1][0].latex.format(*args)
