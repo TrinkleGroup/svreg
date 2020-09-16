@@ -418,7 +418,7 @@ class SVTree(list):
             m = splinePop[:, :-2].T
             penalties += np.diagonal(m.T @ (A @ m))
 
-        return penalties
+        return penalties/len(splitParams)  # normalize by number of splines
 
 
     def latex(self):
