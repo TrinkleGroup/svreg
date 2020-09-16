@@ -139,7 +139,7 @@ def main(settings, worldComm, isMaster):
             for treeNum, t in enumerate(regressor.trees):
                 print(treeNum, t)
     
-            print('\t\t', ''.join(['{:<10}'.format(i) for i in range(10)]))
+            print('\t\t\t', ''.join(['{:<10}'.format(i) for i in range(10)]))
 
         for optStep in range(settings['numOptimizerSteps']):
             if isMaster:
@@ -198,7 +198,7 @@ def main(settings, worldComm, isMaster):
                 ]
 
                 # Print the cost of the best paramaterization of the best tree
-                printTreeCosts(optStep, costs)
+                printTreeCosts(optStep, costs, penalties)
 
                 # Update optimizers
                 for treeIdx in range(len(regressor.optimizers)):
@@ -563,12 +563,25 @@ def computeErrors(refStruct, energies, forces, trueValues):
     return errors
 
 
-def printTreeCosts(optStep, costs):
+def printTreeCosts(optStep, costs, penalties):
     first10 = costs[:10]
+    first10Pen = penalties[:10]
+
+    string = '\t\t'
+
+    for c, p in zip(first10, first10Pen):
+        argmin = np.argmin(c)
+        string += '{:.2f} ({:.2f})\t'.format(c[argmin], p[argmin])
+        # string += '{:<10}'.format(
+        #     '{:.2f} ({:.2f})'.format(c[argmin], p[argmin])
+        # )
 
     print(
         optStep,
-        '\t\t', ''.join(['{:<10.2f}'.format(np.min(c)) for c in first10]),
+        string,
+        # '\t\t', ''.join(
+        #     ['{:<10.2f} ({:<10.2f})'.format(np.min(c)) for c in first10]
+        # ),
         flush=True
     )
 

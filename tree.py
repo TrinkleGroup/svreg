@@ -408,8 +408,7 @@ class SVTree(list):
             W[i,i] = 2/3.
             if i > 0:
                 W[i-1, i]=1/6.
-            if i < W.shape[0]-1:
-                W[i, i+1] = 1/6.
+                W[i, i-1] = 1/6.
 
         A = D.T @ (np.linalg.inv(W) @ D)
 
@@ -417,7 +416,7 @@ class SVTree(list):
 
         for splinePop in splitParams:
             m = splinePop[:, :-2].T
-            penalties += (m.T @ (A @ m)).sum(axis=0)
+            penalties += np.diagonal(m.T @ (A @ m))
 
         return penalties
 
