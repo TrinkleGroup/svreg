@@ -56,16 +56,6 @@ class SVNode(Node):
     A Node that is specifically designed to represent structure vector (SV)
     operations. Doesn't have anything new yet.
 
-    TODO: a node needs a way to understand how to parse/produce its own
-    parameter sets. For example, a rho node just directly uses them, but an ffg
-    node should be convolving the parameters first.
-
-    TODO: this ^ requires an easy way for having a user be able to specify how
-    many unique splines compose the given node. For example, a single-element
-    FFG spline only has 2 splines, but a multi-component one could have 3. Maybe
-    you could use a template input that specifies how the parameters are
-    embedded into each node
-
     Attributes:
         numParams (int):
             The number of fitting parameters for the corresponding SV.

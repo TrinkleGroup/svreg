@@ -1,4 +1,8 @@
+import os
 import h5py
+import glob
+
+from ase.io.xyz import read_xyz
 
 
 class SVDatabase(h5py.File):
@@ -48,6 +52,7 @@ class SVDatabase(h5py.File):
 
     def __init__(self, path, openType, *args, **kwargs):
         super().__init__(path, openType, *args, **kwargs)
+        self.structureVectors = []
 
 
     @classmethod
@@ -85,3 +90,50 @@ class SVDatabase(h5py.File):
             trueValues[structName] = {'energy': eng, 'forces': fcs}
 
         return trueValues
+
+
+    def buildDatabase(self, pathToFolder):
+        """
+        Constructs the database using a folder of atomic structures.
+
+        Args:
+            pathToFolder (str):
+                The name of the folder containing the atomic structures. It is
+                assumed that the atomic structures are stored in XYZ (or 
+                extended XYZ) format as specified in the ASE documentation.
+
+                ASE extended XYZ format:
+                https://wiki.fysik.dtu.dk/ase/ase/io/formatoptions.html#xyz
+        """
+
+        if len(self.structureVectors) < 1:
+            raise RuntimeError('Must define structure vectors first.')
+
+        for fileName in glob.glob(os.path.join(pathToFolder, '*.xyz')):
+            atoms = read_xyz(fileName)
+            shortName = os.path.split(fileName)[-1]
+            shortName = os.path.splitext(shortName)[0]
+
+            self.addStructure(shortName, atoms)
+
+    
+    def addStructure(self, name, atoms):
+
+        newGroup = self.create_group(name)
+        newGroup.attrs['natoms'] = len(atoms)
+
+        for sv in self.structureVectors:
+            # Assumes `sv` is a fully-prepared StructureVector object
+
+            # vectors = {bondType: {'energy': vec1, 'forces': vec2}}
+            vectors = sv.loop(atoms, 'vector')
+
+            for bondType in vectors:
+                energyData = newGroup[sv.name][bondType]['energy']
+                energyData.resize((1,) + vectors[bondType]['energy'].shape)
+                energyData[:] = vectors[bondType]['energy']
+
+                forcesData = newGroup[sv.name][bondType]['forces']
+                forcesData.resize((1,) + vectors[bondType]['forces'].shape)
+                forcesData[:] = vectors[bondType]['forces']
+
