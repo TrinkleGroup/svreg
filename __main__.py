@@ -86,6 +86,8 @@ def main(settings, worldComm, isMaster):
         trueValues = database.loadTrueValues()
 
         numStructs = len(trueValues)
+
+        natoms = {k: database[k].attrs['natoms'] for k in database}
     
     # Prepare regressor
     if settings['optimizer'] == 'CMA':
@@ -180,7 +182,7 @@ def main(settings, worldComm, isMaster):
 
                 # Save the (per-struct) errors and the single-value costs
                 errors = computeErrors(
-                    settings['refStruct'], energies, forces, trueValues
+                    settings['refStruct'], energies, forces, trueValues, natoms
                 )
 
                 costs = costFxn(errors)
@@ -296,6 +298,8 @@ def fixedExample(settings, worldComm, isMaster):
     
         numStructs = len(trueValues)
 
+        natoms = {k: database[k].attrs['natoms'] for k in database}
+
     # Prepare regressor
     if settings['optimizer'] == 'CMA':
         optimizer = cma.CMAEvolutionStrategy
@@ -408,7 +412,7 @@ def fixedExample(settings, worldComm, isMaster):
             energies, forces = regressor.evaluateTrees(svEng, svFcs, N)
 
             errors = computeErrors(
-                settings['refStruct'], energies, forces, trueValues
+                settings['refStruct'], energies, forces, trueValues, natoms
             )
 
 
@@ -469,6 +473,36 @@ def fixedExample(settings, worldComm, isMaster):
                     pickle.dump(errors[bestTree][bestIdx], outfile)
 
 
+def directTreeEval():
+    import os
+    import pickle
+
+    from ase.io import read
+
+    basePath = 'results/mo_smooth2'
+    # treeName = 'add(mul(ffg, rho), cos(rho))'
+    treeName = 'mul(ffg, ffg)'
+    archive = pickle.load(open(os.path.join(basePath, 'archive.pkl'), 'rb'))
+
+    fileName = os.path.join(basePath, treeName, 'tree.pkl')
+
+    tree = pickle.load(open(fileName, 'rb'))
+    
+    entry = archive[treeName]
+    tree.bestParams = entry.bestParams
+
+    atomsFile = os.path.join(
+        '/home/jvita/scripts/s-meam/data/fitting_databases/',
+        'mlearn/data/Mo/lammps',
+        'Ground_state_crystal.data'
+    )
+
+    atoms = read(atomsFile, format='lammps-data', style='atomic')
+    y = tree.fillFixedKnots(tree.bestParams)[0]
+    val = tree.directEvaluation(y, atoms, evalType='forces')
+    print(val)
+
+
 def buildSVNodePool(group):
     """Prepare svNodePool for use in tree construction"""
 
@@ -505,7 +539,7 @@ def buildSVNodePool(group):
     return svNodePool
 
 
-def computeErrors(refStruct, energies, forces, trueValues):
+def computeErrors(refStruct, energies, forces, trueValues, natoms):
     """
     Takes in dictionaries of energies and forces and returns the energy/force
     errors for each structure for each tree. Sorts structure names first.
@@ -528,6 +562,10 @@ def computeErrors(refStruct, energies, forces, trueValues):
             where the energy of the reference structure has already been
             subtracted off.
 
+        natoms (dict):
+            {structName: number of atoms in structure}. Used for converting
+            total energies into per-atom energies.
+
     Returns:
         costs (list):
             A list of the total costs for the populations of each tree. Eeach
@@ -546,7 +584,8 @@ def computeErrors(refStruct, energies, forces, trueValues):
     for treeNum in range(numTrees):
         treeErrors = np.zeros((numPots, 2*numStructs))
         for i, structName in enumerate(sorted(keys)):
-            eng = energies[structName][treeNum] - energies[refStruct][treeNum]
+            eng = energies[structName][treeNum]/natoms[structName] \
+                - energies[refStruct][treeNum]/natoms[refStruct]
             fcs =   forces[structName][treeNum]
 
             engErrors = eng - trueValues[structName]['energy']
@@ -642,4 +681,5 @@ if __name__ == '__main__':
     if settings['runType'] == 'GA':
         main(settings, worldComm, isMaster)
     else:
-        fixedExample(settings, worldComm, isMaster)
+        # fixedExample(settings, worldComm, isMaster)
+        directTreeEval()

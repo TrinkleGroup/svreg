@@ -1,46 +1,36 @@
-"""
-TODO: need stuff for actually *building* a database
+import numpy as np
 
-Constructors for each different type of SV
-    - Should take in an atomic configuration and output an SV
-    - Use a  StructureVector base class
-    - Have them indexed by a global map
-
-SVs should have an "equation" form that can be used for evaluating them
-directly.
-
-"""
+from numba import jit
+from scipy.sparse import diags
 from scipy.interpolate import CubicSpline
 from ase.neighborlist import NeighborList
 
-class StructureVector:
+
+class Summation:
     """
-    Populates a database with the given structure:
+    A Summation is a representation of a summation over certain values in
+    an atomic configuration (e.g. a summation over all triplets of atoms). This
+    object is used for building a vector representation, as well as for
+    directly performing the defined summation for a given atomic configuration.
 
-    <sv_name>
-        .attrs['components'] (list):
-            A list of component names (e.g. ['rho_A', 'rho_B'])
+    There are three possible outputs from the Summation class:
+        1)  A vector representation of the summation; used constructing
+            databases. The "energy" vector should have a shape of (N, K). The
+            "forces" vector should have a shape of (3*N*N, K). Here N is the
+            number of atoms in the given structure, and K is product of the
+            number of fitting parameters for each component (e.g. in an "FFG"
+            Summation, there are two F components and one G component).
 
-        .attrs['numParams'] (int):
-            The number of fitting parameters for each component of
-            this type of SV.
+        2) The total energy of an atomic configuration. This should have a shape
+           of (1,).
 
-        .attrs['paramRanges'] (list):
-            Optional list of (low, high) ranges of allowed values
-            for each component. If left unspecified, uses the
-            default range of (0, 1) for all components.
-
-        <bond_type>
-            .attrs['components'] (list):
-                A list of components that are used for the given
-                bond type. If multiple, assumes that the SV is
-                constructed by computing outer products of the
-                parameters for each of the components of the bond.
-
-            <eval_type> ('energy' or 'forces')
-
+        3) The atomic forces on the atoms in the system. This should have a
+            shape of (3, N). TODO: in the future, when multi-component systems
+            are supported, this will need to have a shape of (3, N, N) to
+            account for different embedding functions on each branch of the
+            tree.
     
-    Args:
+    Attributes:
         name (str):
             The name of the structure vector type.
 
@@ -59,7 +49,7 @@ class StructureVector:
             is the number of fitting parameters for that component (without
             taking into account any fixed knots).
 
-        paramRanges (dict):
+        paramRanges (dict):F
             A dictionary where the key is the name of a component, and the value
             is a tuple of (low, high).
 
@@ -78,17 +68,18 @@ class StructureVector:
     """
 
     def __init__(
-        self, name, components, numParams, paramRanges, bonds, cutoffs,
-        numElements
+        self, name, components, numParams, restrictions, paramRanges, bonds,
+        cutoffs, numElements
         ):
 
-        self.name = name
-        self.components = components
-        self.numParams = numParams
-        self.paramRanges = paramRanges
-        self.bonds = bonds
-        self.cutoffs = cutoffs
-        self.numElements = numElements
+        self.name           = name
+        self.components     = components
+        self.numParams      = numParams
+        self.restrictions   = restrictions
+        self.paramRanges    = paramRanges
+        self.bonds          = bonds
+        self.cutoffs        = cutoffs
+        self.numElements    = numElements
 
 
     def loop(self, structure):
@@ -99,40 +90,51 @@ class StructureVector:
         pass
 
 
-class FFG(StructureVector):
+class FFG(Summation):
 
-    def  __init__(self, kwargs):
-        StructureVector.__init__(**kwargs)
+    def  __init__(self, *args, **kwargs):
+        Summation.__init__(self, *args, **kwargs)
 
         # An FFG spline has one `f` spline for each element, and one `g` spline
         # for each unique bond type
-        self.components = []
+        # self.components = []
         self.fSplines = []
         self.gSplines = []
-        for i in range(numElements):
+        for i in range(self.numElements):
             # TODO: if numParams or knot positions are ever not the same for all
             # splines, then this section is going to need to change
 
-            self.components.append('f_{}'.format(i))
+            # TODO: currently assumes components is only [f_A, g_AA]; won't be
+            # true for multi-component
+
+            # self.components.append('f_{}'.format(i))
             self.fSplines.append(
                 # Append a F spline
                 Spline(
                     knots=np.linspace(
-                        self.cutoffs[0], self.cutoffs[1], self.numParams
+                        self.cutoffs[0], self.cutoffs[1],
+                        self.numParams[self.components[0]]
+                        + len(self.restrictions[self.components[0]]) - 2
                     ),
-                    bc_type=('natural', 'fixed'),
+                    # bc_type=('natural', 'fixed'),
+                    bc_type=('fixed', 'fixed')
                 )
             )
 
             tmpG = []
 
-            for j in range(j, numElements):
-                self.components.append('g_{}{}'.format(i, j))
+            for j in range(i, self.numElements):
+                # self.components.append('g_{}{}'.format(i, j))
                 tmpG.append(
                     # Append a G spline
                     Spline(
-                        knots=np.linspace(-1, 1, self.numParams),
-                        bc_type=('natural', 'natural'),
+                        knots=np.linspace(
+                            -1, 1,
+                            self.numParams[self.components[1]]
+                            + len(self.restrictions[self.components[1]]) - 2
+                        ),
+                        # bc_type=('natural', 'natural'),
+                        bc_type=('fixed', 'fixed')
                     )
                 )
 
@@ -166,7 +168,7 @@ class FFG(StructureVector):
             a dictionary of the form {bondType: {energy/forces: vector}}.
         """
 
-        types = sorted(list(set(atoms.get_chemical_symbols)))
+        types = sorted(list(set(atoms.get_chemical_symbols())))
 
         atomTypes = np.array(
             list(map(lambda s: types.index(s), atoms.get_chemical_symbols()))
@@ -180,10 +182,12 @@ class FFG(StructureVector):
             forcesSV = np.zeros((3*N*N, int((self.numParams+2)**3)))
         elif evalType == 'energy':
             totalEnergy = 0.0
+        elif evalType == 'forces':
+            forces = np.zeros(3, N)
 
         # Allows double counting bonds; needed for embedding energy calculations
         nl = NeighborList(
-            np.ones(N) * (self.cutoffs[-1]/2.),
+            np.ones(N)*(self.cutoffs[-1]/2.),
             self_interaction=False, bothways=True, skin=0.0
         )
 
@@ -197,8 +201,11 @@ class FFG(StructureVector):
 
             neighbors, offsets = nl.get_neighbors(i)
 
+            if evalType == 'forces':
+                iForces = np.zeros((3,))
+
             jIdx = 0
-            for j, offestj in zip(neighbors, offsets):
+            for j, offsetj in zip(neighbors, offsets):
                 # j = atomic ID, so it can be used for indexing
                 jtype = atomTypes[j]
 
@@ -208,12 +215,12 @@ class FFG(StructureVector):
                 jpos = atoms[j].position + np.dot(offsetj, cell)
 
                 jvec = jpos - ipos
-                rij = np.sqrt(jvec[0] ** 2 + jvec[1] ** 2 + jvec[2] ** 2)
+                rij = np.sqrt(jvec[0]**2 + jvec[1]**2 + jvec[2]**2)
                 jvec /= rij
 
                 # prepare for angular calculations
                 a = jpos - ipos
-                na = np.sqrt(a[0] ** 2 + a[1] ** 2 + a[2] ** 2)
+                na = np.sqrt(a[0]**2 + a[1]**2 + a[2]**2)
 
                 # Construct a list of vectors for each component, then combine
                 # for each bond
@@ -225,7 +232,11 @@ class FFG(StructureVector):
                 if evalType == 'energy':
                     fjVal = self.fjSpline(rij)
                     partialsum = 0.0
-                
+                if evalType == 'forces':
+                    fjPrime = self.fjSpline(rij, 1)
+                    jdel /= rij
+                    jForces = np.zeros((3,))
+               
                 jIdx += 1
                 for k, offsetk in zip(neighbors[jIdx:], offsets[jIdx:]):
                     ktype = atomTypes[k]
@@ -236,12 +247,11 @@ class FFG(StructureVector):
                     kpos = atoms[k].position + np.dot(offsetk, cell)
 
                     kvec = kpos - ipos
-                    rik = np.sqrt(
-                        kvec[0] ** 2 + kvec[1] ** 2 + kvec[2] ** 2)
+                    rik = np.sqrt(kvec[0]**2 + kvec[1]**2 + kvec[2]**2)
                     kvec /= rik
 
                     b = kpos - ipos
-                    nb = np.sqrt(b[0] ** 2 + b[1] ** 2 + b[2] ** 2)
+                    nb = np.sqrt(b[0]**2 + b[1]**2 + b[2]**2)
 
                     cosTheta = np.dot(a, b) / na / nb
 
@@ -264,20 +274,62 @@ class FFG(StructureVector):
                         fkVal = self.fkSpline(rik)
                         gVal = self.gSpline(cosTheta)
                         partialsum += fkVal*gVal
+                    elif evalType == 'forces':
+                        # TODO: Uprime_i will depend on the tree branch in
+                        # multi-component systems
+                        Uprime_i = 1
+
+                        fkPrime = self.fkSpline(rik, 1)
+                        gPrime  = self.gSpline(cosTheta, 1)
+
+                        fij = -Uprime_i*gVal*fkVal*fjPrime
+                        fik = -Uprime_i*gVal*fjVal*fkPrime
+
+                        prefactor = Uprime_i*fjVal*fkVal*gPrime
+
+                        prefactor_ij = prefactor/rij
+                        prefactor_ik = prefactor/rik
+
+                        fij += prefactor_ij*cosTheta
+                        fik += prefactor_ik*cosTheta
+
+                        fj = jdel*fij - kdel*prefactor_ij
+                        fk = kdel*fik - jdel*prefactor_ik
+
+                        jForces += fj
+                        iForces -= fk
+
+                        forces += fk
+                # end triplet loop
 
                 if evalType == 'energy':
                     totalEnergy += fjVal*partialsum
+                elif evalType == 'forces':
+                    forces[i] -= jForces
+                    forces[neighbors[0][j]] += jForces
+            # end neighbor loop
 
+            if evalType == 'forces':
+                forces += iForces
+        # end atom loop
 
         if evalType == 'vector':
             return energySv, forcesSV
+        elif evalType == 'energy':
+            print('Summation.loop() totalEnergy:', totalEnergy)
+            return totalEnergy
+        elif evalType == 'forces':
+            return forces
+
+        # TODO: the next step is to have something like tree.py that uses
+        # Summation objects instead of SVNode objects
 
  
     def add_to_energy_sv(self, sv, rij, rik, cos, atomId):
         # Encode into energy SV
         fjCoeffs = np.sum(self.fjSpline.get_coeffs_wrapper(rij, 0), axis=0)
         fkCoeffs = np.sum(self.fkSpline.get_coeffs_wrapper(rik, 0), axis=0)
-        gCoeffs  = np.sum(self.gSpline.get_coeffs_wrapper(cos, 0), axis=0))
+        gCoeffs  = np.sum(self.gSpline.get_coeffs_wrapper(cos, 0), axis=0)
         
         sv += np.outer(
             np.outer(fjCoeffs.ravel(), fkCoeffs.ravel()),
@@ -355,18 +407,25 @@ class FFG(StructureVector):
         modified scipy CubicSpline evaluators for each spline.
         """
 
-        splits = np.cumsum(self.numParams[c] for c in self.components)[:-1]
+        splits = np.cumsum([
+            self.numParams[c]+len(self.restrictions[c]) for c in self.components
+        ])[:-1]
         splitParams = np.array_split(params, splits)
 
-        fIdx = 0
-        gIdx = 0
+        fCopy = list(self.fSplines[::-1])
+        gCopy = list([list(l[::-1]) for l in self.gSplines[::-1]])
+
         for y, cname in zip(splitParams, self.components):
+            if isinstance(cname, bytes):
+                cname = cname.decode('utf-8')
             if 'f' in cname:
-                self.fSplines[fIdx].buildDirectEvaluator(y)
-                fIdx += 1
+                fCopy[-1].buildDirectEvaluator(y)
+                fCopy.pop()
             else:
-                self.gSplines[gIdx].buildDirectEvaluator(y)
-                gIdx += 1
+                gCopy[-1][-1].buildDirectEvaluator(y)
+                gCopy[-1].pop()
+                if len(gCopy[-1]) == 0:
+                    gCopy.pop()
 
 
 class Spline:
@@ -771,3 +830,9 @@ def build_M(num_x, dx, bc_type):
 
     # M = A^(-1)B
     return np.dot(np.linalg.inv(A), B)
+
+
+_implemented_sums = {
+    'ffg': FFG,
+}
+

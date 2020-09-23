@@ -4,6 +4,7 @@ from copy import deepcopy
 from scipy.interpolate import CubicSpline
 
 from nodes import FunctionNode, SVNode, _node_types
+from summation import Summation, _implemented_sums
 
 
 class SVTree(list):
@@ -578,3 +579,99 @@ class SVTree(list):
     def updateSVNodes(self):
         """Updates self.svNodes. Useful after crossovers/mutations."""
         self.svNodes = [node for node in self.nodes if isinstance(node, SVNode)]
+
+
+    def directEvaluation(self, y, atoms, evalType):
+        """
+        Evaluates a tree by performing SV summations directly, rather than
+        using the SV representation.
+
+        Args:
+            y (np.arr):
+                The full set of parameters for the tree nodes.
+
+            atoms (ase.Atoms):
+                The atomic structure to evaluate
+
+            evalType (str):
+                One of 'energy' or 'forces'.
+
+        Returns:
+            If `evalType` == 'energy', returns the total energy of the system.
+            If `evalType` == 'forces', returns the atomic forces.
+        """
+
+        splits = np.cumsum([
+            n.totalNumParams + len(n.restrictions) for n in self.svNodes
+        ])[:-1]
+        splitParams = np.array_split(y, splits)
+
+        # Clone the tree, but replace SVNode objects with Summation objects
+        nodes = []
+        for node in self.nodes[::-1]:
+            if node.description in _implemented_sums:
+                nodes.append(
+                    _implemented_sums[node.description](
+                        name=node.description,
+                        components=node.components,
+                        numParams=node.numParams,
+                        restrictions=node.restrictions,
+                        paramRanges=node.paramRanges,
+                        bonds=node.bonds,
+                        cutoffs=(2.4, 5.2),
+                        numElements=1,
+                    )
+                )
+
+                nodes[-1].setParams(splitParams.pop())
+            else:
+                nodes.append(node)
+
+        nodes = nodes[::-1]
+
+        # Check for single-node tree
+        if isinstance(nodes[0], Summation):
+            return nodes[0].loop(atoms, evalType)
+
+        # Constructs a list-of-lists where each sub-list is a sub-tree for a
+        # function at a given recursion depth. The first node of a sub-tree
+        # should always be a FunctionNode
+
+        subTrees = []
+
+        for node in nodes:
+            if isinstance(node, FunctionNode):
+                # Start a new sub-tree
+                subTrees.append([node])
+            else:
+                # Grow the current deepest sub-tree
+                subTrees[-1].append(node)
+
+            # If the sub-tree is complete, evaluate its function
+            while len(subTrees[-1]) == subTrees[-1][0].function.arity + 1:
+                args = [
+                    (n.loop(atoms, evalType),) if isinstance(n, Summation)
+                    else n  # Terminal is intermediate result
+                    for n in subTrees[-1][1:]
+                ]
+
+                intermediateEng = subTrees[-1][0].function(*args)
+
+                if evalType == 'forces':
+                    intermediateFcs = subTrees[-1][0].function.derivative(*args)
+                else:
+                    # Functions expect tuple inputs
+                    intermediateFcs = None
+
+                if len(subTrees) != 1:  # Still some left to evaluate
+                    subTrees.pop()
+                    subTrees[-1].append(
+                        (intermediateEng, intermediateFcs)
+                    )
+                else:  # Done evaluating all sub-trees
+                    if evalType == 'energy':
+                        return intermediateEng
+                    else:
+                        return intermediateFcs
+
+        raise RuntimeError("Something went wrong in tree evaluation")
