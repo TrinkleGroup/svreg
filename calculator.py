@@ -20,17 +20,17 @@ class TreeCalculator(Calculator):
         self.implemented_properties = ['energy', 'forces']
         self.discard_results_on_any_change = True
 
-        self.y      = kwargs['y']
-        self.tree   = kwargs['tree']
+        self.tree   = tree
+        self.y      = y
 
 
     def set_atoms(self, atoms):
         self.atoms = atoms
 
 
-    def get_potential_energy(self):
-        return self.tree.directEvaluation(self.y, self.atoms, 'energy')
+    def get_potential_energy(self, atoms):
+        return self.tree.directEvaluation(self.y, atoms, 'energy')
 
 
-    def get_forces(self):
-        return self.tree.directEvaluation(self.y, self.atoms, 'forces')
+    def get_forces(self, atoms):
+        return self.tree.directEvaluation(self.y, atoms, 'forces')
