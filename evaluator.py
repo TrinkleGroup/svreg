@@ -124,8 +124,7 @@ class Manager:
 
                     if evalType == 'energy':
                         # Will convert to per-atom energies in __main__.py
-                        val = val.sum(axis=1)
-                        # val = val.sum(axis=1)/n
+                        val = val.sum(axis=1)#/n
                         pass
                     elif evalType == 'forces':
                         # TODO: nodemanager had to apply U' because the
@@ -141,6 +140,8 @@ class Manager:
                             localPop[svName][bondType].shape[0], 3, n, n
                         )
                         val = val.sum(axis=-1).swapaxes(1, 2)
+
+                        print('Evaluator.eval() forces:', val)
 
                     intermediates.append(val)
 
@@ -212,7 +213,8 @@ class Manager:
             provided HDF5 database.
         """
 
-        mpiDoubleSize = MPI.FLOAT.Get_size()
+        # mpiDoubleSize = MPI.FLOAT.Get_size()
+        mpiDoubleSize = MPI.DOUBLE.Get_size()
 
         if self.isHead:
             # Have the head node figure out how much memory to allocate

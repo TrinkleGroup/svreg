@@ -649,11 +649,26 @@ class SVTree(list):
 
             # If the sub-tree is complete, evaluate its function
             while len(subTrees[-1]) == subTrees[-1][0].function.arity + 1:
-                args = [
-                    (n.loop(atoms, evalType),) if isinstance(n, Summation)
-                    else n  # Terminal is intermediate result
-                    for n in subTrees[-1][1:]
-                ]
+                args = []
+                for n in subTrees[-1][1:]:
+                    if isinstance(n, Summation):
+                        # eng = np.array([n.loop(atoms, 'energy')])
+                        eng = np.array([n.loop(atoms, 'energy')])
+
+                        if evalType == 'forces':
+                            fcs = np.array([n.loop(atoms, evalType)])
+                        else:
+                            fcs = None
+
+                        args.append((eng, fcs))
+                    else:
+                        args.append(n)
+
+                # args = [
+                #     (n.loop(atoms, evalType),) if isinstance(n, Summation)
+                #     else n  # Terminal is intermediate result
+                #     for n in subTrees[-1][1:]
+                # ]
 
                 intermediateEng = subTrees[-1][0].function(*args)
 

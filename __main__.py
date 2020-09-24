@@ -499,8 +499,10 @@ def directTreeEval():
 
     atoms = read(atomsFile, format='lammps-data', style='atomic')
     y = tree.fillFixedKnots(tree.bestParams)[0]
+    # val = tree.directEvaluation(y, atoms, evalType='energy')
+    # print('energy:', val)
     val = tree.directEvaluation(y, atoms, evalType='forces')
-    print(val)
+    print('forces:', val.shape)
 
 
 def buildSVNodePool(group):

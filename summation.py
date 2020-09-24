@@ -183,7 +183,7 @@ class FFG(Summation):
         elif evalType == 'energy':
             totalEnergy = 0.0
         elif evalType == 'forces':
-            forces = np.zeros(3, N)
+            forces = np.zeros((N, 3))
 
         # Allows double counting bonds; needed for embedding energy calculations
         nl = NeighborList(
@@ -218,10 +218,6 @@ class FFG(Summation):
                 rij = np.sqrt(jvec[0]**2 + jvec[1]**2 + jvec[2]**2)
                 jvec /= rij
 
-                # prepare for angular calculations
-                a = jpos - ipos
-                na = np.sqrt(a[0]**2 + a[1]**2 + a[2]**2)
-
                 # Construct a list of vectors for each component, then combine
                 # for each bond
 
@@ -229,12 +225,11 @@ class FFG(Summation):
                 # and that each radial spline has the same cutoffs, we don't
                 # need to worry about indexing the components properly
 
-                if evalType == 'energy':
+                if (evalType == 'energy') or (evalType == 'forces'):
                     fjVal = self.fjSpline(rij)
                     partialsum = 0.0
                 if evalType == 'forces':
                     fjPrime = self.fjSpline(rij, 1)
-                    jdel /= rij
                     jForces = np.zeros((3,))
                
                 jIdx += 1
@@ -250,10 +245,7 @@ class FFG(Summation):
                     rik = np.sqrt(kvec[0]**2 + kvec[1]**2 + kvec[2]**2)
                     kvec /= rik
 
-                    b = kpos - ipos
-                    nb = np.sqrt(b[0]**2 + b[1]**2 + b[2]**2)
-
-                    cosTheta = np.dot(a, b) / na / nb
+                    cosTheta = np.dot(jvec, kvec)#/rij/rik
 
                     d0 = jvec
                     d1 = -cosTheta * jvec / rij
@@ -270,11 +262,12 @@ class FFG(Summation):
                         self.forces_sv(
                             forcesSV, rij, rik, cosTheta, dirs, i, j, k
                         )
-                    elif evalType == 'energy':
+                    elif (evalType == 'energy') or (evalType == 'forces'):
                         fkVal = self.fkSpline(rik)
                         gVal = self.gSpline(cosTheta)
                         partialsum += fkVal*gVal
-                    elif evalType == 'forces':
+
+                    if evalType == 'forces':
                         # TODO: Uprime_i will depend on the tree branch in
                         # multi-component systems
                         Uprime_i = 1
@@ -287,42 +280,43 @@ class FFG(Summation):
 
                         prefactor = Uprime_i*fjVal*fkVal*gPrime
 
+                        # fij = gVal*fkVal*fjPrime
+                        # fik = gVal*fjVal*fkPrime
+
+                        # prefactor = fjVal*fkVal*gPrime
+
                         prefactor_ij = prefactor/rij
                         prefactor_ik = prefactor/rik
 
                         fij += prefactor_ij*cosTheta
                         fik += prefactor_ik*cosTheta
 
-                        fj = jdel*fij - kdel*prefactor_ij
-                        fk = kdel*fik - jdel*prefactor_ik
+                        fj = jvec*fij - kvec*prefactor_ij
+                        fk = kvec*fik - jvec*prefactor_ik
 
                         jForces += fj
                         iForces -= fk
 
-                        forces += fk
+                        forces[k] += fk
                 # end triplet loop
 
                 if evalType == 'energy':
                     totalEnergy += fjVal*partialsum
                 elif evalType == 'forces':
                     forces[i] -= jForces
-                    forces[neighbors[0][j]] += jForces
+                    forces[j] += jForces
             # end neighbor loop
 
             if evalType == 'forces':
-                forces += iForces
+                forces[i] += iForces
         # end atom loop
 
         if evalType == 'vector':
             return energySv, forcesSV
         elif evalType == 'energy':
-            print('Summation.loop() totalEnergy:', totalEnergy)
             return totalEnergy
         elif evalType == 'forces':
             return forces
-
-        # TODO: the next step is to have something like tree.py that uses
-        # Summation objects instead of SVNode objects
 
  
     def add_to_energy_sv(self, sv, rij, rik, cos, atomId):
