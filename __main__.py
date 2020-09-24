@@ -501,8 +501,25 @@ def directTreeEval():
     y = tree.fillFixedKnots(tree.bestParams)[0]
     # val = tree.directEvaluation(y, atoms, evalType='energy')
     # print('energy:', val)
-    val = tree.directEvaluation(y, atoms, evalType='forces')
-    print('forces:', val.shape)
+    # val = tree.directEvaluation(y, atoms, evalType='forces')
+    # print('forces:', val.shape)
+
+
+    from summation import _implemented_sums
+    node = tree.svNodes[0]
+    summation = _implemented_sums[node.description](
+        name=node.description,
+        components=node.components,
+        numParams=node.numParams,
+        restrictions=node.restrictions,
+        paramRanges=node.paramRanges,
+        bonds=node.bonds,
+        cutoffs=(2.4, 5.2),
+        numElements=1,
+    )
+
+    val = summation.loop(atoms, evalType='vector', bondType='ffg_AAA')
+    print('vectors:', val[0].shape, val[1].shape)
 
 
 def buildSVNodePool(group):

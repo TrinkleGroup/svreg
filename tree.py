@@ -601,6 +601,9 @@ class SVTree(list):
             If `evalType` == 'forces', returns the atomic forces.
         """
 
+        if evalType not in ['energy', 'forces']:
+            raise RuntimeError("evalType must be one of 'energy' or 'forces'.")
+
         splits = np.cumsum([
             n.totalNumParams + len(n.restrictions) for n in self.svNodes
         ])[:-1]

@@ -147,7 +147,7 @@ class FFG(Summation):
         self.gSpline  = None
 
     
-    def loop(self, atoms, evalType):
+    def loop(self, atoms, evalType, bondType=None):
         """
         Loops over the desired properties of the structure, and returns the
         specified evaluation type.
@@ -160,6 +160,10 @@ class FFG(Summation):
                 One of 'energy', 'forces', or 'vector'. 'vector' returns the
                 actual vector representation of the structure vector, which is
                 used for constructing databases.
+
+            bondType (str):
+                Required if `evalType` == 'vector'. Used for specifying which
+                bond type to build a structure vector for.
 
         Returns:
             Depends upon specified `evalType`. If `energy`, returns a single
@@ -175,11 +179,19 @@ class FFG(Summation):
         )
 
         N = len(atoms)
-
         if evalType == 'vector':
+            if bondType is None:
+                raise RuntimeError('Must specify bondType.')
+
             # Prepare structure vectors
-            energySV = np.zeros((N, self.numParams+2))
-            forcesSV = np.zeros((3*N*N, int((self.numParams+2)**3)))
+            cartsize = np.prod([
+                self.numParams[c] + len(self.restrictions[c])
+                for c in self.bonds[bondType]
+            ])
+
+            # TODO: each bond type could potentially have a different size
+            energySV = np.zeros((N, cartsize))
+            forcesSV = np.zeros((3*N*N, cartsize))
         elif evalType == 'energy':
             totalEnergy = 0.0
         elif evalType == 'forces':
@@ -195,6 +207,7 @@ class FFG(Summation):
 
         cell = atoms.get_cell()
 
+        tracker = []
         for i, atom in enumerate(atoms):
             itype = atomTypes[i]
             ipos = atom.position
@@ -258,8 +271,10 @@ class FFG(Summation):
 
                     if evalType == 'vector':
                         # Update structure vectors (in-place)
-                        self.add_to_energy_sv(energySV, rij, rik, cosTheta, i)
-                        self.forces_sv(
+                        eng_sv = self.add_to_energy_sv(energySV, rij, rik, cosTheta, i)
+                        tracker.append(eng_sv)
+                        
+                        self.add_to_forces_sv(
                             forcesSV, rij, rik, cosTheta, dirs, i, j, k
                         )
                     elif (evalType == 'energy') or (evalType == 'forces'):
@@ -312,7 +327,7 @@ class FFG(Summation):
         # end atom loop
 
         if evalType == 'vector':
-            return energySv, forcesSV
+            return energySV, forcesSV, tracker
         elif evalType == 'energy':
             return totalEnergy
         elif evalType == 'forces':
@@ -325,10 +340,8 @@ class FFG(Summation):
         fkCoeffs = np.sum(self.fkSpline.get_coeffs_wrapper(rik, 0), axis=0)
         gCoeffs  = np.sum(self.gSpline.get_coeffs_wrapper(cos, 0), axis=0)
         
-        sv += np.outer(
-            np.outer(fjCoeffs.ravel(), fkCoeffs.ravel()),
-            gCoeffs.ravel()
-        )
+        sv[atomId, :] += np.outer(np.outer(fjCoeffs, fkCoeffs), gCoeffs).ravel()
+        return np.outer(np.outer(fjCoeffs, fkCoeffs), gCoeffs).ravel()
 
    
     def get_coeffs(self, rij, rik, cos, deriv=[0,0,0]):
@@ -346,7 +359,7 @@ class FFG(Summation):
         return fjCoeffs.squeeze(), fkCoeffs.squeeze(), gCoeffs.squeeze()
        
 
-    def forces_sv(self, sv, rij, rik, cosTheta, i, j, k):
+    def add_to_forces_sv(self, sv, rij, rik, cos, dirs, i, j, k):
 
         fj_1, fk_1, g_1 = self.get_coeffs(rij, rik, cos, [1, 0, 0])
         fj_2, fk_2, g_2 = self.get_coeffs(rij, rik, cos, [0, 1, 0])
