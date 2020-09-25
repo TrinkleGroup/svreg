@@ -481,7 +481,8 @@ def directTreeEval():
 
     basePath = 'results/mo_smooth2'
     # treeName = 'add(mul(ffg, rho), cos(rho))'
-    treeName = 'mul(ffg, ffg)'
+    # treeName = 'mul(ffg, ffg)'
+    treeName = 'rho'
     archive = pickle.load(open(os.path.join(basePath, 'archive.pkl'), 'rb'))
 
     fileName = os.path.join(basePath, treeName, 'tree.pkl')
@@ -518,8 +519,16 @@ def directTreeEval():
         numElements=1,
     )
 
-    val = summation.loop(atoms, evalType='vector', bondType='ffg_AAA')
+    val = summation.loop(atoms, evalType='vector', bondType='rho_A')
     print('vectors:', val[0].shape, val[1].shape)
+
+    # from calculator import TreeCalculator
+    # atoms.calc = TreeCalculator(tree, y)
+
+    # eng = atoms.get_potential_energy()
+    # fcs = atoms.get_forces()
+
+    # print(eng, fcs.shape)
 
 
 def buildSVNodePool(group):
