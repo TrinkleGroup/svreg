@@ -481,7 +481,8 @@ def directTreeEval():
 
     basePath = 'results/mo_smooth2'
     # treeName = 'add(mul(ffg, rho), cos(rho))'
-    treeName = 'mul(ffg, ffg)'
+    # treeName = 'mul(ffg, ffg)'
+    treeName = 'rho'
     archive = pickle.load(open(os.path.join(basePath, 'archive.pkl'), 'rb'))
 
     fileName = os.path.join(basePath, treeName, 'tree.pkl')
@@ -505,29 +506,29 @@ def directTreeEval():
     # print('forces:', val.shape)
 
 
-    # from summation import _implemented_sums
-    # node = tree.svNodes[0]
-    # summation = _implemented_sums[node.description](
-    #     name=node.description,
-    #     components=node.components,
-    #     numParams=node.numParams,
-    #     restrictions=node.restrictions,
-    #     paramRanges=node.paramRanges,
-    #     bonds=node.bonds,
-    #     cutoffs=(2.4, 5.2),
-    #     numElements=1,
-    # )
+    from summation import _implemented_sums
+    node = tree.svNodes[0]
+    summation = _implemented_sums[node.description](
+        name=node.description,
+        components=node.components,
+        numParams=node.numParams,
+        restrictions=node.restrictions,
+        paramRanges=node.paramRanges,
+        bonds=node.bonds,
+        cutoffs=(2.4, 5.2),
+        numElements=1,
+    )
 
-    # val = summation.loop(atoms, evalType='vector', bondType='ffg_AAA')
-    # print('vectors:', val[0].shape, val[1].shape)
+    val = summation.loop(atoms, evalType='vector', bondType='rho_A')
+    print('vectors:', val[0].shape, val[1].shape)
 
-    from calculator import TreeCalculator
-    atoms.calc = TreeCalculator(tree, y)
+    # from calculator import TreeCalculator
+    # atoms.calc = TreeCalculator(tree, y)
 
-    eng = atoms.get_potential_energy()
-    fcs = atoms.get_forces()
+    # eng = atoms.get_potential_energy()
+    # fcs = atoms.get_forces()
 
-    print(eng, fcs.shape)
+    # print(eng, fcs.shape)
 
 
 def buildSVNodePool(group):
