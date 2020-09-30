@@ -5,8 +5,8 @@ Module for Node objects, which are the elements in an equation tree.
 import random
 import numpy as np
 
-from functions import _function_map, _arities, _latex
-from exceptions import StaleValueException
+from svreg.functions import _function_map, _arities, _latex
+from svreg.exceptions import StaleValueException
 
 # collection of types of nodes that can be added; used for growing trees
 _node_types = ['function', 'parameter', 'sv']

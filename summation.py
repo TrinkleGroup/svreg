@@ -1,6 +1,6 @@
 import numpy as np
 
-from numba import jit
+# from numba import jit
 from scipy.sparse import diags
 from scipy.interpolate import CubicSpline
 from ase.neighborlist import NeighborList
@@ -382,11 +382,11 @@ class FFG(Summation):
             sv[N2*a + N*k + i, :] -= fk[:, a]
 
 
+    # @jit(
+    #     'Tuple((float64[:,:], float64[:,:]))(float64[:], float64[:], float64[:],float64[:], float64[:], float64[:],float64[:], float64[:], float64[:], float64[:,:])',
+    #     nopython=True
+    # )
     @staticmethod
-    @jit(
-        'Tuple((float64[:,:], float64[:,:]))(float64[:], float64[:], float64[:],float64[:], float64[:], float64[:],float64[:], float64[:], float64[:], float64[:,:])',
-        nopython=True
-    )
     def jitted_force_mixer(fj_1, fk_1, g_1, fj_2, fk_2, g_2, fj_3, fk_3, g_3, dirs):
         v1 = np.outer(np.outer(fj_1, fk_1), g_1).ravel()
         v2 = np.outer(np.outer(fj_2, fk_2), g_2).ravel()
@@ -551,11 +551,11 @@ class Spline:
             return self._scipy_cs(x, i)
 
 
+    # @jit(
+    #     'Tuple((float64[:,:], float64[:,:]))(float64[:], int64, float64, float64[:], int64)',
+    #     nopython=True
+    # )
     @staticmethod
-    @jit(
-        'Tuple((float64[:,:], float64[:,:]))(float64[:], int64, float64, float64[:], int64)',
-        nopython=True
-    )
     def get_coeffs(x, deriv=0, extrap_dist=None, tmp_knots=None,
                  n_knots=None):
         """Calculates the spline coefficients for a set of points x
@@ -706,11 +706,11 @@ class Spline:
         return alpha + np.sum(gamma, axis=1)
 
 
+    # @jit(
+    #     'Tuple((float64[:,:], float64[:,:]))(float64[:], float64[:], float64[:],float64[:], float64[:], float64[:],float64[:], float64[:], float64[:], float64[:,:])',
+    #     nopython=True
+    # )
     @staticmethod
-    @jit(
-        'Tuple((float64[:,:], float64[:,:]))(float64[:], float64[:], float64[:],float64[:], float64[:], float64[:],float64[:], float64[:], float64[:], float64[:,:])',
-        nopython=True
-    )
     def ffg_abcd_mixer(fj_1, fk_1, g_1, fj_2, fk_2, g_2, fj_3, fk_3, g_3, dirs):
         v1 = np.outer(np.outer(fj_1, fk_1), g_1).ravel()
         v2 = np.outer(np.outer(fj_2, fk_2), g_2).ravel()
