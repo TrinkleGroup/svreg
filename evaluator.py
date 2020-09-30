@@ -124,9 +124,7 @@ class Manager:
 
                     if evalType == 'energy':
                         # Will convert to per-atom energies in __main__.py
-                        print(val.shape)
                         val = val.sum(axis=1)#/n
-                        print("evaluator.eval():", val)
                         pass
                     elif evalType == 'forces':
                         # TODO: nodemanager had to apply U' because the
@@ -137,6 +135,11 @@ class Manager:
                         # fact, the ffg splines don't need their 4th dimension.
                         # Make sure to address this in database.py when you
                         # the functions for constructing splines.
+
+                        # TODO: the above is no longer true. In order to account
+                        # for different trees for reach bond type, the SVs must
+                        # keep their extra dimension to allow for different U'
+                        # scaling for each atom type
 
                         val = val.reshape(
                             localPop[svName][bondType].shape[0], 3, n, n

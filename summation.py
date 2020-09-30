@@ -134,8 +134,8 @@ class FFG(Summation):
                         self.numParams[self.components[0]]
                         + len(self.restrictions[self.components[0]]) - 2
                     ),
-                    # bc_type=('natural', 'fixed'),
-                    bc_type=('fixed', 'fixed')
+                    bc_type=('natural', 'fixed'),
+                    # bc_type=('fixed', 'fixed')
                 )
             )
 
@@ -150,8 +150,8 @@ class FFG(Summation):
                             self.numParams[self.components[1]]
                             + len(self.restrictions[self.components[1]]) - 2
                         ),
-                        # bc_type=('natural', 'natural'),
-                        bc_type=('fixed', 'fixed')
+                        bc_type=('natural', 'natural'),
+                        # bc_type=('fixed', 'fixed')
                     )
                 )
 
@@ -429,8 +429,8 @@ class Rho(Summation):
                         self.numParams[self.components[0]]
                         + len(self.restrictions[self.components[0]]) - 2
                     ),
-                    # bc_type=('natural', 'fixed'),
-                    bc_type=('fixed', 'fixed')
+                    bc_type=('natural', 'fixed'),
+                    # bc_type=('fixed', 'fixed')
                 )
             )
 
