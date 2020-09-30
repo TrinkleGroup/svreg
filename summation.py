@@ -34,13 +34,6 @@ class Summation:
         name (str):
             The name of the structure vector type.
 
-        bc_type (tuple):
-            A tuple of (bc1, bc2), where the boundary conditions can be either
-            `fixed` or `natural`. If `fixed`, then the boundary condition is
-            assumed to have a fixed 1st derivative at the end-point. If
-            `natural`, then the boundary condition is assumed to have a zero
-            second derivative at the end-point.
-
         components (list):
             A list of the names of the different components of the SV.
 
@@ -49,7 +42,11 @@ class Summation:
             is the number of fitting parameters for that component (without
             taking into account any fixed knots).
 
-        paramRanges (dict):F
+        restrictions (dict):
+            A dictionary where the key is the name of a component, and the value
+            is a list of tuples of restricted knots and their values.
+
+        paramRanges (dict):
             A dictionary where the key is the name of a component, and the value
             is a tuple of (low, high).
 

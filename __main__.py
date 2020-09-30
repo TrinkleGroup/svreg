@@ -187,17 +187,17 @@ def main(settings, worldComm, isMaster):
 
                 costs = costFxn(errors)
 
-                # # Add ridge regression penalty
-                # penalties = np.array([
-                #     np.linalg.norm(pop, axis=1)*settings['ridgePenalty']
-                #     for pop in rawPopulations
-                # ])
+                # Add ridge regression penalty
+                penalties = np.array([
+                    np.linalg.norm(pop, axis=1)*settings['ridgePenalty']
+                    for pop in rawPopulations
+                ])
 
-                # Add roughness penalties
-                penalties= [
-                    tree.roughnessPenalty(pop)*settings['ridgePenalty']
-                    for tree, pop in zip(regressor.trees, rawPopulations)
-                ]
+                # # Add roughness penalties
+                # penalties= [
+                #     tree.roughnessPenalty(pop)*settings['ridgePenalty']
+                #     for tree, pop in zip(regressor.trees, rawPopulations)
+                # ]
 
                 # Print the cost of the best paramaterization of the best tree
                 printTreeCosts(optStep, costs, penalties)
@@ -543,7 +543,7 @@ def buildSVNodePool(group):
         restrictions = None
         if 'restrictions' in svGroup.attrs:
             restrictions = []
-            resList = svGroup.attrs['restrictions'].tolist()
+            resList = svGroup.attrs['restrictions'].tolist()[::-1]
             for num in svGroup.attrs['numRestrictions']:
                 tmp = []
                 for _ in range(num):

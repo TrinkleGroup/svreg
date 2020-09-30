@@ -605,7 +605,9 @@ class SVTree(list):
             raise RuntimeError("evalType must be one of 'energy' or 'forces'.")
 
         splits = np.cumsum([
-            n.totalNumParams + len(n.restrictions) for n in self.svNodes
+            # n.totalNumParams + len(n.restrictions) for n in self.svNodes
+            n.totalNumParams+sum([len(r) for r in n.restrictions.values()])
+            for n in self.svNodes
         ])[:-1]
         splitParams = np.array_split(y, splits)
 
@@ -657,6 +659,8 @@ class SVTree(list):
                     if isinstance(n, Summation):
                         # eng = np.array([n.loop(atoms, 'energy')])
                         eng = np.array([n.loop(atoms, 'energy')])
+
+                        print('tree.eval():', eng)
 
                         if evalType == 'forces':
                             fcs = np.array([n.loop(atoms, evalType)])
