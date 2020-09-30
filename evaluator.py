@@ -124,7 +124,9 @@ class Manager:
 
                     if evalType == 'energy':
                         # Will convert to per-atom energies in __main__.py
+                        print(val.shape)
                         val = val.sum(axis=1)#/n
+                        print("evaluator.eval():", val)
                         pass
                     elif evalType == 'forces':
                         # TODO: nodemanager had to apply U' because the
@@ -140,8 +142,6 @@ class Manager:
                             localPop[svName][bondType].shape[0], 3, n, n
                         )
                         val = val.sum(axis=-1).swapaxes(1, 2)
-
-                        print('Evaluator.eval() forces:', val)
 
                     intermediates.append(val)
 

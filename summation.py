@@ -34,13 +34,6 @@ class Summation:
         name (str):
             The name of the structure vector type.
 
-        bc_type (tuple):
-            A tuple of (bc1, bc2), where the boundary conditions can be either
-            `fixed` or `natural`. If `fixed`, then the boundary condition is
-            assumed to have a fixed 1st derivative at the end-point. If
-            `natural`, then the boundary condition is assumed to have a zero
-            second derivative at the end-point.
-
         components (list):
             A list of the names of the different components of the SV.
 
@@ -49,7 +42,11 @@ class Summation:
             is the number of fitting parameters for that component (without
             taking into account any fixed knots).
 
-        paramRanges (dict):F
+        restrictions (dict):
+            A dictionary where the key is the name of a component, and the value
+            is a list of tuples of restricted knots and their values.
+
+        paramRanges (dict):
             A dictionary where the key is the name of a component, and the value
             is a tuple of (low, high).
 
@@ -82,11 +79,32 @@ class Summation:
         self.numElements    = numElements
 
 
-    def loop(self, structure):
+    def loop(self, atoms, evalType, bondType=None):
         """
-        Loops over the structure according to a specific summation, returning
-        either energies/forces or a vector encoding the structure.
+        Loops over the desired properties of the structure, and returns the
+        specified evaluation type.
+
+        Args:
+            atoms (ase.Atoms):
+                The atomic structure
+
+            evalType (str):
+                One of 'energy', 'forces', or 'vector'. 'vector' returns the
+                actual vector representation of the structure vector, which is
+                used for constructing databases.
+
+            bondType (str):
+                Required if `evalType` == 'vector'. Used for specifying which
+                bond type to build a structure vector for.
+
+        Returns:
+            Depends upon specified `evalType`. If `energy`, returns a single
+            float corresponding to the total energy of the system. If `forces`,
+            returns an (N, 3) array of forces on each atom. If `vector`, returns
+            a dictionary of the form {bondType: {energy/forces: vector}}.
         """
+
+
         pass
 
 
@@ -124,7 +142,6 @@ class FFG(Summation):
             tmpG = []
 
             for j in range(i, self.numElements):
-                # self.components.append('g_{}{}'.format(i, j))
                 tmpG.append(
                     # Append a G spline
                     Spline(
@@ -148,30 +165,6 @@ class FFG(Summation):
 
     
     def loop(self, atoms, evalType, bondType=None):
-        """
-        Loops over the desired properties of the structure, and returns the
-        specified evaluation type.
-
-        Args:
-            atoms (ase.Atoms):
-                The atomic structure
-
-            evalType (str):
-                One of 'energy', 'forces', or 'vector'. 'vector' returns the
-                actual vector representation of the structure vector, which is
-                used for constructing databases.
-
-            bondType (str):
-                Required if `evalType` == 'vector'. Used for specifying which
-                bond type to build a structure vector for.
-
-        Returns:
-            Depends upon specified `evalType`. If `energy`, returns a single
-            float corresponding to the total energy of the system. If `forces`,
-            returns an (N, 3) array of forces on each atom. If `vector`, returns
-            a dictionary of the form {bondType: {energy/forces: vector}}.
-        """
-
         types = sorted(list(set(atoms.get_chemical_symbols())))
 
         atomTypes = np.array(
@@ -189,7 +182,6 @@ class FFG(Summation):
                 for c in self.bonds[bondType]
             ])
 
-            # TODO: each bond type could potentially have a different size
             energySV = np.zeros((N, cartsize))
             forcesSV = np.zeros((3*N*N, cartsize))
         elif evalType == 'energy':
@@ -207,7 +199,6 @@ class FFG(Summation):
 
         cell = atoms.get_cell()
 
-        tracker = []
         for i, atom in enumerate(atoms):
             itype = atomTypes[i]
             ipos = atom.position
@@ -271,9 +262,8 @@ class FFG(Summation):
 
                     if evalType == 'vector':
                         # Update structure vectors (in-place)
-                        eng_sv = self.add_to_energy_sv(energySV, rij, rik, cosTheta, i)
-                        tracker.append(eng_sv)
-                        
+                        self.add_to_energy_sv(energySV, rij, rik, cosTheta, i)
+
                         self.add_to_forces_sv(
                             forcesSV, rij, rik, cosTheta, dirs, i, j, k
                         )
@@ -283,22 +273,14 @@ class FFG(Summation):
                         partialsum += fkVal*gVal
 
                     if evalType == 'forces':
-                        # TODO: Uprime_i will depend on the tree branch in
-                        # multi-component systems
-                        Uprime_i = 1
 
                         fkPrime = self.fkSpline(rik, 1)
                         gPrime  = self.gSpline(cosTheta, 1)
 
-                        fij = -Uprime_i*gVal*fkVal*fjPrime
-                        fik = -Uprime_i*gVal*fjVal*fkPrime
+                        fij = -gVal*fkVal*fjPrime
+                        fik = -gVal*fjVal*fkPrime
 
-                        prefactor = Uprime_i*fjVal*fkVal*gPrime
-
-                        # fij = gVal*fkVal*fjPrime
-                        # fik = gVal*fjVal*fkPrime
-
-                        # prefactor = fjVal*fkVal*gPrime
+                        prefactor = fjVal*fkVal*gPrime
 
                         prefactor_ij = prefactor/rij
                         prefactor_ik = prefactor/rik
@@ -327,7 +309,7 @@ class FFG(Summation):
         # end atom loop
 
         if evalType == 'vector':
-            return energySV, forcesSV, tracker
+            return energySV, forcesSV
         elif evalType == 'energy':
             return totalEnergy
         elif evalType == 'forces':
@@ -341,7 +323,6 @@ class FFG(Summation):
         gCoeffs  = np.sum(self.gSpline.get_coeffs_wrapper(cos, 0), axis=0)
         
         sv[atomId, :] += np.outer(np.outer(fjCoeffs, fkCoeffs), gCoeffs).ravel()
-        return np.outer(np.outer(fjCoeffs, fkCoeffs), gCoeffs).ravel()
 
    
     def get_coeffs(self, rij, rik, cos, deriv=[0,0,0]):
@@ -433,6 +414,147 @@ class FFG(Summation):
                 gCopy[-1].pop()
                 if len(gCopy[-1]) == 0:
                     gCopy.pop()
+
+
+class Rho(Summation):
+    def  __init__(self, *args, **kwargs):
+        Summation.__init__(self, *args, **kwargs)
+
+        self.splines = []
+        for i in range(self.numElements):
+            self.splines.append(
+                Spline(
+                    knots=np.linspace(
+                        self.cutoffs[0], self.cutoffs[1],
+                        self.numParams[self.components[0]]
+                        + len(self.restrictions[self.components[0]]) - 2
+                    ),
+                    # bc_type=('natural', 'fixed'),
+                    bc_type=('fixed', 'fixed')
+                )
+            )
+
+        self.rho = None
+
+
+    def loop(self, atoms, evalType, bondType=None):
+
+        types = sorted(list(set(atoms.get_chemical_symbols())))
+
+        atomTypes = np.array(
+            list(map(lambda s: types.index(s), atoms.get_chemical_symbols()))
+        )
+
+        N = len(atoms)
+        if evalType == 'vector':
+            if bondType is None:
+                raise RuntimeError('Must specify bondType.')
+
+            # Prepare structure vectors
+            totalNumParams = sum([
+                self.numParams[c] + len(self.restrictions[c])
+                for c in self.bonds[bondType]
+            ])
+
+            energySV = np.zeros((N, totalNumParams))
+            forcesSV = np.zeros((3*N*N, totalNumParams))
+        elif evalType == 'energy':
+            totalEnergy = 0.0
+        elif evalType == 'forces':
+            forces = np.zeros((N, 3))
+
+        # No double counting allowed
+        nl = NeighborList(
+            np.ones(N)*(self.cutoffs[-1]/2.),
+            self_interaction=False, bothways=False, skin=0.0
+        )
+
+        nl.update(atoms)
+
+        cell = atoms.get_cell()
+
+        for i, atom in enumerate(atoms):
+            itype = atomTypes[i]
+            ipos = atom.position
+
+            neighbors, offsets = nl.get_neighbors(i)
+
+            if evalType == 'forces':
+                iForces = np.zeros((3,))
+
+            jIdx = 0
+            for j, offsetj in zip(neighbors, offsets):
+                # j = atomic ID, so it can be used for indexing
+                jtype = atomTypes[j]
+
+                self.rho = self.splines[jtype]
+
+                # offset accounts for periodic images
+                jpos = atoms[j].position + np.dot(offsetj, cell)
+
+                jvec = jpos - ipos
+                rij = np.sqrt(jvec[0]**2 + jvec[1]**2 + jvec[2]**2)
+                jvec /= rij
+
+                if evalType == 'vector':
+                    self.add_to_energy_sv(energySV, rij, i)
+                    self.add_to_energy_sv(energySV, rij, j)
+
+                    # Forces acting on i
+                    self.add_to_forces_sv(forcesSV, rij,  jvec, i, i)
+                    self.add_to_forces_sv(forcesSV, rij,  jvec, i, j)
+
+                    # Forces acting on j
+                    self.add_to_forces_sv(forcesSV, rij, -jvec, j, i)
+                    self.add_to_forces_sv(forcesSV, rij, -jvec, j, j)
+                elif evalType == 'energy':
+                    # Double count; i w.r.t j + j w.r.t. i
+                    totalEnergy += self.rho(rij)*2
+                elif evalType == 'forces':
+                    rhoPrimeI = self.splines[itype](rij, 1)
+                    rhoPrimeJ = self.splines[jtype](rij, 1)
+
+                    fcs = jvec*(rhoPrimeI + rhoPrimeJ)
+
+                    forces[i] += fcs
+                    forces[j] -= fcs
+
+        if evalType == 'vector':
+            return energySV, forcesSV
+        elif evalType == 'energy':
+            return totalEnergy
+        elif evalType == 'forces':
+            return forces
+
+
+    def add_to_energy_sv(self, sv, rij, atomId):
+        sv[atomId, :] += self.rho.get_coeffs_wrapper(rij).sum(axis=0)
+
+    def add_to_forces_sv(self, sv, rij, direction, i, j):
+        coeffs = self.rho.get_coeffs_wrapper(rij, 1).sum(axis=0).ravel()
+        coeffs = np.einsum('i,j->ij', coeffs, direction)
+
+        N = int(np.sqrt(sv.shape[0]//3))
+        N2 = N*N
+        for a in range(3):
+            sv[N2*a + N*i + j, :] += coeffs[:, a]
+
+
+    def setParams(self, params):
+
+        splits = np.cumsum([
+            self.numParams[c]+len(self.restrictions[c]) for c in self.components
+        ])[:-1]
+        splitParams = np.array_split(params, splits)
+
+        rhoCopy = list(self.splines[::-1])
+
+        for y, cname in zip(splitParams, self.components):
+            if isinstance(cname, bytes):
+                cname = cname.decode('utf-8')
+            
+            rhoCopy[-1].buildDirectEvaluator(y)
+            rhoCopy.pop()
 
 
 class Spline:
@@ -841,5 +963,5 @@ def build_M(num_x, dx, bc_type):
 
 _implemented_sums = {
     'ffg': FFG,
+    'rho': Rho,
 }
-
