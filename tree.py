@@ -581,7 +581,7 @@ class SVTree(list):
         self.svNodes = [node for node in self.nodes if isinstance(node, SVNode)]
 
 
-    def directEvaluation(self, y, atoms, evalType):
+    def directEvaluation(self, y, atoms, evalType, bc_type):
         """
         Evaluates a tree by performing SV summations directly, rather than
         using the SV representation.
@@ -595,6 +595,11 @@ class SVTree(list):
 
             evalType (str):
                 One of 'energy' or 'forces'.
+
+            bc_type (str):
+                One of 'natural' or 'fixed'. 'natural' uses natural boundary
+                conditions for LHS boundaries of radial functions and for both
+                boundaries of non-radial functions.
 
         Returns:
             If `evalType` == 'energy', returns the total energy of the system.
@@ -625,6 +630,7 @@ class SVTree(list):
                         bonds=node.bonds,
                         cutoffs=(2.4, 5.2),
                         numElements=1,
+                        bc_type=bc_type
                     )
                 )
 

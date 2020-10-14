@@ -66,7 +66,7 @@ class Summation:
 
     def __init__(
         self, name, components, numParams, restrictions, paramRanges, bonds,
-        cutoffs, numElements
+        cutoffs, numElements, bc_type,
         ):
 
         self.name           = name
@@ -77,6 +77,7 @@ class Summation:
         self.bonds          = bonds
         self.cutoffs        = cutoffs
         self.numElements    = numElements
+        self.bc_type        = bc_type
 
 
     def loop(self, atoms, evalType, bondType=None):
@@ -134,7 +135,9 @@ class FFG(Summation):
                         self.numParams[self.components[0]]
                         + len(self.restrictions[self.components[0]]) - 2
                     ),
-                    bc_type=('natural', 'fixed'),
+                    bc_type=('natural', 'fixed')
+                    if self.bc_type == 'natural'
+                    else ('fixed', 'fixed')
                     # bc_type=('fixed', 'fixed')
                 )
             )
@@ -150,7 +153,9 @@ class FFG(Summation):
                             self.numParams[self.components[1]]
                             + len(self.restrictions[self.components[1]]) - 2
                         ),
-                        bc_type=('natural', 'natural'),
+                        bc_type=('natural', 'natural')
+                        if self.bc_type == 'natural'
+                        else ('fixed', 'fixed')
                         # bc_type=('fixed', 'fixed')
                     )
                 )
@@ -429,7 +434,9 @@ class Rho(Summation):
                         self.numParams[self.components[0]]
                         + len(self.restrictions[self.components[0]]) - 2
                     ),
-                    bc_type=('natural', 'fixed'),
+                    bc_type=('natural', 'fixed')
+                    if self.bc_type == 'natural'
+                    else ('fixed', 'fixed')
                     # bc_type=('fixed', 'fixed')
                 )
             )

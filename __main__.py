@@ -338,12 +338,10 @@ def fixedExample(settings, worldComm, isMaster):
 
         tree.nodes = [
             FunctionNode('add'),
-            deepcopy(rhoNode),
-            FunctionNode('sqrt'),
-            FunctionNode('add'),
-            deepcopy(rhoNode),
-            deepcopy(ffgNode)
-            # FunctionNode('sqrt'), deepcopy(rhoNode), deepcopy(rhoNode)
+            # FunctionNode('mul'),
+            # deepcopy(ffgNode),
+            deepcopy(ffgNode),
+            deepcopy(ffgNode),
         ]
 
         tree.svNodes = [n for n in tree.nodes if isinstance(n, SVNode)]
@@ -420,16 +418,16 @@ def fixedExample(settings, worldComm, isMaster):
             costs = costFxn(errors)
 
             # Add ridge regression penalty
-            # penalties = np.array([
-            #     np.linalg.norm(pop, axis=1)*settings['ridgePenalty']
-            #     for pop in rawPopulations
-            # ])
+            penalties = np.array([
+                np.linalg.norm(pop, axis=1)*settings['ridgePenalty']
+                for pop in rawPopulations
+            ])
 
-            # Add roughness penalties
-            penalties= [
-                tree.roughnessPenalty(pop)*settings['ridgePenalty']
-                for tree, pop in zip(regressor.trees, rawPopulations)
-            ]
+            # # Add roughness penalties
+            # penalties= [
+            #     tree.roughnessPenalty(pop)*settings['ridgePenalty']
+            #     for tree, pop in zip(regressor.trees, rawPopulations)
+            # ]
 
 
             # Print the cost of the best paramaterization of the best tree
@@ -666,10 +664,26 @@ def buildCostFunction(settings):
     """
 
     def mae(errors):
-        return np.array([np.average(err, axis=1) for err in errors])
+        
+        costs = []
+        for err in errors:
+            tmp = err.copy()
+            tmp[::2]  *= settings['energyWeight']
+            tmp[1::2] *= settings['forcesWeight']
+            costs.append(np.average(tmp, axis=1))
+
+        return np.array(costs)
 
     def rmse(errors):
-        return np.array([np.sqrt(np.average(err**2, axis=1)) for err in errors])
+        
+        costs = []
+        for err in errors:
+            tmp = err.copy()
+            tmp[::2]  *= settings['energyWeight']
+            tmp[1::2] *= settings['forcesWeight']
+            costs.append(np.sqrt(np.average(tmp**2, axis=1)))
+
+        return np.array(costs)
 
     if settings['costFxn'] == 'MAE':
         return mae
@@ -709,5 +723,5 @@ if __name__ == '__main__':
     if settings['runType'] == 'GA':
         main(settings, worldComm, isMaster)
     else:
-        # fixedExample(settings, worldComm, isMaster)
-        directTreeEval()
+        fixedExample(settings, worldComm, isMaster)
+        # directTreeEval()
