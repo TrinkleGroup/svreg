@@ -338,10 +338,10 @@ def fixedExample(settings, worldComm, isMaster):
 
         tree.nodes = [
             FunctionNode('add'),
-            # FunctionNode('mul'),
-            # deepcopy(ffgNode),
             deepcopy(ffgNode),
+            FunctionNode('add'),
             deepcopy(ffgNode),
+            deepcopy(rhoNode),
         ]
 
         tree.svNodes = [n for n in tree.nodes if isinstance(n, SVNode)]
@@ -668,8 +668,8 @@ def buildCostFunction(settings):
         costs = []
         for err in errors:
             tmp = err.copy()
-            tmp[::2]  *= settings['energyWeight']
-            tmp[1::2] *= settings['forcesWeight']
+            tmp[:, ::2]  *= settings['energyWeight']
+            tmp[:, 1::2] *= settings['forcesWeight']
             costs.append(np.average(tmp, axis=1))
 
         return np.array(costs)
@@ -679,8 +679,8 @@ def buildCostFunction(settings):
         costs = []
         for err in errors:
             tmp = err.copy()
-            tmp[::2]  *= settings['energyWeight']
-            tmp[1::2] *= settings['forcesWeight']
+            tmp[:, ::2]  *= settings['energyWeight']
+            tmp[:, 1::2] *= settings['forcesWeight']
             costs.append(np.sqrt(np.average(tmp**2, axis=1)))
 
         return np.array(costs)

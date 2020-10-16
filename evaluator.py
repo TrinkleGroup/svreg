@@ -126,7 +126,6 @@ class Manager:
                         # Will convert to per-atom energies in __main__.py
                         val = val.sum(axis=1)#/n
 
-                        pass
                     elif evalType == 'forces':
                         # TODO: nodemanager had to apply U' because the
                         # embedding function could be different for each atom
