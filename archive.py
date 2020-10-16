@@ -5,7 +5,7 @@ import random
 import numpy as np
 from scipy.special import erf
 
-from tree import SVTree
+from svreg.tree import SVTree
 
 
 class Entry:
