@@ -144,7 +144,7 @@ class FFG(Summation):
 
             tmpG = []
 
-            for j in range(i, self.numElements):
+            for j in range(self.numElements):
                 tmpG.append(
                     # Append a G spline
                     Spline(

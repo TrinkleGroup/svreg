@@ -7,28 +7,26 @@
 ################################################################################
 
 seed        1123
-runType     GA
+runType     DEBUG
 
 ################################################################################
 # Database settings
 ################################################################################
 
 refStruct           Ground_state_crystal
-# databasePath        ./examples/Mo.hdf5
-databasePath        ../svreg_data/mlearn/Mo/Mo.hdf5-fixed
-# outputPath          ./results
-outputPath          ./results/natural
-overwrite           True
+databasePath        ../svreg_data/mlearn/Mo/Mo.hdf5-natural-f32
+outputPath          ./results/natural_sofomore
+overwrite           False
 
 ################################################################################
 #  Regressor settings
 ################################################################################
 
-costFxn             RMSE
+costFxn             MAE
 
-optimizer           CMA
+optimizer           Sofomore
 
-numberOfTrees       30
+numberOfTrees       20
 tournamentSize      10
 
 optimizerPopSize    100
@@ -38,11 +36,11 @@ pointMutateProb     0.2
 maxTreeDepth        3
 
 numRegressorSteps   1000
-numOptimizerSteps   100
+numOptimizerSteps   10000
 
 energyWeight        100
 forcesWeight        1
 
-ridgePenalty        1
+ridgePenalty        1e-2
 
 ################################################################################
