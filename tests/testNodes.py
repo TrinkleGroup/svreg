@@ -66,8 +66,8 @@ class Test_SVNode(unittest.TestCase):
 
     def test_verify_constructor(self):
         self.assertEquals(self.node.description, 'dummy_sv_node')
-        self.assertEqual(self.node.numParams['comp1'], 10)
-        self.assertEqual(self.node.numParams['comp2'], 10)
+        self.assertEqual(self.node.numFreeParams['comp1'], 10)
+        self.assertEqual(self.node.numFreeParams['comp2'], 10)
 
         with self.assertRaises(StaleValueException):
             self.node.values

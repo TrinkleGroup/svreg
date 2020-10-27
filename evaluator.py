@@ -124,6 +124,10 @@ class Manager:
 
                     if evalType == 'energy':
                         # Will convert to per-atom energies in __main__.py
+
+                        # TODO: don't sum across atoms here; I'll need to split
+                        # by atom type later for different branches
+
                         val = val.sum(axis=1)#/n
 
                     elif evalType == 'forces':
@@ -140,6 +144,8 @@ class Manager:
                         # for different trees for reach bond type, the SVs must
                         # keep their extra dimension to allow for different U'
                         # scaling for each atom type
+
+                        # TODO: check if you're still allowed to sum here.
 
                         val = val.reshape(
                             localPop[svName][bondType].shape[0], 3, n, n

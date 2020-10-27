@@ -3,6 +3,7 @@ import numpy as np
 from copy import deepcopy
 
 from tree import SVTree
+from tree import MultiComponentTree as MCTree
 
 # TODO: may be able to merge this into ga.py, it really only initializes
 # trees/optimizers and evaluates the trees.
@@ -61,11 +62,16 @@ class SVRegressor:
         self.trees = []
 
 
-    def initializeTrees(self, singleNodeTreeProb=0.1):
+    def initializeTrees(self, numElements):
         """Populates the GA with randomly-generated equation trees."""
 
+        if numElements < 1:
+            raise RuntimeError("numElements must be >= 1 in initializeTrees()")
+
+        treeClass = SVTree if numElements == 1 else MCTree
+
         self.trees = [
-            SVTree.random(
+            treeClass.random(
                 svNodePool=self.svNodePool,
                 maxDepth=random.randint(1, self.settings['maxTreeDepth']),
             ) for _ in range(self.settings['numberOfTrees'])
@@ -108,8 +114,8 @@ class SVRegressor:
                 # Loop over the list of values
                 # for tree, treeVals in zip(self.trees, listOfValues):
                 for tree in self.trees[::-1]:
-                    # Each node has the same population size, so just split
-                    for svNode in tree.svNodes[::-1]:
+                    # tree.updateNodeValues(unstackedValues, svName)
+                    for svNode in self.svNodes[::-1]:
                         # Only update the SVNode objects of the current type
                         if svNode.description == svName:
                             svNode.values = unstackedValues.pop()

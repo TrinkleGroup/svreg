@@ -66,7 +66,7 @@ class Summation:
 
     def __init__(
         self, name, components, numParams, restrictions, paramRanges, bonds,
-        cutoffs, numElements, bc_type,
+        bondMapping, cutoffs, numElements, bc_type,
         ):
 
         self.name           = name
@@ -75,12 +75,14 @@ class Summation:
         self.restrictions   = restrictions
         self.paramRanges    = paramRanges
         self.bonds          = bonds
+        self.bondMappingStr = bondMapping
+        self.bondMapping    = eval(bondMapping)
         self.cutoffs        = cutoffs
         self.numElements    = numElements
         self.bc_type        = bc_type
 
 
-    def loop(self, atoms, evalType, bondType=None):
+    def loop(self, atoms, evalType):
         """
         Loops over the desired properties of the structure, and returns the
         specified evaluation type.
@@ -93,10 +95,6 @@ class Summation:
                 One of 'energy', 'forces', or 'vector'. 'vector' returns the
                 actual vector representation of the structure vector, which is
                 used for constructing databases.
-
-            bondType (str):
-                Required if `evalType` == 'vector'. Used for specifying which
-                bond type to build a structure vector for.
 
         Returns:
             Depends upon specified `evalType`. If `energy`, returns a single
@@ -169,26 +167,33 @@ class FFG(Summation):
         self.gSpline  = None
 
     
-    def loop(self, atoms, evalType, bondType=None):
+    def loop(self, atoms, evalType):
         types = sorted(list(set(atoms.get_chemical_symbols())))
 
         atomTypes = np.array(
             list(map(lambda s: types.index(s), atoms.get_chemical_symbols()))
         )
 
+        # TODO: need to check that atom types match bondType components
+
         N = len(atoms)
         if evalType == 'vector':
-            if bondType is None:
-                raise RuntimeError('Must specify bondType.')
+            # if bondType is None:
+            #     raise RuntimeError('Must specify bondType.')
 
             # Prepare structure vectors
-            cartsize = np.prod([
-                self.numParams[c] + len(self.restrictions[c])
-                for c in self.bonds[bondType]
-            ])
+            energySV = {bondType: None for bondType in self.bonds}
+            forcesSV = {bondType: None for bondType in self.bonds}
 
-            energySV = np.zeros((N, cartsize))
-            forcesSV = np.zeros((3*N*N, cartsize))
+            for bondType in self.bonds:
+                cartsize = np.prod([
+                    self.numParams[c] + len(self.restrictions[c])
+                    for c in self.bonds[bondType]
+                ])
+
+                energySV[bondType] = np.zeros((N, cartsize))
+                forcesSV[bondType] = np.zeros((3*N*N, cartsize))
+
         elif evalType == 'energy':
             totalEnergy = 0.0
         elif evalType == 'forces':
@@ -266,11 +271,16 @@ class FFG(Summation):
                     dirs = np.vstack([d0, d1, d2, d3, d4, d5])
 
                     if evalType == 'vector':
+                        bondType = self.bondMapping(jtype, ktype)
+
                         # Update structure vectors (in-place)
-                        self.add_to_energy_sv(energySV, rij, rik, cosTheta, i)
+                        self.add_to_energy_sv(
+                            energySV[bondType], rij, rik, cosTheta, i
+                            )
 
                         self.add_to_forces_sv(
-                            forcesSV, rij, rik, cosTheta, dirs, i, j, k
+                            forcesSV[bondType],
+                            rij, rik, cosTheta, dirs, i, j, k
                         )
                     elif (evalType == 'energy') or (evalType == 'forces'):
                         fkVal = self.fkSpline(rik)
@@ -444,7 +454,7 @@ class Rho(Summation):
         self.rho = None
 
 
-    def loop(self, atoms, evalType, bondType=None):
+    def loop(self, atoms, evalType):
 
         types = sorted(list(set(atoms.get_chemical_symbols())))
 
@@ -454,17 +464,22 @@ class Rho(Summation):
 
         N = len(atoms)
         if evalType == 'vector':
-            if bondType is None:
-                raise RuntimeError('Must specify bondType.')
+            # if bondType is None:
+            #     raise RuntimeError('Must specify bondType.')
+
+            energySV = {bondType: None for bondType in self.bonds}
+            forcesSV = {bondType: None for bondType in self.bonds}
 
             # Prepare structure vectors
-            totalNumParams = sum([
-                self.numParams[c] + len(self.restrictions[c])
-                for c in self.bonds[bondType]
-            ])
+            for bondType in self.bonds:
+                totalNumParams = sum([
+                    self.numParams[c] + len(self.restrictions[c])
+                    for c in self.bonds[bondType]
+                ])
 
-            energySV = np.zeros((N, totalNumParams))
-            forcesSV = np.zeros((3*N*N, totalNumParams))
+                energySV[bondType] = np.zeros((N, totalNumParams))
+                forcesSV[bondType] = np.zeros((3*N*N, totalNumParams))
+
         elif evalType == 'energy':
             totalEnergy = 0.0
         elif evalType == 'forces':
@@ -504,16 +519,18 @@ class Rho(Summation):
                 jvec /= rij
 
                 if evalType == 'vector':
-                    self.add_to_energy_sv(energySV, rij, i)
-                    self.add_to_energy_sv(energySV, rij, j)
+                    bondType = self.bondMapping(jtype)
+
+                    self.add_to_energy_sv(energySV[bondType], rij, i)
+                    self.add_to_energy_sv(energySV[bondType], rij, j)
 
                     # Forces acting on i
-                    self.add_to_forces_sv(forcesSV, rij,  jvec, i, i)
-                    self.add_to_forces_sv(forcesSV, rij,  jvec, i, j)
+                    self.add_to_forces_sv(forcesSV[bondType], rij,  jvec, i, i)
+                    self.add_to_forces_sv(forcesSV[bondType], rij,  jvec, i, j)
 
                     # Forces acting on j
-                    self.add_to_forces_sv(forcesSV, rij, -jvec, j, i)
-                    self.add_to_forces_sv(forcesSV, rij, -jvec, j, j)
+                    self.add_to_forces_sv(forcesSV[bondType], rij, -jvec, j, i)
+                    self.add_to_forces_sv(forcesSV[bondType], rij, -jvec, j, j)
                 elif evalType == 'energy':
                     # Double count; i w.r.t j + j w.r.t. i
                     totalEnergy += self.rho(rij)*2

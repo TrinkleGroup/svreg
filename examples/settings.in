@@ -14,9 +14,9 @@ runType     DEBUG
 ################################################################################
 
 refStruct           Ground_state_crystal
-databasePath        ../svreg_data/mlearn/Mo/Mo.hdf5-natural-f32
-outputPath          ./results/natural_sofomore
-overwrite           False
+databasePath        ../svreg_data/mlearn/Mo/Mo.hdf5-fixed
+outputPath          ./results/debug
+overwrite           True
 
 ################################################################################
 #  Regressor settings
@@ -24,7 +24,7 @@ overwrite           False
 
 costFxn             MAE
 
-optimizer           Sofomore
+optimizer           CMA
 
 numberOfTrees       20
 tournamentSize      10

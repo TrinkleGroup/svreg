@@ -5,8 +5,6 @@ import random
 import numpy as np
 from scipy.special import erf
 
-from tree import SVTree
-
 
 class Entry:
     """A helper class for the Archive"""

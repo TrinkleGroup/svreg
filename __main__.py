@@ -7,10 +7,7 @@ TODO: change this into a GA class, then make a new __main__.py
 # Imports
 
 import os
-import sys
-import cma, comocma
-import time
-import h5py
+import cma
 import shutil
 import pickle
 import random
@@ -25,7 +22,8 @@ from regressor import SVRegressor
 from evaluator import SVEvaluator
 from nodes import SVNode, FunctionNode
 from tree import SVTree
-from archive import Archive, Entry
+from tree import MultiComponentTree as MCTree
+from archive import Archive
 from optimizers import GAWrapper, SofomoreWrapper
 
 
@@ -125,7 +123,7 @@ def main(settings, worldComm, isMaster):
             settings, svNodePool, optimizer, optimizerArgs
         )
 
-        regressor.initializeTrees()
+        regressor.initializeTrees(numElements=numElements)
         regressor.initializeOptimizers()
         print()
 
@@ -556,6 +554,7 @@ def buildSVNodePool(group):
                 bonds={
                     k:svGroup[k].attrs['components'] for k in svGroup.keys()
                 },
+                # bondMapping=eval(svGroup.attrs['bondMapping']),
                 restrictions=restrictions,
                 paramRanges=svGroup.attrs['paramRanges']\
                     if 'paramRanges' in group[svName].attrs else None

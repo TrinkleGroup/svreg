@@ -68,8 +68,8 @@ class SVNode(Node):
             component. It's assumed that this does NOT take into account any
             non-free knots specified by `restrictions`.
 
-        bonds (list):
-            A list of lists, where each sub-list is a set of component names to
+        bonds (dict):
+            A dict of lists, where each sub-list is a set of component names to
             be used for the given bond type.
 
         population (np.arr):
@@ -107,13 +107,16 @@ class SVNode(Node):
 
         self.restrictions = {comp: res for comp, res in zip(components, tmp)}
 
+        self.numParams = numParams
+
         # Store number of free parameters
-        self.numParams = {}
+        self.numFreeParams = {}
         for compName, num in zip(components, numParams):
             numFixed = len(self.restrictions[compName])
-            self.numParams[compName] = num - numFixed
+            self.numFreeParams[compName] = num - numFixed
 
         self.totalNumParams = sum(self.numParams.values())
+        self.totalNumFreeParams = sum(self.numFreeParams)
 
         # Load any limits on the parameter ranges for each component type
         self.paramRanges = paramRanges

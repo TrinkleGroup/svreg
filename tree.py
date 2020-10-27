@@ -1,4 +1,5 @@
 import random
+import itertools
 import numpy as np
 from copy import deepcopy
 from scipy.interpolate import CubicSpline
@@ -186,6 +187,13 @@ class SVTree(list):
         return np.hstack(population)
 
 
+    # def updateNodeValues(self, values, svName):
+    #     for svNode in self.svNodes[::-1]:
+    #         # Only update the SVNode objects of the current type
+    #         if svNode.description == svName:
+    #             svNode.values = values.pop()
+
+
     def getPopulation(self):
         """Return a 2D array of all SVNode parameters"""
 
@@ -254,7 +262,7 @@ class SVTree(list):
         fullPop = np.empty(fullShape)
 
         splitPop = np.array_split(
-            population, np.cumsum([n.totalNumParams for n in self.svNodes]),
+            population, np.cumsum([n.totalNumFreeParams for n in self.svNodes]),
             axis=1
         )
 
@@ -295,11 +303,11 @@ class SVTree(list):
 
         if fillFixedKnots:
             splitIndices = np.cumsum([
-                n.totalNumParams for n in self.svNodes
+                n.totalNumFreeParams for n in self.svNodes
             ])[:-1]
         else:
             splitIndices = np.cumsum([
-                n.totalNumParams+sum([len(r) for r in n.restrictions.values()])
+                n.totalNumParams#+sum([len(r) for r in n.restrictions.values()])
                 for n in self.svNodes
             ])[:-1]
 
@@ -611,7 +619,7 @@ class SVTree(list):
 
         splits = np.cumsum([
             # n.totalNumParams + len(n.restrictions) for n in self.svNodes
-            n.totalNumParams+sum([len(r) for r in n.restrictions.values()])
+            n.totalNumParams#+sum([len(r) for r in n.restrictions.values()])
             for n in self.svNodes
         ])[:-1]
         splitParams = np.array_split(y, splits)
@@ -695,3 +703,182 @@ class SVTree(list):
                         return intermediateFcs
 
         raise RuntimeError("Something went wrong in tree evaluation")
+
+
+class MultiComponentTree(SVTree):
+    """
+    An extension of SVTree that accounts for additional complexities associated
+    with dealing with multi-component systems.
+
+    "MultiComponentTree" will be shorthanded as "MCT"
+
+    The main differences between MCT and SVTree:
+        1)  The MCT has different trees for each chemistry.
+        2)  When generating a random tree using a pool of SVNode objects, the
+            pool for MCT is extended to include each of the bond types
+            separately (e.g. FFG -> FFG_AA, FFG_AB, and FFG_BB).
+        3)  MCT will track the active "components" of each SVNode, that way it
+            can generate correct populations that don't include inactive
+            components (e.g. an MCT that only uses FFG_AA won't generate
+            parameters for the f_B component).
+        4)  The MCT needs some additional logic for parsing results and passing
+            them to the correct chemistry tree.
+        5)  Mate/mutate operations in an MCT can operate between chemistry
+            trees.
+
+    TODO:
+        -   It would be helpful if the chemistry trees were in a dictionary
+            where the key was the element type, that way results could be parsed
+            more easily.
+        -   The Evaluator might need to be informed if it's dealing with single-
+            or mult-component data, that way it knows if it should split by
+            element or not.
+
+    Note: when doing any looping over nodes or chemistry trees, it's assumed
+    that the looop will go over the trees in alphabetical order of chemical
+    name.
+
+    Attributes:
+        elements (list):
+            A sorted list of element names (e.g. ['Mo', 'Ti']). Since this list
+            is sorted, it will be used when looping over any dictionaries in the
+            MCT.
+    """
+
+    # TODO: is it really better to make MCT than just to generalize SVTree??
+    # If I make MCT.svNodes be the dummy nodes, then it should still update
+    # properly, right? Maybe just do the MCT, then use it to replace the SVTree
+    # if it seems appropriate.
+
+    def __init__(self, elements):#, nodes=None):
+        self.elements = sorted(elements)
+
+        # TODO: I don't think I need MCT to track nodes, just let child do it
+        # if nodes is None:
+        #     nodes = {el: [] for el in self.elements}
+
+        # self.nodes = nodes
+
+        # self.chemistryTrees = {el: SVTree(nodes[el]) for el in self.elements}
+        self.chemistryTrees = {el: None for el in self.elements}
+        self.treeNumParams = {el: None for el in self.elements}
+        self.cost = np.inf
+
+
+    @classmethod
+    def random(cls, svNodePool, maxDepth=1):
+        """
+        Overloads SVTree.random() to extend the given svNodePool to include each
+        of the bond types separately, which wasn't necessary for a
+        single-component tree. For example FFG -> FFG_AA, FFG_AB, and FFG_BB.
+        Chemistry trees are then built using the extended pool.
+        """
+
+        extendedPool = []
+        for node in svNodePool:
+            for bondType in node.bonds:
+                bondComps = node.bonds[bondType]
+
+                # Build dummy node to add each bond to a tree independently
+                dummyNode = SVNode(
+                    description=bondType,
+                    components=bondComps,
+                    numParams=[node.numParams[comp] for comp in bondComps],
+                    bonds={bondType: bondComps},
+                    restrictions={c: node.restrictions[c] for c in bondComps},
+                )
+
+                # # A pointer to the parent node to help with identification
+                # dummyNode._parent = node
+
+                extendedPool.append(dummyNode)
+
+
+        tree = cls()
+
+        # TODO: can't just randomly generate, need to identify which ones have
+        # shared parameters
+
+        tree.chemistryTrees = {
+            SVTree.random(extendedPool, maxDepth=maxDepth)
+        }
+
+        tree.svNodes = list(itertools.chain.from_iterable(
+            [tree.chemistryTrees[el].svNodes for el in tree.elements]
+        ))
+
+        tree.numFreeParams = {
+            el: sum([
+                n.totalNumFreeParams# + len(n.restrictions)
+                for n in tree.chemistryTrees[el].svNodes
+            ])
+            for el in tree.elements
+        }
+
+        tree.numParams = {
+            el: sum([
+                n.totalNumParams# + len(n.restrictions)
+                for n in tree.chemistryTrees[el].svNodes
+            ])
+            for el in tree.elements
+        }
+
+        tree.totalNumFreeParams = sum(tree.numFreeParams.values())
+        tree.totalNumParams = sum(tree.numParams.values())
+
+        return tree
+
+    
+    def eval(self):
+        return sum([tree.eval() for tree in self.chemistryTrees.values()])
+
+
+    def populate(self, N):
+        return np.hstack(
+            [self.chemistryTrees[el].populate(N) for el in self.elements]
+        )
+
+
+    def fillFixedKnots(self, population):
+        splits = np.cumsum([
+            self.chemistryTrees[el].totalNumFreeParams
+            for el in self.elements
+        ])
+        splitPop = np.array_split(population, splits, axis=1)
+
+        return np.hstack([
+            self.chemistryTrees[el].fillFixedKnots(splitPop[i])
+            for i,el in self.elements
+        ])
+
+    
+    def parseArr2Dict(self, rawPopulation, fillFixedKnots=True):
+        # This might get weird...
+        # Actually, can you just split and pass to sub-tree functions?
+        splitIndices = np.cumsum([
+            self.chemistryTrees[el].totalNumFreeParams if fillFixedKnots
+            else self.chemistryTrees[el].totalNumParams
+            for el in self.elements
+        ])[:-1]
+
+        splitPop = np.split(rawPopulation, splitIndices, axis=1)
+
+        subDicts = [
+            self.chemistryTrees[el].parseArr2Dict(splitPop[i])
+            for el in self.elements
+        ]
+
+        # The nodes of each tree are completely independent; there's no
+        # parameter sharing at all. However, this function is supposed to stack
+        # them so that all of the parameters for a given bond type can be
+        # evaluated at once (the results will be parsed later). The node names
+        # will be their bond type
+
+
+
+    # TODO: when pupulating, just override a node's self.components field with 
+    # a list of the active components only
+
+    # TODO: there's weird stuff about the logic of my code, where the evaluator
+    # and regressor seem to need a lot of knowledge about how the trees are
+    # structured?
