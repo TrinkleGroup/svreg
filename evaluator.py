@@ -32,20 +32,42 @@ class Manager:
     the full database.
     """
 
-    def __init__(self, id, rank, comm, structures):
+    def __init__(self, id, farmRank, farmComm, structures, ppn):
         self.id = id
-        self.rank = rank
-        self.comm = comm
+        self.farmRank = farmRank
+        self.farmComm = farmComm
         self.structures = structures
+        self.ppn = ppn
 
-        self.isHead = (self.rank == 0)
-        self.numWorkers = self.comm.Get_size()
+        self.isHead = (self.farmRank == 0)
+        self.numWorkers = self.farmComm.Get_size()
 
-    
+        self.nodeId   = self.farmRank // self.ppn
+        self.nodeRank = self.farmRank %  self.ppn
+
+        self.isNodeHead = (self.nodeRank == 0)
+
+        self.numNodes = self.numWorkers // self.ppn
+
+        # Build a communicator between Manager and node heads
+        nodeHeadRanks = np.arange(0, self.farmComm.Get_size(), self.ppn)
+
+        farmGroup = self.farmComm.Get_group()
+        nodeHeadGroup = farmGroup.Incl(nodeHeadRanks)
+
+        self.nodeHeadComm = self.farmComm.Create(nodeHeadGroup)
+
+        # Build a communicator between node heads and their physical processors
+        self.physComm = MPI.Comm.Split(farmComm, self.nodeId, self.nodeRank)
+        self.physSize = self.physComm.Get_size()
+
+   
     # @profile
     def evaluate(self, population, evalType):
         """
         Evaluates the population by splitting it across the farm of processors.
+        The Manager head first scatter the population across its node heads,
+        who then scatter their splits to their physical processors.
 
         Args:
             population (dict):
@@ -102,8 +124,13 @@ class Manager:
         else:
             localPopulations = None
 
+        # Scatter the population to each node head
+        localPop = self.farmComm.scatter(localPopulations, root=0)
 
-        localPop = self.comm.scatter(localPopulations, root=0)
+        # TODO: each node head should open a shared memory window for a results
+        # buffer, that way we can avoid in-node MPI calls, and the manager can
+        # just gather the buffers from each node head. I'm going to ignore this
+        # now, just because I'm not hitting communication limits yet.
 
         localValues = {}
         for structName in database:  # Loop over all locally-loaded structures
@@ -133,11 +160,11 @@ class Manager:
                         # simple algebraic functions, and are constant across
                         # all bond types, this can be summed safely here. In
                         # fact, the ffg splines don't need their 4th dimension.
-                        # Make sure to address this in database.py when you
+                        # Make sure to address this in summation.py when you
                         # the functions for constructing splines.
 
                         # TODO: the above is no longer true. In order to account
-                        # for different trees for reach bond type, the SVs must
+                        # for different trees for each bond type, the SVs must
                         # keep their extra dimension to allow for different U'
                         # scaling for each atom type
 
@@ -153,7 +180,7 @@ class Manager:
                 else:
                     localValues[structName][svName] = None
 
-        workerValues = self.comm.gather(localValues, root=0)
+        workerValues = self.farmComm.gather(localValues, root=0)
 
         # Gather results on head
         if self.isHead:
@@ -219,8 +246,8 @@ class Manager:
         # mpiDoubleSize = MPI.FLOAT.Get_size()
         mpiDoubleSize = MPI.DOUBLE.Get_size()
 
-        if self.isHead:
-            # Have the head node figure out how much memory to allocate
+        if self.isNodeHead:
+            # Have all node heads figure out how much memory to allocate
             fullKey = '/'.join(path)
 
             eng = h5pyFile[fullKey]['energy'][()]
@@ -235,19 +262,21 @@ class Manager:
             # Everyone else doesn't need to allocate anything
             engShape = None
             fcsShape = None
+
             engBytes = 0
             fcsBytes = 0
 
-        engShape = self.comm.bcast(engShape, root=0)
-        fcsShape = self.comm.bcast(fcsShape, root=0)
+        # ALL processes in the Manager need to know the shape
+        engShape = self.farmComm.bcast(engShape, root=0)
+        fcsShape = self.farmComm.bcast(fcsShape, root=0)
 
-        # Have everyone open windows to the shared memory
+        # Open shared memory windows on each physical node
         engShmemWin = MPI.Win.Allocate_shared(
-            engBytes, mpiDoubleSize, comm=self.comm
+            engBytes, mpiDoubleSize, comm=self.physComm
         )
 
         fcsShmemWin = MPI.Win.Allocate_shared(
-            fcsBytes, mpiDoubleSize, comm=self.comm
+            fcsBytes, mpiDoubleSize, comm=self.physComm
         )
 
         # Get buffers in the shared memory to fill; convert to Numpy buffers
@@ -260,7 +289,7 @@ class Manager:
         # Add natoms to shmem too
         natomsBytes = mpiDoubleSize  # should be enough
         natomsShmemWin = MPI.Win.Allocate_shared(
-            natomsBytes, mpiDoubleSize, comm=self.comm
+            natomsBytes, mpiDoubleSize, comm=self.physComm
         )
         natomsBuf, _ = natomsShmemWin.Shared_query(0)
         natomsShmemArr = np.ndarray(buffer=natomsBuf, dtype='f4', shape=(1,))
@@ -268,7 +297,6 @@ class Manager:
         # Iteratively build Manager-level database, then insert buffer
         pointer = database
         for i in range(len(path)):
-            # pointer[path[i]] = {}
             if path[i] in pointer:
                 pointer = pointer[path[i]]
             else:
@@ -279,8 +307,8 @@ class Manager:
         pointer['forces'] = fcsShmemArr
         natoms[path[0]] = natomsShmemArr
 
-        # Finally, populate buffer
-        if self.isHead:
+        # Finally, scatter data to node heads and have them populate buffers
+        if self.isNodeHead:
             pointer['energy'][...] = eng
             pointer['forces'][...] = fcs
             natoms[path[0]][...] = h5pyFile[path[0]].attrs['natoms']
@@ -323,12 +351,12 @@ class SVEvaluator:
         self.structNames = structNames
         self.settings = settings
 
-        # It's important to know if we're in charge of a Manager object
-        self.isManager = ((self.rank % settings['PROCS_PER_MANAGER']) == 0)
-
         # Build Manager object
         managerId = self.rank // settings['PROCS_PER_MANAGER']
         localRank = self.rank  % settings['PROCS_PER_MANAGER']
+
+        # It's important to know if we're in charge of a Manager object
+        self.isManager = (localRank == 0)
 
         # Build a communicator between master process and Manager heads
         self.managerComm = self.buildManagerComm()
@@ -339,9 +367,12 @@ class SVEvaluator:
         )[managerId]
 
         # Build a communicator between Manager head and its farm of processors
-        localComm = MPI.Comm.Split(comm, managerId, self.rank)
+        farmComm = MPI.Comm.Split(comm, managerId, localRank)
 
-        self.manager = Manager(managerId, localRank, localComm, managerStructs)
+        self.manager = Manager(
+            managerId, localRank, farmComm, managerStructs,
+            settings['PROCS_PER_PHYS_NODE']
+        )
 
 
     def buildManagerComm(self):
