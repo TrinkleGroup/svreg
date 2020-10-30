@@ -68,9 +68,12 @@ class SVNode(Node):
             component. It's assumed that this does NOT take into account any
             non-free knots specified by `restrictions`.
 
-        bonds (dict):
-            A dict of lists, where each sub-list is a set of component names to
-            be used for the given bond type.
+        constructor (list):
+            A list of components for building a parameter vector out of the node
+            components. For example, if components = ['f_A', 'g_AA'] and
+            constructor = ['f_A', 'f_A', 'g_AA'], then the node would build the
+            full parameter vector by generating vectors for 'f_A' and 'g_AA',
+            then computing np.outer(np.outer('f_A', 'f_A'), 'g_AA').
 
         population (np.arr):
             An array of shape (P, self.numParams) where each row
@@ -92,13 +95,13 @@ class SVNode(Node):
     """
 
     def __init__(
-        self, description, components, numParams, bonds,
+        self, description, components, constructor, numParams,
         restrictions=None, paramRanges=None
         ):
 
         Node.__init__(self, description)
         self.components = components
-        self.bonds = bonds
+        self.constructor = constructor
 
         # Load any restricted knot values
         tmp = restrictions
@@ -107,16 +110,18 @@ class SVNode(Node):
 
         self.restrictions = {comp: res for comp, res in zip(components, tmp)}
 
-        self.numParams = numParams
+        # self.restrictions = restrictions
 
         # Store number of free parameters
         self.numFreeParams = {}
+        self.numParams = {}
         for compName, num in zip(components, numParams):
             numFixed = len(self.restrictions[compName])
             self.numFreeParams[compName] = num - numFixed
+            self.numParams[compName] = num
 
         self.totalNumParams = sum(self.numParams.values())
-        self.totalNumFreeParams = sum(self.numFreeParams)
+        self.totalNumFreeParams = sum(self.numFreeParams.values())
 
         # Load any limits on the parameter ranges for each component type
         self.paramRanges = paramRanges
@@ -133,9 +138,7 @@ class SVNode(Node):
     
     def populate(self, popSize):
         """
-        Generate a random population of `popSize` fitting parameters. Since
-        bonds should share parameters if they use the same SV components, this
-        builds a single population for each component type.
+        Generate a random population of `popSize` fitting parameters.
 
         Args:
             popSize (int):
@@ -149,7 +152,7 @@ class SVNode(Node):
 
         population = []
         for componentName in self.components:
-            numParams = self.numParams[componentName]
+            numParams = self.numFreeParams[componentName]
 
             pop = np.random.random(size=(popSize, numParams))
 

@@ -86,6 +86,8 @@ def main(settings, worldComm, isMaster):
         numStructs = len(trueValues)
 
         natoms = {k: database[k].attrs['natoms'] for k in database}
+
+        elements = [el.decode('utf-8') for el in database.attrs['elements']]
     
     # Prepare regressor
     if settings['optimizer'] == 'CMA':
@@ -123,7 +125,7 @@ def main(settings, worldComm, isMaster):
             settings, svNodePool, optimizer, optimizerArgs
         )
 
-        regressor.initializeTrees(numElements=numElements)
+        regressor.initializeTrees(elements=elements)
         regressor.initializeOptimizers()
         print()
 
@@ -157,15 +159,35 @@ def main(settings, worldComm, isMaster):
 
                 # Group all dictionaries into one
                 populationDict = {}
-                for svNode in svNodePool:
-                    populationDict[svNode.description] = {}
-                    for bondType in svNode.bonds:
-                        populationDict[svNode.description][bondType] = []
+                for elem in elements:
+                    populationDict[elem] = {}
+                    for svNode in svNodePool:
+                        # populationDict[svNode.description] = {}
+                        populationDict[elem][svNode.description] = []
+                    # for bondType in svNode.bonds:
+                    #     populationDict[svNode.description][bondType] = []
+
+                # TODO: even though there's no parameter sharing, I should still
+                # be stacking parameters by svType ('ffg' or 'rho') instead of
+                # by bondType. I need to change parseArr2Dict, then move on to
+                # figuring out how to parse everything properly.
 
                 for treeDict in treePopulations:
-                    for svName in treeDict.keys():
-                        for bondType, pop in treeDict[svName].items():
-                            populationDict[svName][bondType].append(pop)
+                    for elem in elements:
+                        for svName in treeDict[elem].keys():
+                            if svName not in populationDict:
+                                populationDict[elem][svName] = []
+                                # populationDict[svName] = {
+                                #     bondType: []
+                                #     for bondType in treeDict[svName].keys()
+                                # }
+
+                            populationDict[elem][svName].append(
+                                treeDict[elem][svName]
+                            )
+
+                            # for bondType, pop in treeDict[svName].items():
+                            #     populationDict[svName][bondType].append(pop)
 
             else:
                 populationDict = None
@@ -455,7 +477,7 @@ def fixedExample(settings, worldComm, isMaster):
                 bestTree = bestIdx//N
                 saveTree = deepcopy(regressor.trees[bestTree])
                 saveTree.bestParams = saveTree.fillFixedKnots(
-                    rawPopulations[bestTree][bestIdx]
+                    np.atleast_2d(rawPopulations[bestTree][bestIdx])
                 )[0]
 
                 errorsOutfilePath = os.path.join(
@@ -546,20 +568,56 @@ def buildSVNodePool(group):
                     tmp.append(tuple(resList.pop()))
                 restrictions.append(tmp)
 
+        # for bondType in svGroup:
+
+        bondComps = sorted(set(svGroup.attrs['components']))
+        numParams = []
+        restr = []
+
+        cList = svGroup.attrs['components'].tolist()
+        for c in bondComps:
+            idx = cList.index(c)
+            numParams.append(svGroup.attrs['numParams'][idx])
+            restr.append(restrictions[idx])
+
+        if 'paramRanges' in group[svName].attrs:
+            pRanges = []
+            for c in bondComps:
+                idx = cList.index(c)
+                pRanges.append(svGroup.attrs['paramRanges'][idx])
+        else:
+            pRanges = None
+
+        bondComps = [c.decode('utf-8') for c in bondComps]
+
+
         svNodePool.append(
             SVNode(
                 description=svName,
-                components=svGroup.attrs['components'],
-                numParams=svGroup.attrs['numParams'],
-                bonds={
-                    k:svGroup[k].attrs['components'] for k in svGroup.keys()
-                },
-                # bondMapping=eval(svGroup.attrs['bondMapping']),
-                restrictions=restrictions,
-                paramRanges=svGroup.attrs['paramRanges']\
-                    if 'paramRanges' in group[svName].attrs else None
+                components=bondComps,
+                constructor=[
+                    c.decode('utf-8') for c in svGroup.attrs['components']
+                ],
+                numParams=numParams,
+                restrictions=restr,
+                paramRanges=pRanges,
             )
         )
+
+            # svNodePool.append(
+            #     SVNode(
+            #         description=svName,
+            #         components=svGroup[bondType].attrs['components'],
+            #         numParams=svGroup.attrs['numParams'],
+            #         bonds={
+            #             k:svGroup[k].attrs['components'] for k in svGroup.keys()
+            #         },
+            #         # bondMapping=eval(svGroup.attrs['bondMapping']),
+            #         restrictions=restrictions,
+            #         paramRanges=svGroup.attrs['paramRanges']\
+            #             if 'paramRanges' in group[svName].attrs else None
+            #     )
+            # )
 
     return svNodePool
 

@@ -62,20 +62,29 @@ class SVRegressor:
         self.trees = []
 
 
-    def initializeTrees(self, numElements):
+    def initializeTrees(self, elements):
         """Populates the GA with randomly-generated equation trees."""
+
+        numElements = len(elements)
 
         if numElements < 1:
             raise RuntimeError("numElements must be >= 1 in initializeTrees()")
 
-        treeClass = SVTree if numElements == 1 else MCTree
-
-        self.trees = [
-            treeClass.random(
-                svNodePool=self.svNodePool,
-                maxDepth=random.randint(1, self.settings['maxTreeDepth']),
-            ) for _ in range(self.settings['numberOfTrees'])
-        ]
+        if numElements == 1:
+            self.trees = [
+                SVTree.random(
+                    svNodePool=self.svNodePool,
+                    maxDepth=random.randint(1, self.settings['maxTreeDepth']),
+                ) for _ in range(self.settings['numberOfTrees'])
+            ]
+        else:
+            self.trees = [
+                MCTree.random(
+                    svNodePool=self.svNodePool,
+                    maxDepth=random.randint(1, self.settings['maxTreeDepth']),
+                    elements=elements
+                ) for _ in range(self.settings['numberOfTrees'])
+            ]
 
     def evaluateTrees(self, svEng, svFcs, N):
         """
@@ -84,7 +93,7 @@ class SVRegressor:
 
         Args:
             svEng, svFcs (dict):
-                {structName: {svName: list of values for each tree}}
+                {elem: {structName: {svName: list of values for each tree}}}
 
             N (int):
                 The number of parameter sets for each node. Used for splitting
@@ -99,31 +108,35 @@ class SVRegressor:
         forces   = {struct:[] for struct in svFcs.keys()}
         for structName in energies:
             for svName in svEng[structName]:
-                # The list of stacked values for each tree for a given SV type
-                listOfEng = svEng[structName][svName]
-                listOfFcs = svFcs[structName][svName]
+                for elem in self.trees[0].elements[::-1]:
+                    # Uses sorted elements list so it can loop over svNodes
 
-                # Un-stack any stacked values
-                unstackedValues = []
-                for val1, val2 in zip(listOfEng, listOfFcs):
-                    unstackedValues += list(zip(
-                        np.split(val1, val1.shape[0]//N, axis=0),
-                        np.split(val2, val2.shape[0]//N, axis=0)
-                    ))
+                    # The list of stacked values for each tree for a given SV type
+                    listOfEng = svEng[structName][svName][elem]
+                    listOfFcs = svFcs[structName][svName][elem]
 
-                # Loop over the list of values
-                # for tree, treeVals in zip(self.trees, listOfValues):
-                for tree in self.trees[::-1]:
-                    # tree.updateNodeValues(unstackedValues, svName)
-                    for svNode in self.svNodes[::-1]:
-                        # Only update the SVNode objects of the current type
-                        if svNode.description == svName:
-                            svNode.values = unstackedValues.pop()
+                    # Un-stack any stacked values
+                    unstackedValues = []
+                    for val1, val2 in zip(listOfEng, listOfFcs):
+                        unstackedValues += list(zip(
+                            np.split(val1, val1.shape[0]//N, axis=0),
+                            np.split(val2, val2.shape[0]//N, axis=0)
+                        ))
 
-                # Error check to see if there are leftovers
-                leftovers = len(unstackedValues)
-                if leftovers > 0:
-                    raise RuntimeError('Found leftover results.')
+                    # Loop over the list of values
+                    # for tree, treeVals in zip(self.trees, listOfValues):
+                    for tree in self.trees[::-1]:
+                        # tree.updateNodeValues(unstackedValues, svName)
+                        for svNode in tree.chemistryTrees[elem].svNodes[::-1]:
+                            # Only update the SVNode objects of the current type
+                            if svNode.description == svName:
+                                # TODO: resume: getting pop from empty list error 
+                                svNode.values = unstackedValues.pop()
+
+                    # Error check to see if there are leftovers
+                    leftovers = len(unstackedValues)
+                    if leftovers > 0:
+                        raise RuntimeError('Found leftover results.')
 
             # If here, all of the nodes have been updated with their values
             for tree in self.trees:

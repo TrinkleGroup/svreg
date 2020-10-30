@@ -49,25 +49,45 @@ class Manager:
 
         Args:
             population (dict):
-                {svName: {bondType: list of populations for trees}}
+                {
+                    elem: {svName: {bondType: list of populations for trees}}
+                    for elem in elements
+                }
 
             evalType (str):
                 'energy' or 'forces'
 
         Returns:
             managerValues (dict):
-                {structName: {svName: list of results}}. Since each SVNode
+                {el: {structName: {svName: list of results}}}. Since each SVNode
                 may not necessarily have the same number of each evaluations for
                 each svName, the results need to be kept as lists.
         """
 
+        # TODO: This should eval energies/forces at the same time
+
+        # TODO: something seems wrong here. Each SV might not be used in each
+        # tree, and the splits might be different for each tree. So this should
+        # be indexed by element too, right? Maybe not. I'm not sure.
+        # All bond types will be of the same shape, but they'll be indexed not
+        # only by which tree they're a part of, but also which element. I COULD
+        # batch them by element, but it seems like it'll just make it more
+        # confusing later. Therefore, splits will be element-based too. This
+        # means that input populations should also be element-based.
+
         if self.isHead:
+            elements = list(population.keys())
+
             # Group the populations, but track how to un-group them for later
-            splits = {}
-            batchedPopulations = {}
-            for svName in population.keys():
-                batchedPopulations[svName] = {}
-                for bondType, listOfPops in population[svName].items():
+            splits = {el: {} for el in elements}
+            batchedPopulations = {el: {} for el in elements}
+            for elem in elements:
+                for svName in population[elem].keys():
+                    # batchedPopulations[svName] = {}
+
+                    listOfPops = population[elem][svName]
+
+                    # for bondType, listOfPops in population[svName].items():
                     splitIndices = np.cumsum(
                         [pop.shape[0] for pop in listOfPops]
                     )[:-1]
@@ -75,26 +95,25 @@ class Manager:
                     # Record how to un-group the populations for each tree
                     # Note: don't need to save for all bondTypes because they
                     # should all have the same dimensions
-                    splits[svName] = splitIndices
+                    splits[elem][svName] = splitIndices
                     
                     if len(listOfPops) > 0:
                         # Split the full population across the workers
-                        batchedPopulations[svName][bondType] = np.array_split(
+                        # batchedPopulations[svName][bondType] = np.array_split(
+                        batchedPopulations[elem][svName] = np.array_split(
                             np.vstack(listOfPops), self.numWorkers
                         )
                     else:
-                        batchedPopulations[svName][bondType] = \
-                             [None]*self.numWorkers
+                        batchedPopulations[elem][svName] = [None]*self.numWorkers
 
 
             # Prepare the split populations for MPI scatter()
             localPopulations = [
-                {
-                    svName: {
-                        bondType: batchedPopulations[svName][bondType][i]
-                        for bondType in population[svName]
+                {el: {
+                        svName: batchedPopulations[el][svName][i]
+                        for svName in population[el]
                     }
-                    for svName in population
+                    for el in elements
                 }
                 for i in range(self.numWorkers)
             ]
@@ -104,79 +123,96 @@ class Manager:
 
 
         localPop = self.comm.scatter(localPopulations, root=0)
+        elements = list(localPop.keys())
 
         localValues = {}
         for structName in database:  # Loop over all locally-loaded structures
             n = int(natoms[structName])
-            localValues[structName] = {}
+            localValues[structName] = {el: {} for el in elements}
 
-            for svName in database[structName]:
-                intermediates = []  # for summing over bond types
-                for bondType in database[structName][svName]:
-                    if localPop[svName][bondType] is None:
-                        # Possible if a tree doesn't use a given SV;
-                        # localPop[svName] will have [bondType] entries, so it
-                        # won't be None
-                        continue
+            for elem in elements:
+                localValues[structName][elem] = {}
 
-                    sv = database[structName][svName][bondType][evalType]
-                    val = (sv @ localPop[svName][bondType].T).T
+                for svName in database[structName]:
+                # for svName in localPop[elem]:
+                    localValues[structName][elem][svName] = {}
 
-                    if evalType == 'energy':
-                        # Will convert to per-atom energies in __main__.py
+                    for elem in database[structName][svName]:
+                        if localPop[elem][svName] is None:
+                            # Possible if a tree doesn't use a given SV;
+                            # localPop[svName] will have [bondType] entries, so it
+                            # won't be None
+                            localValues[structName][elem][svName] = None
+                            continue
 
-                        # TODO: don't sum across atoms here; I'll need to split
-                        # by atom type later for different branches
+                        # TODO: need to store results for each element type
+                        sv = database[structName][svName][elem][evalType]
+                        val = (sv @ localPop[elem][svName].T).T
 
-                        val = val.sum(axis=1)#/n
+                        if evalType == 'energy':
+                            # Will convert to per-atom energies in __main__.py
 
-                    elif evalType == 'forces':
-                        # TODO: nodemanager had to apply U' because the
-                        # embedding function could be different for each atom
-                        # type. Since the embedding functions are now just
-                        # simple algebraic functions, and are constant across
-                        # all bond types, this can be summed safely here. In
-                        # fact, the ffg splines don't need their 4th dimension.
-                        # Make sure to address this in database.py when you
-                        # the functions for constructing splines.
+                            # TODO: don't sum across atoms here; I'll need to split
+                            # by atom type later for different branches
 
-                        # TODO: the above is no longer true. In order to account
-                        # for different trees for reach bond type, the SVs must
-                        # keep their extra dimension to allow for different U'
-                        # scaling for each atom type
+                            val = val.sum(axis=1)#/n
 
-                        # TODO: check if you're still allowed to sum here.
+                        elif evalType == 'forces':
+                            # TODO: nodemanager had to apply U' because the
+                            # embedding function could be different for each atom
+                            # type. Since the embedding functions are now just
+                            # simple algebraic functions, and are constant across
+                            # all bond types, this can be summed safely here. In
+                            # fact, the ffg splines don't need their 4th dimension.
+                            # Make sure to address this in database.py when you
+                            # the functions for constructing splines.
 
-                        val = val.reshape(
-                            localPop[svName][bondType].shape[0], 3, n, n
-                        )
-                        val = val.sum(axis=-1).swapaxes(1, 2)
+                            # TODO: the above is no longer true. In order to account
+                            # for different trees for reach bond type, the SVs must
+                            # keep their extra dimension to allow for different U'
+                            # scaling for each atom type
 
-                    intermediates.append(val)
+                            # TODO: check if you're still allowed to sum here.
 
-                if len(intermediates) > 0:
-                    localValues[structName][svName] = sum(intermediates)
-                else:
-                    localValues[structName][svName] = None
+                            # TODO: N could be different for each atom type
+                            nhost = val.shape[1]//3//n
+
+                            val = val.reshape(
+                                localPop[elem][svName].shape[0], 3, nhost, n
+                            )
+                            val = val.sum(axis=-1).swapaxes(1, 2)
+
+                        localValues[structName][elem][svName] = val
+
+                    # if len(intermediates) > 0:
+                    #     localValues[structName][svName] = sum(intermediates)
+                    # else:
+                    #     localValues[structName][svName] = None
 
         workerValues = self.comm.gather(localValues, root=0)
 
         # Gather results on head
         if self.isHead:
             # workerValues = [{structName: {svName: sub-population}}]
-            managerValues = {structName: {} for structName in database}
+            managerValues = {
+                structName: {
+                    svName: {} for svName in database[structName]
+                } for structName in database
+            }
             for structName in database:
                 for svName in database[structName]:
-                    if workerValues[0][structName][svName] is None:
-                        continue
+                    for elem in database[structName][svName]:
+                        if workerValues[0][structName][elem][svName] is None:
+                            managerValues[structName][svName][elem] = []
+                            continue
 
-                    # Stack over worker results, then split by tree pop sizes
-                    managerValues[structName][svName] = np.split(
-                        np.concatenate([
-                            v[structName][svName] for v in workerValues
-                        ]),
-                        splits[svName]
-                    )
+                        # Stack worker results, then split by tree pop sizes
+                        managerValues[structName][svName][elem] = np.split(
+                            np.concatenate([
+                                v[structName][elem][svName] for v in workerValues
+                            ]),
+                            splits[elem][svName]
+                        )
 
         else:
             managerValues = None
@@ -199,8 +235,11 @@ class Manager:
             structGroup = h5pyFile[struct]
             for svName in structGroup:
                 # Ideally, map N-D bond-types into a 1D index
-                for bondType in structGroup[svName]:
-                    path = [struct, svName, bondType]
+                # for bondType in structGroup[svName]:
+                # for elem in structGroup[svName][bondType]:
+                    # path = [struct, svName, bondType, elem]
+                for elem in structGroup[svName]:
+                    path = [struct, svName, elem]
 
                     self.loadToSharedMemory(path, h5pyFile)
 

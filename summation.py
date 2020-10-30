@@ -1,5 +1,5 @@
+import itertools
 import numpy as np
-
 from numba import jit
 from scipy.sparse import diags
 from scipy.interpolate import CubicSpline
@@ -65,12 +65,14 @@ class Summation:
     """
 
     def __init__(
-        self, name, components, numParams, restrictions, paramRanges, bonds,
-        bondMapping, cutoffs, numElements, bc_type,
+        self, name, elements, components, inputTypes, numParams, restrictions,
+        paramRanges, bonds, bondMapping, cutoffs, numElements, bc_type,
         ):
 
         self.name           = name
+        self.elements       = elements
         self.components     = components
+        self.inputTypes     = inputTypes
         self.numParams      = numParams
         self.restrictions   = restrictions
         self.paramRanges    = paramRanges
