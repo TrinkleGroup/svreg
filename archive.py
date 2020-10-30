@@ -127,6 +127,11 @@ class Archive(dict):
         costs = np.array([self[k].cost for k in keys])
         costs = 1-erf(np.log(costs))
         costs[np.where(np.isnan(costs))] = 0
+
+        # Handle the case where all costs are really high
+        if sum(costs) == 0:
+            costs = np.random.random(size=costs.shape)
+
         costs /= np.sum(costs)
 
         sampleNames = np.random.choice(

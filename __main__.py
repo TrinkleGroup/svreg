@@ -162,33 +162,17 @@ def main(settings, worldComm, isMaster):
                 for elem in elements:
                     populationDict[elem] = {}
                     for svNode in svNodePool:
-                        # populationDict[svNode.description] = {}
                         populationDict[elem][svNode.description] = []
-                    # for bondType in svNode.bonds:
-                    #     populationDict[svNode.description][bondType] = []
-
-                # TODO: even though there's no parameter sharing, I should still
-                # be stacking parameters by svType ('ffg' or 'rho') instead of
-                # by bondType. I need to change parseArr2Dict, then move on to
-                # figuring out how to parse everything properly.
 
                 for treeDict in treePopulations:
                     for elem in elements:
                         for svName in treeDict[elem].keys():
                             if svName not in populationDict:
                                 populationDict[elem][svName] = []
-                                # populationDict[svName] = {
-                                #     bondType: []
-                                #     for bondType in treeDict[svName].keys()
-                                # }
 
                             populationDict[elem][svName].append(
                                 treeDict[elem][svName]
                             )
-
-                            # for bondType, pop in treeDict[svName].items():
-                            #     populationDict[svName][bondType].append(pop)
-
             else:
                 populationDict = None
 

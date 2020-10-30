@@ -184,7 +184,6 @@ class SVRegressor:
 
         newTrees = []
         for _ in range(self.settings['numberOfTrees'] - len(self.trees)):
-            # parent = self.tournament()
             parent = deepcopy(random.choice(self.trees))
 
             # For handling only allowing crossover OR point mutation

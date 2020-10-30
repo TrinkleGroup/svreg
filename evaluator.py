@@ -130,8 +130,6 @@ class Manager:
 
         # Scatter the population to each node head
         localPop = self.farmComm.scatter(localPopulations, root=0)
-
-        localPop = self.comm.scatter(localPopulations, root=0)
         elements = list(localPop.keys())
 
         localValues = {}

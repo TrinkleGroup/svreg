@@ -746,10 +746,8 @@ class MultiComponentTree(SVTree):
     @classmethod
     def random(cls, svNodePool, elements, maxDepth=1):
         """
-        Overloads SVTree.random() to extend the given svNodePool to include each
-        of the bond types separately, which wasn't necessary for a
-        single-component tree. For example FFG -> FFG_AA, FFG_AB, and FFG_BB.
-        Chemistry trees are then built using the extended pool.
+        Overloads SVTree.random() to generate random trees for each chemistry,
+        then to update the corresponding class attributes.
         """
 
         tree = cls(elements)
@@ -759,28 +757,7 @@ class MultiComponentTree(SVTree):
             for el in tree.elements
         }
 
-        tree.svNodes = list(itertools.chain.from_iterable(
-            [tree.chemistryTrees[el].svNodes for el in tree.elements]
-        ))
-
-        tree.numFreeParams = {
-            el: sum([
-                n.totalNumFreeParams
-                for n in tree.chemistryTrees[el].svNodes
-            ])
-            for el in tree.elements
-        }
-
-        tree.numParams = {
-            el: sum([
-                n.totalNumParams
-                for n in tree.chemistryTrees[el].svNodes
-            ])
-            for el in tree.elements
-        }
-
-        tree.totalNumFreeParams = sum(tree.numFreeParams.values())
-        tree.totalNumParams = sum(tree.numParams.values())
+        tree.updateSVNodes()
 
         return tree
 
@@ -825,6 +802,48 @@ class MultiComponentTree(SVTree):
         }
 
         return subDicts
+
+
+    def crossover(self, donor):
+        """
+        For MCTree, crossover does not necessarily need to be within trees of
+        the same host element type. Crossover is performed by choosing a random
+        from both parents.
+        """
+
+        parentTree1 = random.choice(list(self.chemistryTrees.values()))
+        parentTree2 = random.choice(list(donor.chemistryTrees.values()))
+
+        parentTree1.crossover(parentTree2)
+
+
+    def updateSVNodes(self):
+
+        for tree in self.chemistryTrees.values():
+            tree.updateSVNodes()
+
+        self.svNodes = list(itertools.chain.from_iterable(
+            [self.chemistryTrees[el].svNodes for el in self.elements]
+        ))
+
+        self.numFreeParams = {
+            el: sum([
+                n.totalNumFreeParams
+                for n in self.chemistryTrees[el].svNodes
+            ])
+            for el in self.elements
+        }
+
+        self.numParams = {
+            el: sum([
+                n.totalNumParams
+                for n in self.chemistryTrees[el].svNodes
+            ])
+            for el in self.elements
+        }
+
+        self.totalNumFreeParams = sum(self.numFreeParams.values())
+        self.totalNumParams = sum(self.numParams.values())
 
 
     def __str__(self):
