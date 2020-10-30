@@ -110,8 +110,6 @@ class SVNode(Node):
 
         self.restrictions = {comp: res for comp, res in zip(components, tmp)}
 
-        # self.restrictions = restrictions
-
         # Store number of free parameters
         self.numFreeParams = {}
         self.numParams = {}

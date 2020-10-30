@@ -204,13 +204,6 @@ class SVTree(list):
         return np.hstack(population)
 
 
-    # def updateNodeValues(self, values, svName):
-    #     for svNode in self.svNodes[::-1]:
-    #         # Only update the SVNode objects of the current type
-    #         if svNode.description == svName:
-    #             svNode.values = values.pop()
-
-
     def getPopulation(self):
         """Return a 2D array of all SVNode parameters"""
 
@@ -338,15 +331,11 @@ class SVTree(list):
             # Prepare dictionary if entry doesn't exist yet
             if svNode.description not in parameters:
                 parameters[svNode.description] = []
-                # parameters[svNode.description] = {
-                #     bondType: [] for bondType in svNode.bonds
-                # }
 
             # Split the parameters for each component type
             if fillFixedKnots:
                 splitParams = np.array_split(
                     rawParams, np.cumsum(
-                        # [svNode.numParams[c] for c in svNode.components]
                         [svNode.numFreeParams[c] for c in svNode.components]
                     )[:-1],
                     axis=1
@@ -354,7 +343,6 @@ class SVTree(list):
             else:
                 splitParams = np.array_split(
                     rawParams, np.cumsum([
-                        # len(svNode.restrictions[c]) + sum([svNode.numParams[c]])
                         svNode.numParams[c] for c in svNode.components
                     ])[:-1],
                     axis=1
@@ -371,9 +359,6 @@ class SVTree(list):
                 else:
                     componentParams[compName] = pop
 
-            # for bondType, bondComponents in svNode.bonds.items():
-                # Take outer products to form SV params out of bond components
-
             cart = None
             for componentName in svNode.constructor:
                 tmp = componentParams[componentName]
@@ -386,17 +371,11 @@ class SVTree(list):
                         cart.shape[0], cart.shape[1]*cart.shape[2]
                     )
 
-            # parameters[svNode.description][bondType].append(cart)
             parameters[svNode.description].append(cart)
 
         # Stack populations of same bond type; can be split by N later
         for svName in parameters:
             parameters[svName] = np.vstack(parameters[svName])
-            # for bondType in parameters[svName]:
-            #     # TODO: theres now the 'element' indexing too
-            #     parameters[svName][bondType] = np.vstack(
-            #         parameters[svName][bondType]
-            #     )
 
         return parameters
 
@@ -641,11 +620,7 @@ class SVTree(list):
         if evalType not in ['energy', 'forces']:
             raise RuntimeError("evalType must be one of 'energy' or 'forces'.")
 
-        splits = np.cumsum([
-            # n.totalNumParams + len(n.restrictions) for n in self.svNodes
-            n.totalNumParams#+sum([len(r) for r in n.restrictions.values()])
-            for n in self.svNodes
-        ])[:-1]
+        splits = np.cumsum([n.totalNumParams for n in self.svNodes])[:-1]
         splitParams = np.array_split(y, splits)
 
         # Clone the tree, but replace SVNode objects with Summation objects
@@ -750,14 +725,6 @@ class MultiComponentTree(SVTree):
         5)  Mate/mutate operations in an MCT can operate between chemistry
             trees.
 
-    TODO:
-        -   It would be helpful if the chemistry trees were in a dictionary
-            where the key was the element type, that way results could be parsed
-            more easily.
-        -   The Evaluator might need to be informed if it's dealing with single-
-            or mult-component data, that way it knows if it should split by
-            element or not.
-
     Note: when doing any looping over nodes or chemistry trees, it's assumed
     that the looop will go over the trees in alphabetical order of chemical
     name.
@@ -769,21 +736,8 @@ class MultiComponentTree(SVTree):
             MCT.
     """
 
-    # TODO: is it really better to make MCT than just to generalize SVTree??
-    # If I make MCT.svNodes be the dummy nodes, then it should still update
-    # properly, right? Maybe just do the MCT, then use it to replace the SVTree
-    # if it seems appropriate.
-
     def __init__(self, elements):#, nodes=None):
         self.elements = sorted(elements)
-
-        # TODO: I don't think I need MCT to track nodes, just let child do it
-        # if nodes is None:
-        #     nodes = {el: [] for el in self.elements}
-
-        # self.nodes = nodes
-
-        # self.chemistryTrees = {el: SVTree(nodes[el]) for el in self.elements}
         self.chemistryTrees = {el: None for el in self.elements}
         self.treeNumParams = {el: None for el in self.elements}
         self.cost = np.inf
@@ -798,40 +752,9 @@ class MultiComponentTree(SVTree):
         Chemistry trees are then built using the extended pool.
         """
 
-        # extendedPool = []
-        # for node in svNodePool:
-        #     for bondType in node.bonds:
-        #         # Note: when specifying the bonds to the dummy node, we use the
-        #         # non-unique list of components since it will be used to
-        #         # generate the fitting parameters
-        #         bondComps = sorted(set(node.bonds[bondType]))
-
-        #         # Build dummy node to add each bond to a tree independently
-        #         dummyNode = SVNode(
-        #             description=bondType,
-        #             components=bondComps,
-        #             numParams=[node.numParams[comp] for comp in bondComps],
-        #             bonds={bondType: node.bonds[bondType]},
-        #             # restrictions={c: node.restrictions[c] for c in bondComps},
-        #             restrictions=[node.restrictions[c] for c in bondComps],
-        #             # restrictions=list(itertools.chain.from_iterable(
-        #             #     node.restrictions[c] for c in bondComps
-        #             # )),
-        #         )
-
-        #         # # A pointer to the parent node to help with identification
-        #         # dummyNode._parent = node
-
-        #         extendedPool.append(dummyNode)
-
-
         tree = cls(elements)
 
-        # TODO: can't just randomly generate, need to identify which ones have
-        # shared parameters
-
         tree.chemistryTrees = {
-            # el: SVTree.random(extendedPool, maxDepth=maxDepth)
             el: SVTree.random(svNodePool, maxDepth=maxDepth)
             for el in tree.elements
         }
@@ -842,7 +765,7 @@ class MultiComponentTree(SVTree):
 
         tree.numFreeParams = {
             el: sum([
-                n.totalNumFreeParams# + len(n.restrictions)
+                n.totalNumFreeParams
                 for n in tree.chemistryTrees[el].svNodes
             ])
             for el in tree.elements
@@ -850,7 +773,7 @@ class MultiComponentTree(SVTree):
 
         tree.numParams = {
             el: sum([
-                n.totalNumParams# + len(n.restrictions)
+                n.totalNumParams
                 for n in tree.chemistryTrees[el].svNodes
             ])
             for el in tree.elements
@@ -888,8 +811,6 @@ class MultiComponentTree(SVTree):
 
     
     def parseArr2Dict(self, rawPopulation, fillFixedKnots=True):
-        # This might get weird...
-        # Actually, can you just split and pass to sub-tree functions?
         splitIndices = np.cumsum([
             self.chemistryTrees[el].totalNumFreeParams if fillFixedKnots
             else self.chemistryTrees[el].totalNumParams
@@ -904,38 +825,6 @@ class MultiComponentTree(SVTree):
         }
 
         return subDicts
-
-        # # {svName: {bondType: np.vstack-ed array of parameters}}
-        # fullDict = {}
-        # for dct in subDicts:
-        #     for svName in dct:
-        #         if svName not in fullDict:
-        #             # Initialize dictionary entry for a new SV
-        #             # fullDict[svName] = {bondType: [dct[svName]]}
-        #             fullDict[svName] = [dct[svName]]
-        #         else:
-        #             # Prepare to stack values into existing entry
-        #             fullDict[svName].append(dct[svName])
-
-        # for svName in fullDict:
-        #     fullDict[svName] = np.vstack(fullDict[svName])
-
-        #     # for bondType in fullDict[svName]:
-        #     #     fullDict[svName][bondType] = np.vstack(
-        #     #         fullDict[svName][bondType]
-        #     #     )
-
-        # return fullDict
-
-        # The current assumption is that every single node is completely
-        # distinct and has no parameter sharing (even FFG_AA and FFG_AB).
-        # Because of this, it's okay to stack them by name
-
-        # The nodes of each tree are completely independent; there's no
-        # parameter sharing at all. However, this function is supposed to stack
-        # them so that all of the parameters for a given bond type can be
-        # evaluated at once (the results will be parsed later). The node names
-        # will be their bond type
 
 
     def __str__(self):

@@ -40,14 +40,7 @@ class SVDatabase(h5py.File):
                         for each component. If left unspecified, uses the
                         default range of (0, 1) for all components.
 
-                    <bond_type>
-                        .attrs['components'] (list):
-                            A list of components that are used for the given
-                            bond type. If multiple, assumes that the SV is
-                            constructed by computing outer products of the
-                            parameters for each of the components of the bond.
-
-                        <eval_type> ('energy' or 'forces')
+                    <eval_type> ('energy' or 'forces')
     """
 
     def __init__(self, path, openType, *args, **kwargs):
@@ -125,7 +118,6 @@ class SVDatabase(h5py.File):
         for sv in self.structureVectors:
             # Assumes `sv` is a fully-prepared StructureVector object
 
-            # vectors = {bondType: {'energy': vec1, 'forces': vec2}}
             vectors = sv.loop(atoms, 'vector')
 
             for bondType in vectors:

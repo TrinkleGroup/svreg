@@ -66,15 +66,6 @@ class Manager:
 
         # TODO: This should eval energies/forces at the same time
 
-        # TODO: something seems wrong here. Each SV might not be used in each
-        # tree, and the splits might be different for each tree. So this should
-        # be indexed by element too, right? Maybe not. I'm not sure.
-        # All bond types will be of the same shape, but they'll be indexed not
-        # only by which tree they're a part of, but also which element. I COULD
-        # batch them by element, but it seems like it'll just make it more
-        # confusing later. Therefore, splits will be element-based too. This
-        # means that input populations should also be element-based.
-
         if self.isHead:
             elements = list(population.keys())
 
@@ -83,23 +74,17 @@ class Manager:
             batchedPopulations = {el: {} for el in elements}
             for elem in elements:
                 for svName in population[elem].keys():
-                    # batchedPopulations[svName] = {}
-
                     listOfPops = population[elem][svName]
 
-                    # for bondType, listOfPops in population[svName].items():
                     splitIndices = np.cumsum(
                         [pop.shape[0] for pop in listOfPops]
                     )[:-1]
 
                     # Record how to un-group the populations for each tree
-                    # Note: don't need to save for all bondTypes because they
-                    # should all have the same dimensions
                     splits[elem][svName] = splitIndices
                     
                     if len(listOfPops) > 0:
                         # Split the full population across the workers
-                        # batchedPopulations[svName][bondType] = np.array_split(
                         batchedPopulations[elem][svName] = np.array_split(
                             np.vstack(listOfPops), self.numWorkers
                         )
@@ -134,66 +119,42 @@ class Manager:
                 localValues[structName][elem] = {}
 
                 for svName in database[structName]:
-                # for svName in localPop[elem]:
                     localValues[structName][elem][svName] = {}
 
                     for elem in database[structName][svName]:
                         if localPop[elem][svName] is None:
                             # Possible if a tree doesn't use a given SV;
-                            # localPop[svName] will have [bondType] entries, so it
-                            # won't be None
                             localValues[structName][elem][svName] = None
                             continue
 
-                        # TODO: need to store results for each element type
                         sv = database[structName][svName][elem][evalType]
                         val = (sv @ localPop[elem][svName].T).T
 
                         if evalType == 'energy':
                             # Will convert to per-atom energies in __main__.py
-
-                            # TODO: don't sum across atoms here; I'll need to split
-                            # by atom type later for different branches
-
                             val = val.sum(axis=1)#/n
 
                         elif evalType == 'forces':
-                            # TODO: nodemanager had to apply U' because the
-                            # embedding function could be different for each atom
-                            # type. Since the embedding functions are now just
-                            # simple algebraic functions, and are constant across
-                            # all bond types, this can be summed safely here. In
-                            # fact, the ffg splines don't need their 4th dimension.
-                            # Make sure to address this in database.py when you
-                            # the functions for constructing splines.
-
-                            # TODO: the above is no longer true. In order to account
-                            # for different trees for reach bond type, the SVs must
-                            # keep their extra dimension to allow for different U'
-                            # scaling for each atom type
-
-                            # TODO: check if you're still allowed to sum here.
-
-                            # TODO: N could be different for each atom type
                             nhost = val.shape[1]//3//n
 
                             val = val.reshape(
                                 localPop[elem][svName].shape[0], 3, nhost, n
                             )
+
+                            # Note: we can safely sum over neighbor
+                            # contributions here since the values are grouped by
+                            # host element type. This means that all of the
+                            # neighbor contributions for a given entry will all
+                            # be evaluated by the same embedding function.
+
                             val = val.sum(axis=-1).swapaxes(1, 2)
 
                         localValues[structName][elem][svName] = val
-
-                    # if len(intermediates) > 0:
-                    #     localValues[structName][svName] = sum(intermediates)
-                    # else:
-                    #     localValues[structName][svName] = None
 
         workerValues = self.comm.gather(localValues, root=0)
 
         # Gather results on head
         if self.isHead:
-            # workerValues = [{structName: {svName: sub-population}}]
             managerValues = {
                 structName: {
                     svName: {} for svName in database[structName]
@@ -235,9 +196,6 @@ class Manager:
             structGroup = h5pyFile[struct]
             for svName in structGroup:
                 # Ideally, map N-D bond-types into a 1D index
-                # for bondType in structGroup[svName]:
-                # for elem in structGroup[svName][bondType]:
-                    # path = [struct, svName, bondType, elem]
                 for elem in structGroup[svName]:
                     path = [struct, svName, elem]
 
