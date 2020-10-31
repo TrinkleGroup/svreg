@@ -422,7 +422,24 @@ class SVEvaluator:
 
         if self.isManager:
             # Now gather all manager values back to the master process
-            allValues = self.managerComm.gather(managerValues, root=0)
+            # allValues = self.managerComm.gather(managerValues, root=0)
+
+            numManagers = self.managerComm.Get_size()
+
+            if self.isMaster:
+                allValues = [managerValues]
+
+            for i in range(1, numManagers):
+                if self.manager.id == i:
+                    self.managerComm.send(managerValues, dest=0)
+                elif self.isMaster:
+                    allValues.append(self.managerComm.recv(source=i))
+
+                    # if rank == 0:
+                    #     data = {'a': 7, 'b': 3.14}
+                    #     comm.send(data, dest=1, tag=11)
+                    # elif rank == 1:
+                    #     data = comm.recv(source=0, tag=11)
 
         if self.isMaster:
             # allValues = [{structName: list of values for subset of structs}]
