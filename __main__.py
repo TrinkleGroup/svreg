@@ -167,7 +167,7 @@ def main(settings, worldComm, isMaster):
                 for treeDict in treePopulations:
                     for elem in elements:
                         for svName in treeDict[elem].keys():
-                            if svName not in populationDict:
+                            if svName not in populationDict[elem]:
                                 populationDict[elem][svName] = []
 
                             populationDict[elem][svName].append(

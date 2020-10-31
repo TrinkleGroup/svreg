@@ -30,8 +30,8 @@ costFxn             MAE
 
 optimizer           CMA
 
-numberOfTrees       2
-tournamentSize      1
+numberOfTrees       20
+tournamentSize      10
 
 optimizerPopSize    100
 
