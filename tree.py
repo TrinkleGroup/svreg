@@ -591,6 +591,14 @@ class SVTree(list):
         """Updates self.svNodes. Useful after crossovers/mutations."""
         self.svNodes = [node for node in self.nodes if isinstance(node, SVNode)]
 
+        self.totalNumFreeParams = sum([
+            n.totalNumFreeParams for n in self.svNodes
+        ])
+        
+        self.totalNumParams = sum([
+            n.totalNumParams for n in self.svNodes
+        ])
+
 
     def directEvaluation(self, y, atoms, evalType, bc_type):
         """
@@ -815,6 +823,11 @@ class MultiComponentTree(SVTree):
         parentTree2 = random.choice(list(donor.chemistryTrees.values()))
 
         parentTree1.crossover(parentTree2)
+
+
+    def pointMutate(self, svNodePool, mutProb):
+        for tree in self.chemistryTrees.values():
+            tree.pointMutate(svNodePool, mutProb)
 
 
     def updateSVNodes(self):
