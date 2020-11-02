@@ -176,13 +176,8 @@ class FFG(Summation):
             list(map(lambda s: types.index(s), atoms.get_chemical_symbols()))
         )
 
-        # TODO: need to check that atom types match bondType components
-
         N = len(atoms)
         if evalType == 'vector':
-            # if bondType is None:
-            #     raise RuntimeError('Must specify bondType.')
-
             # Prepare structure vectors
             energySV = {bondType: None for bondType in self.bonds}
             forcesSV = {bondType: None for bondType in self.bonds}

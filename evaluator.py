@@ -397,6 +397,7 @@ class SVEvaluator:
         self.manager.loadDatabase(h5pyFile)
 
 
+    # @profile
     def evaluate(self, population, evalType):
         """
         Evaluate the structure vectors by transmitting the population to each

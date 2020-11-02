@@ -33,14 +33,14 @@ optimizer           CMA
 numberOfTrees       20
 tournamentSize      10
 
-optimizerPopSize    100
+optimizerPopSize    1000
 
 crossoverProb       0.2
 pointMutateProb     0.2
 maxTreeDepth        3
 
-numRegressorSteps   1000
-numOptimizerSteps   2
+numRegressorSteps   1
+numOptimizerSteps   3
 
 energyWeight        100
 forcesWeight        1

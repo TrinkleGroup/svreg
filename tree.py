@@ -791,7 +791,7 @@ class MultiComponentTree(SVTree):
 
         return np.hstack([
             self.chemistryTrees[el].fillFixedKnots(splitPop[i])
-            for i,el in self.elements
+            for i,el in enumerate(self.elements)
         ])
 
     
@@ -832,6 +832,11 @@ class MultiComponentTree(SVTree):
 
     def updateSVNodes(self):
 
+        self.nodes = {
+            el: self.chemistryTrees[el].nodes
+            for el in self.elements
+        }
+
         for tree in self.chemistryTrees.values():
             tree.updateSVNodes()
 
@@ -863,6 +868,16 @@ class MultiComponentTree(SVTree):
         return ' + '.join([
             '<{}> {}'.format(
                 el, str(self.chemistryTrees[el])
-                )
+            )
             for el in self.elements
         ])
+
+
+    def latex(self):
+        return {el: self.chemistryTrees[el].latex() for el in self.elements}
+        # return ' + '.join([
+        #     '{}: {}'.format(
+        #         el, self.chemistryTrees[el].latex()
+        #     )
+        #     for el in self.elements
+        # ])

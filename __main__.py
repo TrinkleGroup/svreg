@@ -269,6 +269,14 @@ def main(settings, worldComm, isMaster):
                                 )
                             )
 
+                # Now pull old trees to ensure population size is the same
+                keys = list(archive.keys())
+                while len(uniqueTrees) < settings['numberOfTrees']:
+                    randomTree = random.choice(keys)
+                    if randomTree not in uniqueTrees:
+                        uniqueTrees.append(randomTree)
+                        uniqueOptimizers.append(archive[randomTree].optimizer)
+
                 regressor.trees = uniqueTrees
                 regressor.optimizers = uniqueOptimizers
 
