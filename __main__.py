@@ -274,7 +274,7 @@ def main(settings, worldComm, isMaster):
                 while len(uniqueTrees) < settings['numberOfTrees']:
                     randomTree = random.choice(keys)
                     if randomTree not in uniqueTrees:
-                        uniqueTrees.append(randomTree)
+                        uniqueTrees.append(archive[randomTree].tree)
                         uniqueOptimizers.append(archive[randomTree].optimizer)
 
                 regressor.trees = uniqueTrees
