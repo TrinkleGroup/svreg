@@ -40,21 +40,31 @@ class SVTree(list):
 
 
     @classmethod
-    def random(cls, svNodePool, maxDepth=1):
+    def random(cls, svNodePool, maxDepth=1, method='full'):
         """
         Generates a random tree with a maximum depth of maxDepth by randomly
         adding nodes from a pool of function nodes and the given svNodes list.
 
         Args:
-            maxDepth (int):
-                The maximum allowed depth.
-
             svNodePool (list):
                 The collection of svNodes that can be used to generate the tree.
+
+            maxDepth (int):
+                The maximum allowed depth. The depth of a tree is defined by the
+                maximum number of nested functions that it has. A tree with only
+                one node has a depth of 0.
+
+            method (str):
+                'full' or 'grow'. Following the terminology used in the gplearn
+                package, 'grow' means that nodes are randomly selected, often
+                leading to asymmetrical trees. 'full' means that only functions
+                are chosen until the maximum depth is reached, then the
+                "terminal" (SV) nodes are chosen, often resulting in
+                symmetrical, "bushy" trees.
         """
 
-        if maxDepth < 1:
-            raise RuntimeError("maxDepth must be >= 1")
+        if maxDepth < 0:
+            raise RuntimeError("maxDepth must be >= 0")
        
         tree = cls()
 
@@ -62,8 +72,8 @@ class SVTree(list):
         numFuncs = FunctionNode._num_avail_functions
         numNodeChoices = numFuncs + numSVNodes
 
-        # Choose a random depth from [1, maxDepth]
-        if maxDepth == 1:
+        # Choose a random depth from [0, maxDepth]
+        if maxDepth == 0:
             # Choose random SVNode to use as the only term in the tree
             newSVNode = deepcopy(random.choice(svNodePool))
             tree.nodes.append(newSVNode)
@@ -90,7 +100,9 @@ class SVTree(list):
 
             choice = random.randint(0, numNodeChoices)
 
-            if (depth < maxDepth) and (choice <= numFuncs):
+            if (depth < maxDepth) and (
+                (choice <= numFuncs) or (method == 'full')):
+
                 # Chose to add a FunctionNode
                 tree.nodes.append(FunctionNode.random())
                 nodesToAdd.append(tree.nodes[-1].function.arity)

@@ -281,8 +281,8 @@ class Manager:
         engBuf, _ = engShmemWin.Shared_query(0)
         fcsBuf, _ = fcsShmemWin.Shared_query(0)
 
-        engShmemArr = np.ndarray(buffer=engBuf, dtype='f4', shape=engShape)
-        fcsShmemArr = np.ndarray(buffer=fcsBuf, dtype='f4', shape=fcsShape)
+        engShmemArr = np.ndarray(buffer=engBuf, dtype='f8', shape=engShape)
+        fcsShmemArr = np.ndarray(buffer=fcsBuf, dtype='f8', shape=fcsShape)
 
         # Add natoms to shmem too
         natomsBytes = mpiDoubleSize  # should be enough
@@ -290,7 +290,7 @@ class Manager:
             natomsBytes, mpiDoubleSize, comm=self.physComm
         )
         natomsBuf, _ = natomsShmemWin.Shared_query(0)
-        natomsShmemArr = np.ndarray(buffer=natomsBuf, dtype='f4', shape=(1,))
+        natomsShmemArr = np.ndarray(buffer=natomsBuf, dtype='f8', shape=(1,))
 
         # Iteratively build Manager-level database, then insert buffer
         pointer = database
