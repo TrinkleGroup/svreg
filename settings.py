@@ -94,7 +94,7 @@ _valid_options = {
                 ' well; too many, and the regressor may be slow.'
     ),
     'maxTreeDepth': Option(
-        'maxTreeDepth', int, (1,), [1, 3],
+        'maxTreeDepth', int, (0,), [0, 3],
         'The maximum allowed tree depth. Trees should be kept relatively '\
             'shallow to encourage speed and interpretability of the final '\
                 'potential form.'

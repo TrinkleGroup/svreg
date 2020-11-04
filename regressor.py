@@ -81,7 +81,7 @@ class SVRegressor:
             self.trees = [
                 MCTree.random(
                     svNodePool=self.svNodePool,
-                    maxDepth=random.randint(1, self.settings['maxTreeDepth']),
+                    maxDepth=random.randint(0, self.settings['maxTreeDepth']),
                     elements=elements
                 ) for _ in range(self.settings['numberOfTrees'])
             ]
@@ -124,13 +124,10 @@ class SVRegressor:
                         ))
 
                     # Loop over the list of values
-                    # for tree, treeVals in zip(self.trees, listOfValues):
                     for tree in self.trees[::-1]:
-                        # tree.updateNodeValues(unstackedValues, svName)
                         for svNode in tree.chemistryTrees[elem].svNodes[::-1]:
                             # Only update the SVNode objects of the current type
                             if svNode.description == svName:
-                                # TODO: resume: getting pop from empty list error 
                                 svNode.values = unstackedValues.pop()
 
                     # Error check to see if there are leftovers

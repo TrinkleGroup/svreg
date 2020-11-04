@@ -669,10 +669,7 @@ def computeErrors(refStruct, energies, forces, trueValues, natoms):
             treeErrors[:,   2*i] = abs(engErrors)
             treeErrors[:, 2*i+1] = np.average(np.abs(fcsErrors), axis=(1, 2))
 
-        # Could not sum here to preserve per-struct energy/force errors
-        # costs.append(treeCosts.sum(axis=1))
         errors.append(treeErrors)
-
 
     return errors
 

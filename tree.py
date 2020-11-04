@@ -884,6 +884,10 @@ class MultiComponentTree(SVTree):
             for el in self.elements
         ])
 
+    
+    def __repr__(self):
+        return str(self)
+
 
     def latex(self):
         return {el: self.chemistryTrees[el].latex() for el in self.elements}

@@ -129,6 +129,10 @@ class Manager:
             localPopulations = None
 
         # Scatter the population to each node head
+
+        # TODO: Ideally, this would scatter to node heads, who would place the
+        # population into shared memory space.
+
         localPop = self.farmComm.scatter(localPopulations, root=0)
         elements = list(localPop.keys())
 
@@ -173,6 +177,9 @@ class Manager:
 
                         localValues[structName][elem][svName] = val
 
+        # TODO: this call is ~50% of the cost of this function. It could
+        # probably be reduced a bit by storing results in shared memory on each
+        # node, then gathering from node heads.
         workerValues = self.farmComm.gather(localValues, root=0)
 
         # Gather results on head
@@ -415,6 +422,8 @@ class SVEvaluator:
             values (dict):
                 {structName: {svName: <result array>}}
         """
+
+        # TODO: SVEvaluator and Manager should be in charge of wrapping pop
 
         if self.isManager:
             population = self.managerComm.bcast(population, root=0)

@@ -30,14 +30,14 @@ costFxn             MAE
 
 optimizer           CMA
 
-numberOfTrees       20
-tournamentSize      10
+numberOfTrees       5
+tournamentSize      2
 
 optimizerPopSize    100
 
 crossoverProb       0.2
 pointMutateProb     0.2
-maxTreeDepth        3
+maxTreeDepth        0
 
 numRegressorSteps   1
 numOptimizerSteps   100
