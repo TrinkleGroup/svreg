@@ -26,7 +26,7 @@ _valid_options = {
     'PROCS_PER_PHYS_NODE': Option(
         'PROCS_PER_PHYS_NODE', int, (1,), 32,
         'The number of cores on a physical compute node. The number of'\
-            ' compute nodes assigned to each Manager is euqal to'\
+            ' compute nodes assigned to each Manager is equal to'\
                 ' (PROCS_PER_MANAGER / PROCS_PER_PHYS_NODE.'
     ),
     'seed' : Option(
@@ -266,14 +266,14 @@ class Settings(dict):
             option.printInfo()
         print('-'*20)
 
-    @staticmethod
+    # @staticmethod
     def printSettings(self):
         for key, val in self.items():
             option = _valid_options[key]
 
             print(
-                '{} (type: {}, value: {}):\n\n{}\n'.format(
-                    key, option.allowedType, val, option.info()
+                '{} (type: {}, value: {}):\n{}\n'.format(
+                    key, option.allowedType, val, option.message
                 )
             )
 

@@ -821,7 +821,18 @@ class MultiComponentTree(SVTree):
             for i,el in enumerate(self.elements)
         }
 
-        return subDicts
+        stackedDict = {}
+        for dct in subDicts.values():
+            for svName in dct:
+                if svName not in stackedDict:
+                    stackedDict[svName] = []
+
+                stackedDict[svName].append(dct[svName])
+
+        for svName in stackedDict:
+            stackedDict[svName] = np.vstack(stackedDict[svName])
+
+        return stackedDict
 
 
     def crossover(self, donor):

@@ -2,6 +2,10 @@ import random
 import numpy as np
 from copy import deepcopy
 
+import cma
+from optimizers import GAWrapper, SofomoreWrapper
+
+from nodes import SVNode
 from tree import SVTree
 from tree import MultiComponentTree as MCTree
 
@@ -42,22 +46,45 @@ class SVRegressor:
     def __init__(
             self,
             settings,
-            svNodePool,
-            optimizer=None,
-            optimizerArgs=None,
+            database,
         ):
 
         # Note: it is assumed that Settings has already performed all validation
         # checks on the provided settings.
 
         self.settings = settings
-        self.svNodePool = svNodePool
+        self.svNodePool = buildSVNodePool(database)
+        numStructs = len(database.attrs['structNames'])
 
-        self.optimizer = optimizer
-
-        self.optimizerArgs = optimizerArgs
-        if self.optimizerArgs is None:
-            self.optimizerArgs = {}
+        if settings['optimizer'] == 'CMA':
+            self.optimizer = cma.CMAEvolutionStrategy
+            self.optimizerArgs = [
+                1.0,  # defaulted sigma0 value
+                {'verb_disp': 0, 'popsize':settings['optimizerPopSize']}
+            ]
+        elif settings['optimizer'] == 'GA':
+            self.optimizer = GAWrapper
+            self.optimizerArgs = [
+                {
+                    'verb_disp': 0,
+                    'popsize': settings['optimizerPopSize'],
+                    'pointMutateProb': settings['pointMutateProb']
+                }
+            ]
+        elif settings['optimizer'] == 'Sofomore':
+            self.optimizer = SofomoreWrapper
+            self.optimizerArgs = {
+                'numStructs': numStructs,
+                'paretoDimensionality': 2,
+                'CMApopSize': settings['optimizerPopSize'],
+                'SofomorePopSize': settings['numberOfTrees'],  # Placeholder
+                # 'threads_per_node': settings['PROCS_PER_PHYS_NODE'],
+                'threads_per_node': None,
+            }
+        else:
+            raise NotImplementedError(
+                'Must be one of `GA`, `CMA`, or `Sofomore`.'
+            )
 
         self.trees = []
 
@@ -86,14 +113,14 @@ class SVRegressor:
                 ) for _ in range(self.settings['numberOfTrees'])
             ]
 
-    def evaluateTrees(self, svEng, svFcs, N):
+    def evaluateTrees(self, svResults, N):
         """
         Updates the SVNode objects in the trees with the given values, then
         evaluate the trees
 
         Args:
-            svEng, svFcs (dict):
-                {elem: {structName: {svName: list of values for each tree}}}
+            svResults (dict):
+                svResults[evalType][structName][svName][elem]
 
             N (int):
                 The number of parameter sets for each node. Used for splitting
@@ -104,36 +131,45 @@ class SVRegressor:
                 {structName: [tree.eval() for tree in self.trees]}
         """
 
+        svEng = svResults['energy']
+        svFcs = svResults['forces']
+
         energies = {struct:[] for struct in svEng.keys()}
         forces   = {struct:[] for struct in svFcs.keys()}
         for structName in energies:
             for svName in svEng[structName]:
-                for elem in self.trees[0].elements[::-1]:
-                    # Uses sorted elements list so it can loop over svNodes
+                # The list of stacked values for each tree for a given SV type
+                stackedEng = svEng[structName][svName]
+                stackedFcs = svFcs[structName][svName]
 
-                    # The list of stacked values for each tree for a given SV type
-                    listOfEng = svEng[structName][svName][elem]
-                    listOfFcs = svFcs[structName][svName][elem]
+                # Un-stack values for each element, and append to list
+                unstackedValues = []
+                for val1, val2 in zip(stackedEng, stackedFcs):
+                    numNodes = val1.shape[0]//N
 
-                    # Un-stack any stacked values
-                    unstackedValues = []
-                    for val1, val2 in zip(listOfEng, listOfFcs):
-                        unstackedValues += list(zip(
-                            np.split(val1, val1.shape[0]//N, axis=0),
-                            np.split(val2, val2.shape[0]//N, axis=0)
-                        ))
+                    val1 = val1.reshape((numNodes, N))
+                    val2 = val2.reshape(
+                        (numNodes, N, val2.shape[1], val2.shape[2])
+                    )
 
-                    # Loop over the list of values
-                    for tree in self.trees[::-1]:
-                        for svNode in tree.chemistryTrees[elem].svNodes[::-1]:
-                            # Only update the SVNode objects of the current type
-                            if svNode.description == svName:
-                                svNode.values = unstackedValues.pop()
+                    for nodeEng, nodeFcs in zip(val1, val2):
+                        unstackedValues.append((nodeEng, nodeFcs))
 
-                    # Error check to see if there are leftovers
-                    leftovers = len(unstackedValues)
-                    if leftovers > 0:
-                        raise RuntimeError('Found leftover results.')
+                # Loop backwards over the list of values
+                for tree in self.trees[::-1]:
+                    for svNode in tree.svNodes[::-1]:
+                        # Only update the SVNode objects of the current type
+                        if svNode.description == svName:
+                            # TODO: I could put dask.compute() here, but it
+                            # would involve a lot more dask calls. The advantage
+                            # is that it would be more asynchronous and might be
+                            # able to load balance better.
+                            svNode.values = unstackedValues.pop()
+
+                # Error check to see if there are leftovers
+                leftovers = len(unstackedValues)
+                if leftovers > 0:
+                    raise RuntimeError('Found leftover results.')
 
             # If here, all of the nodes have been updated with their values
             for tree in self.trees:
@@ -172,7 +208,7 @@ class SVRegressor:
         return deepcopy(self.trees[np.argmin(costs)])
 
     
-    def evolvePopulation(self, svNodePool):
+    def evolvePopulation(self):
         """
         Performs an in-place evolution of self.trees using tournament selection,
         crossover, and mutation. Assumes that self.trees is the current set of
@@ -193,7 +229,9 @@ class SVRegressor:
                 donor = self.tournament()
                 parent.crossover(donor)
             elif rand < pmProb:
-                parent.pointMutate(svNodePool, self.settings['pointMutateProb'])
+                parent.pointMutate(
+                    self.svNodePool, self.settings['pointMutateProb']
+                )
 
             parent.updateSVNodes()
             newTrees.append(parent)
@@ -207,3 +245,109 @@ class SVRegressor:
     
     def mutate(self):
         raise NotImplementedError
+
+
+    def printTop10Header(self, regStep):
+        print(regStep, flush=True)
+
+        for treeNum, t in enumerate(self.trees):
+            print(treeNum, t)
+
+        print('\t\t\t', ''.join(['{:<10}'.format(i) for i in range(10)]))
+
+
+    def generatePopulationDict(self, N):
+        """
+        Generates N parameter sets for each tree, then groups them by SV name
+        for easy batch evaluation.
+
+        Returns:
+            populationDict: {svName: stacked population}
+            rawPopulation: the parameter arrays generated by each optimizer
+        """
+
+        rawPopulations = [np.array(opt.ask(N)) for opt in self.optimizers]
+
+        # Now parse the populations and group them by SV type
+        populationDict = {}
+        for pop, tree in zip(rawPopulations, self.trees):
+            # popDict= {svName: population}
+            popDict = tree.parseArr2Dict(pop)
+
+            for svName, pop in popDict.items():
+                if svName not in populationDict:
+                    populationDict[svName] = []
+
+                populationDict[svName].append(pop)
+
+        # Stack each group
+        for svName, popList in populationDict.items():
+            populationDict[svName] = np.vstack(popList)
+
+        return populationDict, rawPopulations
+
+    
+    def updateOptimizers(self, rawPopulations, costs, penalties):
+        for treeIdx in range(len(self.optimizers)):
+            fullCost = costs[treeIdx] + penalties[treeIdx]
+
+            opt = self.optimizers[treeIdx]
+            opt.tell(rawPopulations[treeIdx], fullCost)
+
+
+
+def buildSVNodePool(database):
+    """Prepare svNodePool for use in tree construction"""
+
+    svNodePool = []
+
+    # `group` is a pointer to an entry for a structure in the database
+    for svName in database['energy']:
+
+        restrictions = None
+        if 'restrictions' in database.attrs[svName]:
+            restrictions = []
+            resList = database.attrs[svName]['restrictions'].tolist()[::-1]
+            for num in database.attrs[svName]['numRestrictions']:
+                tmp = []
+                for _ in range(num):
+                    tmp.append(tuple(resList.pop()))
+                restrictions.append(tmp)
+
+        bondComps = sorted(set(database.attrs[svName]['components']))
+        numParams = []
+        restr = []
+
+        cList = database.attrs[svName]['components'].tolist()
+        for c in bondComps:
+            idx = cList.index(c)
+            numParams.append(database.attrs[svName]['numParams'][idx])
+            restr.append(restrictions[idx])
+
+        if 'paramRanges' in database.attrs[svName]:
+            pRanges = []
+            for c in bondComps:
+                idx = cList.index(c)
+                pRanges.append(database.attrs[svName]['paramRanges'][idx])
+        else:
+            pRanges = None
+
+        bondComps = [c.decode('utf-8') for c in bondComps]
+
+
+        svNodePool.append(
+            SVNode(
+                description=svName,
+                components=bondComps,
+                constructor=[
+                    c.decode('utf-8')
+                    for c in database.attrs[svName]['components']
+                ],
+                numParams=numParams,
+                restrictions=restr,
+                paramRanges=pRanges,
+            )
+        )
+
+    return svNodePool
+

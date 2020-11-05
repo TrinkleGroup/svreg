@@ -152,3 +152,45 @@ class Archive(dict):
 
         with open(os.path.join(self.savePath, 'archive.pkl'), 'wb') as outfile:
             pickle.dump(self, outfile)
+
+    def printStatus(self, regressorNames):
+        print()
+        printNames = list(self.keys())
+        printCosts = [self[n].cost for n in printNames]
+
+        for idx in np.argsort(printCosts):
+            indicator = ''
+            if printNames[idx] in regressorNames:
+                indicator = '->'
+
+            print(
+                '\t{}{:.2f}'.format(indicator, printCosts[idx]),
+                printNames[idx],
+            )
+        print(flush=True)
+
+
+    def pruneAndLoad(self, sampledTrees, newTrees, opts, regressor):
+        currentTreeNames = [str(t) for t in sampledTrees]
+
+        uniqueTrees = sampledTrees
+        uniqueOptimizers = opts
+        for tree in newTrees:
+            treeName = str(tree)
+            if treeName not in currentTreeNames:
+                # Not a duplicate
+                uniqueTrees.append(tree)
+
+                if treeName in self:
+                    # Load archived optimizer
+                    uniqueOptimizers.append(self[treeName].optimizer)
+                else:
+                    # Create new optimizer
+                    uniqueOptimizers.append(
+                        regressor.optimizer(
+                            tree.populate(N=1)[0],
+                            *regressor.optimizerArgs
+                        )
+                    )
+
+        return uniqueTrees, uniqueOptimizers

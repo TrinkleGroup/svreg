@@ -17,7 +17,8 @@ runType     GA
 # databasePath        ../svreg_data/mlearn/Mo/Mo.hdf5-fixed
 
 refStruct           Ti48Mo80_type1_c12
-databasePath        ../svreg_data/hyojung/hj.hdf5-fixed-f32
+# databasePath        ../svreg_data/hyojung/hj.hdf5-fixed-f32
+databasePath        ../svreg_data/hyojung/hj.hdf5-fixed-f32-superarray
 
 outputPath          ./results/debug
 overwrite           True
