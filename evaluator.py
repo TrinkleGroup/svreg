@@ -43,15 +43,14 @@ class SVEvaluator:
         for evalType in evalTypes:
             for svName in allSVnames:
                 for elem in elements:
+                    if elem not in populationDict[svName]: continue
+
                     sv = self.database[evalType][svName][elem]
                     pop = populationDict[svName][elem]
 
                     # TODO: can I use JIT somehow? Like make a wrapper to .dot()?
                     results.append(sv.dot(pop.T))
 
-        n = len(allSVnames)
-        engResults, fcsResults = results[:n], results[n:]
-        
         # Now sum by chunks before computing to avoid extra communication
         # summedResults = [[eng[el].sum() for el in elements] for eng in engs]
 
@@ -72,19 +71,23 @@ class SVEvaluator:
         for evalType in evalTypes[::-1]:
             for svName in allSVnames[::-1]:
                 for elem in elements[::-1]:
+                    if elem not in populationDict[svName]: continue
+
                     res = results.pop()
 
                     # Parse the per-structure results
-                    attrs = self.database.attrs[evalType][elem]
+                    splits = self.database.attrs[evalType][elem]['natom_splits']
                     start = {el: 0 for el in elements}
                     for i, structName in enumerate(structNames):
-                        stop = attrs['natom_splits'][i]
+                        stop = splits[i]
 
+                        val = None
                         if evalType == 'energy':
                             val = res[start[elem]:stop, :].sum(axis=0)
                         elif evalType == 'forces':
                             val = res[start[elem]:stop, :]
 
+                            n = self.database.attrs['natoms'][i]
                             nhost = val.shape[0]//3//n
 
                             val = val.T.reshape(res.shape[1], 3, nhost, n)
@@ -99,6 +102,7 @@ class SVEvaluator:
         # TODO: it more be more efficient to use results lists then to put them
         # into a dicitonary later
         # TODO: I could probably push this compute into regressor.py
+
         dask.compute(summedResults)
 
         return summedResults

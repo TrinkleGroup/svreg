@@ -90,8 +90,7 @@ def main(client, settings):
         for optStep in range(settings['numOptimizerSteps']):
             populationDict, rawPopulations = regressor.generatePopulationDict(N)
 
-            # svEng/svFcs: {el: {structName: {svName: list of results}}}
-            svResults = evaluator.evaluate(populationDict, N)
+            svResults = evaluator.evaluate(populationDict)
 
             energies, forces = regressor.evaluateTrees(svResults, N)
 
@@ -241,7 +240,7 @@ def computeErrors(refStruct, energies, forces, database):
             and S is the number of structures being evaluated.
     """
 
-    trueValues = database['trueValues']
+    trueValues = database.trueValues
     natoms  = {
         s: n for s,n in zip(
             database.attrs['structNames'], database.attrs['natoms']
@@ -312,8 +311,8 @@ if __name__ == '__main__':
     ) as cluster, Client(cluster) as client:
 
         print(
-            'Dask dashboard running at: {}'.format(
-                client.scheduler_info()['services']
+            'Dask dashboard running at port: {}'.format(
+                client.scheduler_info()['services']['dashboard']
             ),
             flush=True
         )
