@@ -272,8 +272,10 @@ class Settings(dict):
             option = _valid_options[key]
 
             print(
-                '{} (type: {}, value: {}):\n{}\n'.format(
-                    key, option.allowedType, val, option.message
+                '{}: {}'.format(
+                    key, val
+                # '{} (type: {}, value: {}):\n{}\n'.format(
+                #     key, option.allowedType, val, option.message
                 )
             )
 

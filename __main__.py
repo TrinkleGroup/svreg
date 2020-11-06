@@ -74,7 +74,12 @@ def main(client, settings):
         optStart = time.time()
         for optStep in range(settings['numOptimizerSteps']):
             populationDict, rawPopulations = regressor.generatePopulationDict(N)
-            print('Total population shapes:', [el.shape for el in rawPopulations])
+
+            if optStep == 0:
+                print(
+                    'Total population shapes:',
+                    [el.shape for el in rawPopulations]
+                )
 
             svResults = evaluator.evaluate(populationDict)
 
@@ -311,12 +316,14 @@ if __name__ == '__main__':
         # worker_dashboard_address='40025'
     ) as cluster, Client(cluster) as client:
 
+        print()
         print(
             'Dask dashboard running at port: {}'.format(
                 client.scheduler_info()['services']['dashboard']
             ),
             flush=True
         )
+        print()
 
         # Begin run
         if settings['runType'] == 'GA':

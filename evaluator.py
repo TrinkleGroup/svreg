@@ -112,12 +112,6 @@ class SVEvaluator:
 
                         start[elem] = stop
                
-        # .compute() evaluates everything (blocking) and returns results
-        # TODO: look into usage. may need traverse=True
-        # TODO: it more be more efficient to use results lists then to put them
-        # into a dicitonary later
-        # TODO: I could probably push this compute into regressor.py
-
-        dask.compute(summedResults)
+        summedResults = self.client.gather(self.client.compute(summedResults))
         
         return summedResults
