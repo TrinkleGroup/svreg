@@ -20,6 +20,7 @@ class SVEvaluator:
                     )
 
 
+    @profile
     def evaluate(self, populationDict):
         """
         Evaluates all of the populations on all of their corresponding structure
@@ -39,6 +40,8 @@ class SVEvaluator:
         elements    = list(self.database.attrs['elements'])
         evalTypes   = ['energy', 'forces']
 
+        # results_eng = []
+        # results_fcs = []
         results = []
         for evalType in evalTypes:
             for svName in allSVnames:
@@ -48,8 +51,19 @@ class SVEvaluator:
                     sv = self.database[evalType][svName][elem]
                     pop = populationDict[svName][elem]
 
-                    # TODO: can I use JIT somehow? Like make a wrapper to .dot()?
+                    # TODO: can I use JIT somehow? Like make a wrapper to
+                    # .dot()?
+                    # TODO: is transpose slowing things down? T when generated
                     results.append(sv.dot(pop.T))
+                    # res = sv.dot(pop.T)
+                    # if evalType == 'energy':
+                    #     results_eng.append(res)
+                    # elif evalType == 'energy':
+                    #     results_fcs.append(res)
+                    # else:
+                    #     raise RuntimeWarning(
+                    #         'Invalid evalType: {}'.format(evalType)
+                    #     )
 
         # Now sum by chunks before computing to avoid extra communication
         # summedResults = [[eng[el].sum() for el in elements] for eng in engs]
@@ -68,6 +82,7 @@ class SVEvaluator:
             for evalType in evalTypes
         }
 
+        # TODO: consider dask computing before reshapes (comm while work?)
         for evalType in evalTypes[::-1]:
             for svName in allSVnames[::-1]:
                 for elem in elements[::-1]:
@@ -103,6 +118,6 @@ class SVEvaluator:
         # into a dicitonary later
         # TODO: I could probably push this compute into regressor.py
 
-        dask.compute(summedResults)
-
+        # dask.compute(summedResults)
+        
         return summedResults

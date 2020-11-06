@@ -89,10 +89,17 @@ class SVDatabase(dict):
                         natom_splits, dtype=int
                     )
 
-                    self[evalType][bondType][elem] = da.from_array(
-                        group[elem][()],
-                        chunks=(1000, 1000)
-                    )
+                    if evalType == 'energy':
+                        self[evalType][bondType][elem] = group[elem][()]
+                    elif evalType == 'forces':
+                        self[evalType][bondType][elem] = da.from_array(
+                            group[elem][()],
+                            chunks=(10000, group[elem].shape[1])
+                        )
+                    else:
+                        raise RuntimeError(
+                            'Invalid evalType: {}'.format(evalType)
+                        )
 
         # Load true values
         for structName in h5pyFile['trueValues']:

@@ -7,6 +7,7 @@ import argparse
 import random
 import numpy as np
 
+import dask.array
 from dask.distributed import Client, LocalCluster
 
 from archive import Archive
@@ -42,27 +43,8 @@ args = parser.parse_args()
 ################################################################################
 # Main functions
 
+@profile
 def main(client, settings):
-    """
-    Psuedocode:
-        x Load database: load "super arrays" for each bond type; distribute and
-        persist.
-        x Also load any important attributes, like the structNames list, the
-        elements list, natoms list, true values, and the splitting indices.
-        x Initialize the svNodePool
-        x Start the Regressor object, initializing all of the starting trees and
-        optimizers
-        - Start the Archive for logging results
-        - Start up an Evaluator that has the list of super arrays and knows how
-        to handle evaluating and parsing sets of populations.
-        - Begin the symbolic regression loop
-            - Generate the arrays of populations, pass them to the Evaluator,
-            and get back the parsed results
-
-        TODO: the HDF5 database should also stare the SV settings (restrictions,
-        components, numParams, etc.)
-    """
-
     # Setup
     with h5py.File(settings['databasePath'], 'r') as h5pyFile:
         database = SVDatabase(h5pyFile)
@@ -71,7 +53,7 @@ def main(client, settings):
     regressor = SVRegressor(settings, database)
     archive = Archive(os.path.join(settings['outputPath'], 'archive'))
 
-    costFxn = buildCostFunction(settings)
+    costFxn = buildCostFunction(settings, len(database.attrs['natoms']))
 
     # Begin symbolic regression
     regressor.initializeTrees(elements=database.attrs['elements'])
@@ -89,6 +71,7 @@ def main(client, settings):
 
         for optStep in range(settings['numOptimizerSteps']):
             populationDict, rawPopulations = regressor.generatePopulationDict(N)
+            print('Total population shapes:', [el.shape for el in rawPopulations])
 
             svResults = evaluator.evaluate(populationDict)
 
@@ -174,7 +157,7 @@ def printTreeCosts(optStep, costs, penalties):
     )
 
 
-def buildCostFunction(settings):
+def buildCostFunction(settings, numStructs):
     """
     A function factory for building different types of cost functions. Assumes
     that the cost function will take in a list of (P, S) arrays, where P is the
@@ -186,14 +169,21 @@ def buildCostFunction(settings):
     number of atoms).
     """
 
-    def mae(errors):
+    scaler = np.ones(2*numStructs)
+    scaler[::2]  *= settings['energyWeight']
+    scaler[1::2] *= settings['forcesWeight']
         
+    @profile
+    def mae(errors):
+
         costs = []
         for err in errors:
-            tmp = err.copy()
-            tmp[:, ::2]  *= settings['energyWeight']
-            tmp[:, 1::2] *= settings['forcesWeight']
-            costs.append(np.average(tmp, axis=1))
+            costs.append(
+                dask.array.mean(
+                    dask.array.multiply(err, scaler),
+                    axis=1
+                )
+            )
 
         return np.array(costs)
 
@@ -201,7 +191,7 @@ def buildCostFunction(settings):
         
         costs = []
         for err in errors:
-            tmp = err.copy()
+            tmp = np.array(dask.compute(err))
             tmp[:, ::2]  *= settings['energyWeight']
             tmp[:, 1::2] *= settings['forcesWeight']
             costs.append(np.sqrt(np.average(tmp**2, axis=1)))
@@ -216,6 +206,7 @@ def buildCostFunction(settings):
         raise RuntimeError("costFxn must be 'MAE' or 'RMSE'.")
 
 
+@profile
 def computeErrors(refStruct, energies, forces, database):
     """
     Takes in dictionaries of energies and forces and returns the energy/force
@@ -256,7 +247,8 @@ def computeErrors(refStruct, energies, forces, database):
     errors = []
 
     for treeNum in range(numTrees):
-        treeErrors = np.zeros((numPots, 2*numStructs))
+        treeErrors = dask.array.zeros((numPots, 2*numStructs))
+        treeErrors = []
         for i, structName in enumerate(sorted(keys)):
             eng = energies[structName][treeNum]/natoms[structName] \
                 - energies[refStruct][treeNum]/natoms[refStruct]
@@ -265,11 +257,28 @@ def computeErrors(refStruct, energies, forces, database):
             engErrors = eng - trueValues[structName]['energy']
             fcsErrors = fcs - trueValues[structName]['forces']
 
-            treeErrors[:,   2*i] = abs(engErrors)
-            treeErrors[:, 2*i+1] = np.average(np.abs(fcsErrors), axis=(1, 2))
+            # treeErrors[:,   2*i] = dask.array.from_array(abs(engErrors))
+
+            # This line is 75% of the cost; can you keep things in Dask to help
+            # avoid comm costs?
+            # treeErrors[:, 2*i+1] = np.average(np.abs(fcsErrors), axis=(1, 2))
+            #
+            # treeErrors[:, 2*i+1] = dask.array.mean(
+            #     dask.array.fabs(fcsErrors),
+            #     axis=(1, 2)
+            # )
+            treeErrors.append(dask.array.from_array(abs(engErrors)))
+            treeErrors.append(dask.array.mean(
+                    dask.array.fabs(fcsErrors),
+                    axis=(1, 2)
+                )
+            )
 
         errors.append(treeErrors)
 
+    errors = [dask.array.stack(errList, axis=1) for errList in errors]
+
+    # dask.compute(errors)
     return errors
 
 
