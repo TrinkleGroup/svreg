@@ -118,6 +118,6 @@ class SVEvaluator:
         # into a dicitonary later
         # TODO: I could probably push this compute into regressor.py
 
-        # dask.compute(summedResults)
+        dask.compute(summedResults)
         
         return summedResults

@@ -1,5 +1,6 @@
 # Imports
 import os
+import time
 import h5py
 import shutil
 import argparse
@@ -65,10 +66,12 @@ def main(client, settings):
     errors          = None
     costs           = None
 
+    regStart = time.time()
     for regStep in range(settings['numRegressorSteps']):
 
         regressor.printTop10Header(regStep)
 
+        optStart = time.time()
         for optStep in range(settings['numOptimizerSteps']):
             populationDict, rawPopulations = regressor.generatePopulationDict(N)
             print('Total population shapes:', [el.shape for el in rawPopulations])
@@ -90,7 +93,7 @@ def main(client, settings):
                 for pop in rawPopulations
             ])
 
-            printTreeCosts(optStep, costs, penalties)
+            printTreeCosts(optStep, costs, penalties, optStart)
 
             # Update optimizers
             regressor.updateOptimizers(rawPopulations, costs, penalties)
@@ -134,7 +137,7 @@ def main(client, settings):
 ################################################################################
 # Helper functions
 
-def printTreeCosts(optStep, costs, penalties):
+def printTreeCosts(optStep, costs, penalties, startTime):
     first10 = costs[:10]
     first10Pen = penalties[:10]
 
@@ -143,16 +146,11 @@ def printTreeCosts(optStep, costs, penalties):
     for c, p in zip(first10, first10Pen):
         argmin = np.argmin(c)
         string += '{:.2f} ({:.2f})\t'.format(c[argmin], p[argmin])
-        # string += '{:<10}'.format(
-        #     '{:.2f} ({:.2f})'.format(c[argmin], p[argmin])
-        # )
 
     print(
         optStep,
+        '({:.2f} s)'.format(time.time() - startTime),
         string,
-        # '\t\t', ''.join(
-        #     ['{:<10.2f} ({:<10.2f})'.format(np.min(c)) for c in first10]
-        # ),
         flush=True
     )
 
@@ -179,10 +177,11 @@ def buildCostFunction(settings, numStructs):
         costs = []
         for err in errors:
             costs.append(
-                dask.array.mean(
-                    dask.array.multiply(err, scaler),
-                    axis=1
-                )
+                np.average(np.multiply(err, scaler), axis=1)
+                # dask.array.mean(
+                #     dask.array.multiply(err, scaler),
+                #     axis=1
+                # )
             )
 
         return np.array(costs)
@@ -247,8 +246,8 @@ def computeErrors(refStruct, energies, forces, database):
     errors = []
 
     for treeNum in range(numTrees):
-        treeErrors = dask.array.zeros((numPots, 2*numStructs))
-        treeErrors = []
+        treeErrors = np.zeros((numPots, 2*numStructs))
+        # treeErrors = []
         for i, structName in enumerate(sorted(keys)):
             eng = energies[structName][treeNum]/natoms[structName] \
                 - energies[refStruct][treeNum]/natoms[refStruct]
@@ -257,28 +256,21 @@ def computeErrors(refStruct, energies, forces, database):
             engErrors = eng - trueValues[structName]['energy']
             fcsErrors = fcs - trueValues[structName]['forces']
 
-            # treeErrors[:,   2*i] = dask.array.from_array(abs(engErrors))
+            treeErrors[:, 2*i] = abs(engErrors)
+            treeErrors[:, 2*i+1] = np.average(np.abs(fcsErrors), axis=(1, 2))
 
-            # This line is 75% of the cost; can you keep things in Dask to help
-            # avoid comm costs?
-            # treeErrors[:, 2*i+1] = np.average(np.abs(fcsErrors), axis=(1, 2))
-            #
-            # treeErrors[:, 2*i+1] = dask.array.mean(
-            #     dask.array.fabs(fcsErrors),
-            #     axis=(1, 2)
+            # treeErrors.append(dask.array.from_array(abs(engErrors)))
+            # treeErrors.append(dask.array.mean(
+            #         dask.array.fabs(fcsErrors),
+            #         axis=(1, 2)
+            #     )
             # )
-            treeErrors.append(dask.array.from_array(abs(engErrors)))
-            treeErrors.append(dask.array.mean(
-                    dask.array.fabs(fcsErrors),
-                    axis=(1, 2)
-                )
-            )
 
         errors.append(treeErrors)
 
-    errors = [dask.array.stack(errList, axis=1) for errList in errors]
-
+    # errors = [dask.array.stack(errList, axis=1) for errList in errors]
     # dask.compute(errors)
+
     return errors
 
 
