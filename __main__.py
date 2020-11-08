@@ -310,9 +310,9 @@ if __name__ == '__main__':
 
     # Start Dask client
     with LocalCluster(
-        n_workers=4,
+        n_workers=2,
         processes=True,  # default; need to test out False
-        threads_per_worker=2,
+        threads_per_worker=4,
         # worker_dashboard_address='40025'
     ) as cluster, Client(cluster) as client:
 
