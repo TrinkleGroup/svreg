@@ -107,13 +107,20 @@ class SVRegressor:
                 ) for _ in range(self.settings['numberOfTrees'])
             ]
         else:
-            self.trees = [
-                MCTree.random(
+            uniqueTreeNames = []
+            treesToAdd = []
+            while len(uniqueTreeNames) < self.settings['numberOfTrees']:
+                randTree = MCTree.random(
                     svNodePool=self.svNodePool,
                     maxDepth=random.randint(0, self.settings['maxTreeDepth']),
                     elements=elements
-                ) for _ in range(self.settings['numberOfTrees'])
-            ]
+                )
+
+                if str(randTree) not in uniqueTreeNames:
+                    uniqueTreeNames.append(str(randTree))
+                    treesToAdd.append(randTree)
+            self.trees = treesToAdd
+
 
     def evaluateTrees(self, svResults, N):
         """

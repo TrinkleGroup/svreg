@@ -321,16 +321,39 @@ if __name__ == '__main__':
     os.mkdir(settings['outputPath'])
 
     # Start Dask client
+    # with LocalCluster(
+    #     n_workers=4,
+    #     processes=True,  # default; need to test out False
+    #     threads_per_worker=2,
+    #     # worker_dashboard_address='40025'
+    # with PBSCluster(
+    #         queue='normal',
+    #         project='bbas',
+    #         local_directory=os.getcwd(),
+    #         cores=16,
+    #         memory='64 GB',
+    #         python='aprun -n 1 -N 1 python',
+    #         resource_spec='nodes=1:ppn=32:xe',
+    #         env_extra=[
+    #             'cd /scratch/sciteam/$USER/svreg/hyojung/$PBS_JOBNAME',
+    #             'export PATH=$PATH:/scratch/sciteam/$USER/svreg/hyojung/$PBS_JOBNAME',
+    #             'source ~/bin/svregEnv',
+    #         ]
+    #         
+    # ) as cluster, Client(cluster) as client:
     with Client() as client:
 
-        print()
-        print(
-            'Dask dashboard info: {}'.format(
-                client.scheduler_info()
-            ),
-            flush=True
-        )
-        print()
+        # print('Submitted script:', cluster.job_script())
+
+        # cluster.scale(1)
+        # print()
+        # print(
+        #     'Dask dashboard info: {}'.format(
+        #         client.scheduler_info()
+        #     ),
+        #     flush=True
+        # )
+        # print()
 
         # Begin run
         if settings['runType'] == 'GA':
