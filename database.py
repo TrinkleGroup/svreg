@@ -1,5 +1,6 @@
 import numpy as np
 import dask.array as da
+from dask.distributed import wait
 
 
 class SVDatabase(dict):
@@ -35,7 +36,7 @@ class SVDatabase(dict):
                     <evalType> ('energy' or 'forces')
     """
 
-    def __init__(self, h5pyFile):
+    def __init__(self, client, h5pyFile):
         # Prepare class variables
         self['energy'] = {}
         self['forces'] = {}
@@ -67,6 +68,11 @@ class SVDatabase(dict):
 
         self.trueValues = {}
 
+        thingsToPersist = []
+
+        import time
+        start = time.time()
+
         # Load data from file
         for evalType in h5pyFile:
             if evalType == 'trueValues': continue
@@ -89,17 +95,27 @@ class SVDatabase(dict):
                         natom_splits, dtype=int
                     )
 
-                    if evalType == 'energy':
-                        self[evalType][bondType][elem] = group[elem][()]
-                    elif evalType == 'forces':
-                        self[evalType][bondType][elem] = da.from_array(
-                            group[elem][()],
-                            chunks=(10000, group[elem].shape[1])
-                        )
-                    else:
-                        raise RuntimeError(
-                            'Invalid evalType: {}'.format(evalType)
-                        )
+                    print("Database loading:", evalType, bondType, elem,
+                            group[elem].shape, group[elem].dtype, flush=True)
+
+                    # This makes data get loaded onto Client task first, then
+                    # sent out; faster than parallel reads I think
+                    data = group[elem][()]
+
+                    # if evalType == 'energy':
+                    #     self[evalType][bondType][elem] = group[elem][()]
+                    # elif evalType == 'forces':
+                    self[evalType][bondType][elem] = da.from_array(
+                        data,
+                        # group[elem],
+                        # chunks=group[elem].shape,
+                        chunks=(1000, group[elem].shape[1]),
+                        # name='sv-{}-{}-{}'.format(evalType, bondType, elem),
+                    ).persist()
+                    thingsToPersist.append(self[evalType][bondType][elem])
+        print("Full load time: {} (s)".format(time.time() - start))
+
+        wait(thingsToPersist)
 
         # Load true values
         for structName in h5pyFile['trueValues']:

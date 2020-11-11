@@ -9,18 +9,21 @@ class SVEvaluator:
         self.database   = database
         self.settings   = settings
 
+        # self.distributeDatabase()
+
     
     def distributeDatabase(self):
         """Send data to distributed RAM"""
         for evalType in self.database:
             for bondType in self.database[evalType]:
                 for elem in self.database[evalType][bondType]:
-                    self.client.persist(
-                        self.database[evalType][bondType][elem]
-                    )
+                    if evalType == 'forces':
+                        self.client.persist(
+                            dask.array.from_array(self.database[evalType][bondType][elem])
+                        )
 
 
-    @profile
+    # @profile
     def evaluate(self, populationDict):
         """
         Evaluates all of the populations on all of their corresponding structure

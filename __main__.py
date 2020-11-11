@@ -1,4 +1,5 @@
 # Imports
+import matplotlib.pyplot as plt
 import os
 import time
 import h5py
@@ -8,7 +9,14 @@ import argparse
 import random
 import numpy as np
 
+from dask_mpi import initialize
+initialize(
+    nthreads=32,
+    interface='ipogif0',
+)
+
 import dask.array
+from dask_jobqueue import PBSCluster
 from dask.distributed import Client, LocalCluster
 
 from archive import Archive
@@ -44,13 +52,16 @@ args = parser.parse_args()
 ################################################################################
 # Main functions
 
-@profile
+# @profile
 def main(client, settings):
+    print("In main function", flush=True)
+
     # Setup
     with h5py.File(settings['databasePath'], 'r') as h5pyFile:
-        database = SVDatabase(h5pyFile)
+        database = SVDatabase(client, h5pyFile)
 
-    evaluator = SVEvaluator(client, database, settings)
+        evaluator = SVEvaluator(client, database, settings)
+
     regressor = SVRegressor(settings, database)
     archive = Archive(os.path.join(settings['outputPath'], 'archive'))
 
@@ -76,10 +87,11 @@ def main(client, settings):
             populationDict, rawPopulations = regressor.generatePopulationDict(N)
 
             if optStep == 0:
-                print(
-                    'Total population shapes:',
-                    [el.shape for el in rawPopulations]
-                )
+                print("Total population shapes:")
+
+                for svName in populationDict:
+                    for elem in populationDict[svName]:
+                        print(svName, elem, populationDict[svName][elem].shape)
 
             svResults = evaluator.evaluate(populationDict)
 
@@ -176,7 +188,7 @@ def buildCostFunction(settings, numStructs):
     scaler[::2]  *= settings['energyWeight']
     scaler[1::2] *= settings['forcesWeight']
         
-    @profile
+    # @profile
     def mae(errors):
 
         costs = []
@@ -210,7 +222,7 @@ def buildCostFunction(settings, numStructs):
         raise RuntimeError("costFxn must be 'MAE' or 'RMSE'.")
 
 
-@profile
+# @profile
 def computeErrors(refStruct, energies, forces, database):
     """
     Takes in dictionaries of energies and forces and returns the energy/force
@@ -309,21 +321,39 @@ if __name__ == '__main__':
     os.mkdir(settings['outputPath'])
 
     # Start Dask client
-    with LocalCluster(
-        n_workers=4,
-        processes=True,  # default; need to test out False
-        threads_per_worker=2,
-        # worker_dashboard_address='40025'
-    ) as cluster, Client(cluster) as client:
+    # with LocalCluster(
+    #     n_workers=4,
+    #     processes=True,  # default; need to test out False
+    #     threads_per_worker=2,
+    #     # worker_dashboard_address='40025'
+    # with PBSCluster(
+    #         queue='normal',
+    #         project='bbas',
+    #         local_directory=os.getcwd(),
+    #         cores=16,
+    #         memory='64 GB',
+    #         python='aprun -n 1 -N 1 python',
+    #         resource_spec='nodes=1:ppn=32:xe',
+    #         env_extra=[
+    #             'cd /scratch/sciteam/$USER/svreg/hyojung/$PBS_JOBNAME',
+    #             'export PATH=$PATH:/scratch/sciteam/$USER/svreg/hyojung/$PBS_JOBNAME',
+    #             'source ~/bin/svregEnv',
+    #         ]
+    #         
+    # ) as cluster, Client(cluster) as client:
+    with Client() as client:
 
-        print()
-        print(
-            'Dask dashboard running at port: {}'.format(
-                client.scheduler_info()['services']['dashboard']
-            ),
-            flush=True
-        )
-        print()
+        # print('Submitted script:', cluster.job_script())
+
+        # cluster.scale(1)
+        # print()
+        # print(
+        #     'Dask dashboard info: {}'.format(
+        #         client.scheduler_info()
+        #     ),
+        #     flush=True
+        # )
+        # print()
 
         # Begin run
         if settings['runType'] == 'GA':

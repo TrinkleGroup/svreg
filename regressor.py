@@ -9,6 +9,8 @@ from nodes import SVNode
 from tree import SVTree
 from tree import MultiComponentTree as MCTree
 
+import dask.array
+
 # TODO: may be able to merge this into ga.py, it really only initializes
 # trees/optimizers and evaluates the trees.
 
@@ -291,7 +293,13 @@ class SVRegressor:
         # Stack each group
         for svName in populationDict:
             for elem, popList in populationDict[svName].items():
-                populationDict[svName][elem] = np.vstack(popList)
+                # TODO: convert this to Dask array?
+                dat = np.vstack(popList)
+                populationDict[svName][elem] = dask.array.from_array(
+                    dat,
+                    chunks=dat.shape,
+                    # chunks=(100, popList[0].shape[1]),
+                )
 
         return populationDict, rawPopulations
 
@@ -302,7 +310,6 @@ class SVRegressor:
 
             opt = self.optimizers[treeIdx]
             opt.tell(rawPopulations[treeIdx], fullCost)
-
 
 
 def buildSVNodePool(database):
