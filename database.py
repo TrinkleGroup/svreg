@@ -109,7 +109,7 @@ class SVDatabase(dict):
                         data,
                         # group[elem],
                         # chunks=group[elem].shape,
-                        chunks=(1000, group[elem].shape[1]),
+                        chunks=(10000, group[elem].shape[1]),
                         # name='sv-{}-{}-{}'.format(evalType, bondType, elem),
                     ).persist()
                     thingsToPersist.append(self[evalType][bondType][elem])
