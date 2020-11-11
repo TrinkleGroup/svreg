@@ -1,4 +1,5 @@
 # Imports
+from tree import SVTree
 import matplotlib.pyplot as plt
 import os
 import time
@@ -11,8 +12,8 @@ import numpy as np
 
 from dask_mpi import initialize
 initialize(
-    nthreads=32,
-    interface='ipogif0',
+    nthreads=2,
+    #interface='ipogif0',
 )
 
 import dask.array
@@ -54,7 +55,6 @@ args = parser.parse_args()
 
 # @profile
 def main(client, settings):
-    print("In main function", flush=True)
 
     # Setup
     with h5py.File(settings['databasePath'], 'r') as h5pyFile:
@@ -150,6 +150,96 @@ def main(client, settings):
             regressor.optimizers = uniqueOptimizers
 
     print('Done')
+
+
+def polish(client, settings):
+
+    # Setup
+    with h5py.File(settings['databasePath'], 'r') as h5pyFile:
+        database = SVDatabase(client, h5pyFile)
+
+        evaluator = SVEvaluator(client, database, settings)
+
+    regressor = SVRegressor(settings, database)
+
+    costFxn = buildCostFunction(settings, len(database.attrs['natoms']))
+
+    from nodes import FunctionNode
+    from tree import MultiComponentTree as MCTree
+    tree = MCTree(['Mo', 'Ti'])
+
+    from copy import deepcopy
+
+    treeMo = SVTree()
+    treeMo.nodes = [
+        FunctionNode('add'),
+        deepcopy(regressor.svNodePool[0]),
+        FunctionNode('add'),
+        deepcopy(regressor.svNodePool[1]),
+        FunctionNode('add'),
+        deepcopy(regressor.svNodePool[2]),
+        FunctionNode('add'),
+        deepcopy(regressor.svNodePool[3]),
+        deepcopy(regressor.svNodePool[4]),
+    ]
+
+    treeTi = SVTree()
+    treeTi.nodes = [
+        FunctionNode('add'),
+        deepcopy(regressor.svNodePool[0]),
+        FunctionNode('add'),
+        deepcopy(regressor.svNodePool[1]),
+        FunctionNode('add'),
+        deepcopy(regressor.svNodePool[2]),
+        FunctionNode('add'),
+        deepcopy(regressor.svNodePool[3]),
+        deepcopy(regressor.svNodePool[4]),
+    ]
+
+    tree.chemistryTrees['Mo'] = treeMo
+    tree.chemistryTrees['Ti'] = treeTi
+
+    tree.updateSVNodes()
+
+    regressor.trees = [tree]
+    regressor.initializeOptimizers()
+
+    N = settings['optimizerPopSize']
+
+    optStart = time.time()
+    for optStep in range(settings['numOptimizerSteps']):
+        populationDict, rawPopulations = regressor.generatePopulationDict(N)
+
+        if optStep == 0:
+            print("Total population shapes:")
+
+            for svName in populationDict:
+                for elem in populationDict[svName]:
+                    print(svName, elem, populationDict[svName][elem].shape)
+
+        svResults = evaluator.evaluate(populationDict)
+
+        energies, forces = regressor.evaluateTrees(svResults, N)
+
+        # Save the (per-struct) errors and the single-value costs
+        errors = computeErrors(
+            settings['refStruct'], energies, forces, database
+        )
+
+        costs = costFxn(errors)
+
+        # Add ridge regression penalty
+        penalties = np.array([
+            np.linalg.norm(pop, axis=1)*settings['ridgePenalty']
+            for pop in rawPopulations
+        ])
+
+        printTreeCosts(optStep, costs, penalties, optStart)
+
+        # Update optimizers
+        regressor.updateOptimizers(rawPopulations, costs, penalties)
+
+
 
 ################################################################################
 # Helper functions
@@ -336,5 +426,4 @@ if __name__ == '__main__':
         if settings['runType'] == 'GA':
             main(client, settings)
         else:
-            pass
-            # fixedExample(settings, worldComm, isMaster)
+            polish(client, settings)
