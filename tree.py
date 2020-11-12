@@ -7,6 +7,7 @@ from scipy.interpolate import CubicSpline
 from nodes import FunctionNode, SVNode, _node_types
 from summation import Summation, _implemented_sums
 
+import dask.array as da
 
 class SVTree(list):
     """
@@ -184,7 +185,7 @@ class SVTree(list):
                         (intermediateEng, intermediateFcs)
                     )
                 else:  # Done evaluating all sub-trees
-                    return intermediateEng, intermediateFcs
+                    return intermediateEng.compute(), intermediateFcs.compute()
 
         raise RuntimeError("Something went wrong in tree evaluation")
 
@@ -327,14 +328,22 @@ class SVTree(list):
         if fillFixedKnots:
             splitIndices = np.cumsum([
                 n.totalNumFreeParams for n in self.svNodes
-            ])[:-1]
+            ])
         else:
             splitIndices = np.cumsum([
                 n.totalNumParams#+sum([len(r) for r in n.restrictions.values()])
                 for n in self.svNodes
-            ])[:-1]
+            ])
 
-        splitPop = np.split(rawPopulation, splitIndices, axis=1)
+        splitIndices = np.concatenate([[0], splitIndices])
+        # splitPop = np.split(rawPopulation, splitIndices, axis=1)
+
+        splitPop = []
+        for i in range(splitIndices.shape[0]-1):
+            start = splitIndices[i]
+            stop  = splitIndices[i+1]
+
+            splitPop.append(rawPopulation[:, start:stop])
 
         # Convert raw parameters into SV node parameters (using outer products)
         parameters = {}
@@ -346,19 +355,36 @@ class SVTree(list):
 
             # Split the parameters for each component type
             if fillFixedKnots:
-                splitParams = np.array_split(
-                    rawParams, np.cumsum(
-                        [svNode.numFreeParams[c] for c in svNode.components]
-                    )[:-1],
-                    axis=1
-                )
+                # splitParams = np.array_split(
+                #     rawParams, np.cumsum(
+                #         [svNode.numFreeParams[c] for c in svNode.components]
+                #     )[:-1],
+                #     axis=1
+                # )
+
+                splits = np.cumsum([
+                    svNode.numFreeParams[c] for c in svNode.components
+                ])
             else:
-                splitParams = np.array_split(
-                    rawParams, np.cumsum([
-                        svNode.numParams[c] for c in svNode.components
-                    ])[:-1],
-                    axis=1
-                )
+                # splitParams = np.array_split(
+                #     rawParams, np.cumsum([
+                #         svNode.numParams[c] for c in svNode.components
+                #     ])[:-1],
+                #     axis=1
+                # )
+
+                splits = np.cumsum([
+                    svNode.numParams[c] for c in svNode.components
+                ])
+
+            splits = np.concatenate([[0], splits])
+
+            splitParams = []
+            for i in range(splits.shape[0]-1):
+                start = splits[i]
+                stop  = splits[i+1]
+
+                splitParams.append(rawParams[:, start:stop])
 
             # Organize parameters by component type for easy indexing
             # Fill any fixed values
@@ -378,7 +404,7 @@ class SVTree(list):
                 if cart is None:
                     cart = tmp
                 else:
-                    cart = np.einsum('ij,ik->ijk', cart, tmp)
+                    cart = da.einsum('ij,ik->ijk', cart, tmp)
                     cart = cart.reshape(
                         cart.shape[0], cart.shape[1]*cart.shape[2]
                     )
@@ -387,7 +413,7 @@ class SVTree(list):
 
         # Stack populations of same bond type; can be split by N later
         for svName in parameters:
-            parameters[svName] = np.vstack(parameters[svName])
+            parameters[svName] = da.concatenate(parameters[svName], axis=0)
 
         return parameters
 
@@ -785,6 +811,7 @@ class MultiComponentTree(SVTree):
     def eval(self):
         vals = [self.chemistryTrees[el].eval() for el in self.elements]
         eng, fcs = zip(*vals)
+
         return sum(eng), np.concatenate(fcs, axis=1)
 
 
@@ -812,9 +839,17 @@ class MultiComponentTree(SVTree):
             self.chemistryTrees[el].totalNumFreeParams if fillFixedKnots
             else self.chemistryTrees[el].totalNumParams
             for el in self.elements
-        ])[:-1]
+        ])
 
-        splitPop = np.split(rawPopulation, splitIndices, axis=1)
+        splitIndices = np.concatenate([[0], splitIndices])
+
+        # splitPop = np.split(rawPopulation, splitIndices, axis=1)
+        splitPop = []
+        for i in range(splitIndices.shape[0]-1):
+            start = splitIndices[i]
+            stop  = splitIndices[i+1]
+
+            splitPop.append(rawPopulation[:, start:stop])
 
         subDicts = {
             el: self.chemistryTrees[el].parseArr2Dict(splitPop[i])
@@ -822,19 +857,6 @@ class MultiComponentTree(SVTree):
         }
 
         return subDicts
-
-        # stackedDict = {}
-        # for dct in subDicts.values():
-        #     for svName in dct:
-        #         if svName not in stackedDict:
-        #             stackedDict[svName] = []
-
-        #         stackedDict[svName].append(dct[svName])
-
-        # for svName in stackedDict:
-        #     stackedDict[svName] = np.vstack(stackedDict[svName])
-
-        # return stackedDict
 
 
     def crossover(self, donor):

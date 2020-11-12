@@ -2,6 +2,10 @@ import dask
 import numpy as np
 
 
+@dask.delayed
+def delayedEval(sv, pop):
+    return sv.dot(pop)
+
 class SVEvaluator:
 
     def __init__(self, client, database, settings):
@@ -9,7 +13,7 @@ class SVEvaluator:
         self.database   = database
         self.settings   = settings
 
-   
+  
     # @profile
     def evaluate(self, populationDict):
         """
@@ -43,8 +47,8 @@ class SVEvaluator:
 
                         # TODO: can I use JIT somehow? Like make a wrapper to
                         # .dot()?
-                        # TODO: is transpose slowing things down? T when generated
-                        results.append(sv.dot(pop.T))
+                        # results.append(sv.dot(pop))
+                        results.append(delayedEval(sv, pop))
 
         # Now sum by chunks before computing to avoid extra communication
         # summedResults = [[eng[el].sum() for el in elements] for eng in engs]
@@ -88,6 +92,6 @@ class SVEvaluator:
 
                         summedResults[evalType][struct][svName][elem] = val
                 
-        summedResults = self.client.gather(self.client.compute(summedResults))
+        # summedResults = self.client.gather(self.client.compute(summedResults))
         
         return summedResults
