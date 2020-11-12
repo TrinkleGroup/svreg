@@ -67,6 +67,7 @@ class SVDatabase(dict):
         start = time.time()
         elements = list(h5pyFile[structNames[0]][svNames[0]].keys())
 
+        futures = []
         for struct in structNames:
             self[struct] = {}
             for sv in svNames:
@@ -98,42 +99,7 @@ class SVDatabase(dict):
                         chunks=forceData.shape
                     ).persist()
 
-                    wait(self[struct][sv][elem]['forces'])
+                    futures.append(self[struct][sv][elem]['forces'])
 
-        # # Load data from file
-        # for evalType in h5pyFile:
-        #     if evalType == 'trueValues': continue
-
-        #     for bondType in h5pyFile[evalType]:
-        #         self[evalType][bondType] = {}
-        #         self.attrs[bondType] = {}
-
-        #         for k, v in h5pyFile[evalType][bondType].attrs.items():
-        #             self.attrs[bondType][k] = v
-
-        #         group = h5pyFile[evalType][bondType]
-
-        #         for elem in self.attrs['elements']:
-
-        #             natom_splits = group[elem].attrs['natom_splits']
-
-        #             self.attrs[evalType][elem]['natom_splits'] = np.array(
-        #                 # natom_splits[:-1], dtype=int
-        #                 natom_splits, dtype=int
-        #             )
-        #             # This makes data get loaded onto Client task first, then
-        #             # sent out; faster than parallel reads I think
-        #             data = group[elem][()]
-
-        #             # if evalType == 'energy':
-        #             #     self[evalType][bondType][elem] = group[elem][()]
-        #             # elif evalType == 'forces':
-        #             self[evalType][bondType][elem] = da.from_array(
-        #                 data,
-        #                 # group[elem],
-        #                 # chunks=group[elem].shape,
-        #                 chunks=(10000, group[elem].shape[1]),
-        #                 # name='sv-{}-{}-{}'.format(evalType, bondType, elem),
-        #             ).persist()
-        #             thingsToPersist.append(self[evalType][bondType][elem])
+        wait(futures)
         print("Full load time: {} (s)".format(time.time() - start))
