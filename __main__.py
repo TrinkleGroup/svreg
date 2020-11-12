@@ -13,6 +13,7 @@ import numpy as np
 from dask_mpi import initialize
 initialize(
     nthreads=2,
+    memory_limit='2 GB',
     #interface='ipogif0',
 )
 
@@ -338,11 +339,7 @@ def computeErrors(refStruct, energies, forces, database):
     """
 
     trueValues = database.trueValues
-    natoms  = {
-        s: n for s,n in zip(
-            database.attrs['structNames'], database.attrs['natoms']
-        )
-    }
+    natoms = database.attrs['natoms']
 
     keys = list(energies.keys())
     numTrees   = len(energies[keys[0]])

@@ -324,8 +324,7 @@ def buildSVNodePool(database):
 
     svNodePool = []
 
-    # `group` is a pointer to an entry for a structure in the database
-    for svName in database['energy']:
+    for svName in database[database.attrs['structNames'][0]]:
 
         restrictions = None
         if 'restrictions' in database.attrs[svName]:

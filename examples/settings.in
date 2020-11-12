@@ -7,7 +7,7 @@
 ################################################################################
 
 seed        1123
-runType     GA
+runType     POLISH
 
 ################################################################################
 # Database settings
@@ -17,8 +17,9 @@ runType     GA
 # databasePath        ../svreg_data/mlearn/Mo/Mo.hdf5-fixed
 
 refStruct           Ti48Mo80_type1_c12
-# databasePath        ../svreg_data/hyojung/hj.hdf5-fixed-f32
-databasePath        ../svreg_data/hyojung/hj.hdf5-fixed-f32-superarray
+databasePath        ../svreg_data/hyojung/hj.hdf5-fixed-f32
+# databasePath        ../svreg_data/hyojung/hj.hdf5-fixed-f32-superarray
+# databasePath        ../svreg_data/hyojung/hj.hdf5-fixed-f32-new-redo0-superarray-mini
 
 outputPath          ./results/debug
 overwrite           True
@@ -31,10 +32,10 @@ costFxn             MAE
 
 optimizer           CMA
 
-numberOfTrees       5
+numberOfTrees       20
 tournamentSize      2
 
-optimizerPopSize    1000
+optimizerPopSize    100
 
 crossoverProb       0.2
 pointMutateProb     0.2

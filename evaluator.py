@@ -9,20 +9,7 @@ class SVEvaluator:
         self.database   = database
         self.settings   = settings
 
-        # self.distributeDatabase()
-
-    
-    def distributeDatabase(self):
-        """Send data to distributed RAM"""
-        for evalType in self.database:
-            for bondType in self.database[evalType]:
-                for elem in self.database[evalType][bondType]:
-                    if evalType == 'forces':
-                        self.client.persist(
-                            dask.array.from_array(self.database[evalType][bondType][elem])
-                        )
-
-
+   
     # @profile
     def evaluate(self, populationDict):
         """
@@ -38,35 +25,26 @@ class SVEvaluator:
                 svResults[evalType][structName][svName][elem]
         """
 
-        allSVnames  = list(self.database['energy'].keys())
         structNames = list(self.database.attrs['structNames'])
+        allSVnames  = list(self.database.attrs['svNames'])
         elements    = list(self.database.attrs['elements'])
         evalTypes   = ['energy', 'forces']
 
-        # results_eng = []
-        # results_fcs = []
         results = []
-        for evalType in evalTypes:
+        for struct in structNames:
             for svName in allSVnames:
                 for elem in elements:
                     if elem not in populationDict[svName]: continue
 
-                    sv = self.database[evalType][svName][elem]
-                    pop = populationDict[svName][elem]
+                    for evalType in evalTypes:
 
-                    # TODO: can I use JIT somehow? Like make a wrapper to
-                    # .dot()?
-                    # TODO: is transpose slowing things down? T when generated
-                    results.append(sv.dot(pop.T))
-                    # res = sv.dot(pop.T)
-                    # if evalType == 'energy':
-                    #     results_eng.append(res)
-                    # elif evalType == 'energy':
-                    #     results_fcs.append(res)
-                    # else:
-                    #     raise RuntimeWarning(
-                    #         'Invalid evalType: {}'.format(evalType)
-                    #     )
+                        sv = self.database[struct][svName][elem][evalType]
+                        pop = populationDict[svName][elem]
+
+                        # TODO: can I use JIT somehow? Like make a wrapper to
+                        # .dot()?
+                        # TODO: is transpose slowing things down? T when generated
+                        results.append(sv.dot(pop.T))
 
         # Now sum by chunks before computing to avoid extra communication
         # summedResults = [[eng[el].sum() for el in elements] for eng in engs]
@@ -86,35 +64,30 @@ class SVEvaluator:
         }
 
         # TODO: consider dask computing before reshapes (comm while work?)
-        for evalType in evalTypes[::-1]:
+        for struct in structNames[::-1]:
             for svName in allSVnames[::-1]:
                 for elem in elements[::-1]:
                     if elem not in populationDict[svName]: continue
 
-                    res = results.pop()
+                    for evalType in evalTypes[::-1]:
 
-                    # Parse the per-structure results
-                    splits = self.database.attrs[evalType][elem]['natom_splits']
-                    start = {el: 0 for el in elements}
-                    for i, structName in enumerate(structNames):
-                        stop = splits[i]
+                        res = results.pop()
 
+                        # Parse the per-structure results
                         val = None
                         if evalType == 'energy':
-                            val = res[start[elem]:stop, :].sum(axis=0)
+                            val = res.sum(axis=0)
                         elif evalType == 'forces':
-                            val = res[start[elem]:stop, :]
+                            val = res
 
-                            n = self.database.attrs['natoms'][i]
+                            n = self.database.attrs['natoms'][struct]
                             nhost = val.shape[0]//3//n
 
                             val = val.T.reshape(res.shape[1], 3, nhost, n)
                             val = val.sum(axis=-1).swapaxes(1, 2)
 
-                        summedResults[evalType][structName][svName][elem] = val
-
-                        start[elem] = stop
-               
+                        summedResults[evalType][struct][svName][elem] = val
+                
         summedResults = self.client.gather(self.client.compute(summedResults))
         
         return summedResults

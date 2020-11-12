@@ -41,87 +41,99 @@ class SVDatabase(dict):
         self['energy'] = {}
         self['forces'] = {}
 
-        elements = np.char.decode(
-            h5pyFile.attrs['elements'].astype(np.bytes_)
-        )
-
-        self.attrs = {
-            'elements': elements,
-            'structNames': None,
-            'natoms': None,
-            'energy': {
-                el: {'natom_splits': None}
-                for el in elements
-            },
-            'forces': {
-                el: {'natom_splits': None}
-                for el in elements
-            },
-        }
-
-        self.attrs['natoms']        = h5pyFile.attrs['natoms']
-
-        self.attrs['structNames']   = h5pyFile.attrs['structNames']
-        self.attrs['structNames'] = np.char.decode(
-            self.attrs['structNames'].astype(np.bytes_)
-        )
+        structNames = list(h5pyFile.keys())
+        svNames =  list(h5pyFile[structNames[0]].keys())
+        elements = list(h5pyFile[structNames[0]][svNames[0]].keys())
 
         self.trueValues = {}
+        for struct in structNames:
+            self.trueValues[struct] = {
+                'energy': h5pyFile[struct].attrs['energy'],
+                'forces': h5pyFile[struct].attrs['forces']
+            }
 
-        thingsToPersist = []
+        self.attrs = {
+            'structNames': structNames,
+            'svNames': svNames,
+            'elements': elements,
+            'natoms': {s: h5pyFile[s].attrs['natoms'] for s in structNames},
+        }
+
+        # self.attrs['structNames'] = np.char.decode(
+        #     self.attrs['structNames'].astype(np.bytes_)
+        # )
 
         import time
         start = time.time()
+        elements = list(h5pyFile[structNames[0]][svNames[0]].keys())
 
-        # Load data from file
-        for evalType in h5pyFile:
-            if evalType == 'trueValues': continue
+        for struct in structNames:
+            self[struct] = {}
+            for sv in svNames:
+                self[struct][sv] = {}
+                self.attrs[sv] = {}
 
-            for bondType in h5pyFile[evalType]:
-                self[evalType][bondType] = {}
-                self.attrs[bondType] = {}
+                for k, v in h5pyFile[struct][sv].attrs.items():
+                    self.attrs[sv][k] = v
 
-                for k, v in h5pyFile[evalType][bondType].attrs.items():
-                    self.attrs[bondType][k] = v
+                for elem in elements:
 
-                group = h5pyFile[evalType][bondType]
+                    self[struct][sv][elem] = {}
 
-                for elem in self.attrs['elements']:
+                    group = h5pyFile[struct][sv][elem]
+                    forceData = group['forces']
 
-                    natom_splits = group[elem].attrs['natom_splits']
-
-                    self.attrs[evalType][elem]['natom_splits'] = np.array(
-                        # natom_splits[:-1], dtype=int
-                        natom_splits, dtype=int
+                    print(
+                        "Database loading:", struct, sv, elem,
+                        group['energy'].shape,
+                        forceData.shape,
+                        forceData.dtype,
+                        flush=True
                     )
 
-                    print("Database loading:", evalType, bondType, elem,
-                            group[elem].shape, group[elem].dtype, flush=True)
+                    self[struct][sv][elem]['energy'] = group['energy'][()]
 
-                    # This makes data get loaded onto Client task first, then
-                    # sent out; faster than parallel reads I think
-                    data = group[elem][()]
-
-                    # if evalType == 'energy':
-                    #     self[evalType][bondType][elem] = group[elem][()]
-                    # elif evalType == 'forces':
-                    self[evalType][bondType][elem] = da.from_array(
-                        data,
-                        # group[elem],
-                        # chunks=group[elem].shape,
-                        chunks=(10000, group[elem].shape[1]),
-                        # name='sv-{}-{}-{}'.format(evalType, bondType, elem),
+                    self[struct][sv][elem]['forces'] = da.from_array(
+                        forceData,
+                        chunks=forceData.shape
                     ).persist()
-                    thingsToPersist.append(self[evalType][bondType][elem])
+
+                    wait(self[struct][sv][elem]['forces'])
+
+        # # Load data from file
+        # for evalType in h5pyFile:
+        #     if evalType == 'trueValues': continue
+
+        #     for bondType in h5pyFile[evalType]:
+        #         self[evalType][bondType] = {}
+        #         self.attrs[bondType] = {}
+
+        #         for k, v in h5pyFile[evalType][bondType].attrs.items():
+        #             self.attrs[bondType][k] = v
+
+        #         group = h5pyFile[evalType][bondType]
+
+        #         for elem in self.attrs['elements']:
+
+        #             natom_splits = group[elem].attrs['natom_splits']
+
+        #             self.attrs[evalType][elem]['natom_splits'] = np.array(
+        #                 # natom_splits[:-1], dtype=int
+        #                 natom_splits, dtype=int
+        #             )
+        #             # This makes data get loaded onto Client task first, then
+        #             # sent out; faster than parallel reads I think
+        #             data = group[elem][()]
+
+        #             # if evalType == 'energy':
+        #             #     self[evalType][bondType][elem] = group[elem][()]
+        #             # elif evalType == 'forces':
+        #             self[evalType][bondType][elem] = da.from_array(
+        #                 data,
+        #                 # group[elem],
+        #                 # chunks=group[elem].shape,
+        #                 chunks=(10000, group[elem].shape[1]),
+        #                 # name='sv-{}-{}-{}'.format(evalType, bondType, elem),
+        #             ).persist()
+        #             thingsToPersist.append(self[evalType][bondType][elem])
         print("Full load time: {} (s)".format(time.time() - start))
-
-        wait(thingsToPersist)
-
-        # Load true values
-        for structName in h5pyFile['trueValues']:
-            self.trueValues[structName] = {}
-
-            for evalType in ['energy', 'forces']:
-                self.trueValues[structName][evalType] =\
-                    h5pyFile['trueValues'][structName][evalType][()]
-
