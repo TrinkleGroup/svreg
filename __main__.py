@@ -436,17 +436,14 @@ if __name__ == '__main__':
     # ) as cluster, Client(cluster) as client:
     with Client() as client:
 
-        # print('Submitted script:', cluster.job_script())
-
-        # cluster.scale(1)
-        # print()
-        # print(
-        #     'Dask dashboard info: {}'.format(
-        #         client.scheduler_info()
-        #     ),
-        #     flush=True
-        # )
-        # print()
+        print()
+        print(
+            'Dask dashboard info: {}'.format(
+                client.scheduler_info()
+            ),
+            flush=True
+        )
+        print()
 
         # Begin run
         if settings['runType'] == 'GA':

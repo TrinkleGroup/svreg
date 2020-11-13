@@ -325,7 +325,7 @@ class SVRegressor:
         for svName in populationDict:
             for elem, popList in populationDict[svName].items():
                 # TODO: convert this to Dask array?
-                dat = da.concatenate(popList, axis=0).T
+                dat = np.concatenate(popList, axis=0).T
                 populationDict[svName][elem] = dat
 
                 # populationDict[svName][elem] = dask.array.from_array(

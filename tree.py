@@ -405,7 +405,7 @@ class SVTree(list):
                 if cart is None:
                     cart = tmp
                 else:
-                    cart = da.einsum('ij,ik->ijk', cart, tmp)
+                    cart = np.einsum('ij,ik->ijk', cart, tmp)
                     cart = cart.reshape(
                         cart.shape[0], cart.shape[1]*cart.shape[2]
                     )
@@ -414,7 +414,7 @@ class SVTree(list):
 
         # Stack populations of same bond type; can be split by N later
         for svName in parameters:
-            parameters[svName] = da.concatenate(parameters[svName], axis=0)
+            parameters[svName] = np.concatenate(parameters[svName], axis=0)
 
         return parameters
 
