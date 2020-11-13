@@ -212,12 +212,14 @@ def polish(client, settings):
     for optStep in range(settings['numOptimizerSteps']):
         populationDict, rawPopulations = regressor.generatePopulationDict(N)
 
-        if optStep == 0:
-            print("Total population shapes:")
-
-            for svName in populationDict:
-                for elem in populationDict[svName]:
-                    print(svName, elem, populationDict[svName][elem].shape)
+        # futures = []
+        for svName in populationDict:
+            for el, pop in populationDict[svName].items():
+                populationDict[svName][el] = client.scatter(pop, broadcast=True)
+                # futures.append(populationDict[svName][el])
+        
+        # from dask.distributed import wait
+        # wait(futures)
 
         svResults = evaluator.evaluate(populationDict)
 
