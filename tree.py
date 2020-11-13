@@ -7,6 +7,7 @@ from scipy.interpolate import CubicSpline
 from nodes import FunctionNode, SVNode, _node_types
 from summation import Summation, _implemented_sums
 
+import dask
 import dask.array as da
 
 class SVTree(list):
@@ -185,7 +186,7 @@ class SVTree(list):
                         (intermediateEng, intermediateFcs)
                     )
                 else:  # Done evaluating all sub-trees
-                    return intermediateEng.compute(), intermediateFcs.compute()
+                    return intermediateEng, intermediateFcs
 
         raise RuntimeError("Something went wrong in tree evaluation")
 
@@ -812,7 +813,9 @@ class MultiComponentTree(SVTree):
         vals = [self.chemistryTrees[el].eval() for el in self.elements]
         eng, fcs = zip(*vals)
 
-        return sum(eng), np.concatenate(fcs, axis=1)
+        # eng/fcs = [val for val in element_vals]
+        return eng, fcs
+        # return sum(eng), np.concatenate(fcs, axis=1)
 
 
     def populate(self, N):

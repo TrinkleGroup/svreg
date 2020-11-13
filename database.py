@@ -36,7 +36,7 @@ class SVDatabase(dict):
                     <evalType> ('energy' or 'forces')
     """
 
-    def __init__(self, client, h5pyFile):
+    def __init__(self, h5pyFile):
         # Prepare class variables
         self['energy'] = {}
         self['forces'] = {}
@@ -49,8 +49,11 @@ class SVDatabase(dict):
         for struct in structNames:
             self.trueValues[struct] = {
                 'energy': h5pyFile[struct].attrs['energy'],
-                'forces': h5pyFile[struct].attrs['forces']
             }
+
+            for el in elements:
+                fname = 'forces_' + el
+                self.trueValues[struct][fname] = h5pyFile[struct].attrs[fname]
 
         self.attrs = {
             'structNames': structNames,
@@ -74,6 +77,7 @@ class SVDatabase(dict):
                 self[struct][sv] = {}
                 self.attrs[sv] = {}
 
+                # components, restrictions, etc.
                 for k, v in h5pyFile[struct][sv].attrs.items():
                     self.attrs[sv][k] = v
 

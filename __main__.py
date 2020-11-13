@@ -17,6 +17,7 @@ initialize(
     #interface='ipogif0',
 )
 
+import dask
 import dask.array
 from dask_jobqueue import PBSCluster
 from dask.distributed import Client, LocalCluster
@@ -59,7 +60,7 @@ def main(client, settings):
 
     # Setup
     with h5py.File(settings['databasePath'], 'r') as h5pyFile:
-        database = SVDatabase(client, h5pyFile)
+        database = SVDatabase(h5pyFile)
 
         evaluator = SVEvaluator(client, database, settings)
 
@@ -100,7 +101,7 @@ def main(client, settings):
 
             # Save the (per-struct) errors and the single-value costs
             errors = computeErrors(
-                settings['refStruct'], energies, forces, database
+                client, settings['refStruct'], energies, forces, database
             )
 
             costs = costFxn(errors)
@@ -157,7 +158,7 @@ def polish(client, settings):
 
     # Setup
     with h5py.File(settings['databasePath'], 'r') as h5pyFile:
-        database = SVDatabase(client, h5pyFile)
+        database = SVDatabase(h5pyFile)
 
         evaluator = SVEvaluator(client, database, settings)
 
@@ -224,7 +225,7 @@ def polish(client, settings):
 
         # Save the (per-struct) errors and the single-value costs
         errors = computeErrors(
-            settings['refStruct'], energies, forces, database
+            client, settings['refStruct'], energies, forces, database
         )
 
         costs = costFxn(errors)
@@ -283,14 +284,11 @@ def buildCostFunction(settings, numStructs):
     def mae(errors):
 
         costs = []
-        for err in errors:
-            costs.append(
-                np.average(np.multiply(err, scaler), axis=1)
-                # dask.array.mean(
-                #     dask.array.multiply(err, scaler),
-                #     axis=1
-                # )
-            )
+        for treeErr in errors:
+            costs.append(np.average(np.multiply(treeErr, scaler), axis=1))
+            # costs.append(
+            #     np.average(np.multiply(np.stack(treeErr).T, scaler), axis=1)
+            # )
 
         return np.array(costs)
 
@@ -314,7 +312,7 @@ def buildCostFunction(settings, numStructs):
 
 
 # @profile
-def computeErrors(refStruct, energies, forces, database):
+def computeErrors(client, refStruct, energies, forces, database):
     """
     Takes in dictionaries of energies and forces and returns the energy/force
     errors for each structure for each tree. Sorts structure names first.
@@ -338,42 +336,50 @@ def computeErrors(refStruct, energies, forces, database):
             and S is the number of structures being evaluated.
     """
 
+
     trueValues = database.trueValues
     natoms = database.attrs['natoms']
+    elements = database.attrs['elements']
 
     keys = list(energies.keys())
     numTrees   = len(energies[keys[0]])
-    numPots    = energies[keys[0]][0].shape[0]
-    numStructs = len(keys)
+    # numPots    = energies[keys[0]][0][0].shape[0] # [struct][tree][elem]
+    # numStructs = len(keys)
 
     keys = list(energies.keys())
     errors = []
 
+    @dask.delayed
+    def delayedAverage(err):
+        return dask.array.mean(err, axis=(1, 2))
+
+    errors = []
     for treeNum in range(numTrees):
-        treeErrors = np.zeros((numPots, 2*numStructs))
-        # treeErrors = []
-        for i, structName in enumerate(sorted(keys)):
+        treeErrors = []
+        for structName in sorted(keys):
             eng = energies[structName][treeNum]/natoms[structName] \
                 - energies[refStruct][treeNum]/natoms[refStruct]
+
             fcs =   forces[structName][treeNum]
 
-            engErrors = eng - trueValues[structName]['energy']
-            fcsErrors = fcs - trueValues[structName]['forces']
+            totalEng = sum([eng[ii] for ii in range(len(elements))])
+            engErrors = totalEng - trueValues[structName]['energy']
 
-            treeErrors[:, 2*i] = abs(engErrors)
-            treeErrors[:, 2*i+1] = np.average(np.abs(fcsErrors), axis=(1, 2))
+            fcsErrors = [
+                fcs[ii] - trueValues[structName]['forces_'+el]
+                for ii, el in enumerate(elements)
+            ]
 
-            # treeErrors.append(dask.array.from_array(abs(engErrors)))
-            # treeErrors.append(dask.array.mean(
-            #         dask.array.fabs(fcsErrors),
-            #         axis=(1, 2)
-            #     )
-            # )
+            fcsErrors = [abs(err) for err in fcsErrors]
+            fcsErrors = [delayedAverage(err) for err in fcsErrors]
+
+            treeErrors.append(engErrors)
+            treeErrors.append(sum(fcsErrors))
 
         errors.append(treeErrors)
 
-    # errors = [dask.array.stack(errList, axis=1) for errList in errors]
-    # dask.compute(errors)
+    errors = list(dask.compute(errors)[0])
+    errors = [np.stack(err).T for err in errors]
 
     return errors
 

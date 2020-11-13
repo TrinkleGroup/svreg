@@ -42,7 +42,7 @@ pointMutateProb     0.2
 maxTreeDepth        3
 
 numRegressorSteps   1
-numOptimizerSteps   3
+numOptimizerSteps   10
 
 energyWeight        100
 forcesWeight        1

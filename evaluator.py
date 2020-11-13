@@ -47,8 +47,10 @@ class SVEvaluator:
 
                         # TODO: can I use JIT somehow? Like make a wrapper to
                         # .dot()?
-                        # results.append(sv.dot(pop))
-                        results.append(delayedEval(sv, pop))
+                        if evalType == 'energy':
+                            results.append(sv.dot(pop))
+                        else:
+                            results.append(delayedEval(sv, pop))
 
         # Now sum by chunks before computing to avoid extra communication
         # summedResults = [[eng[el].sum() for el in elements] for eng in engs]
