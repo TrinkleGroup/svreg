@@ -212,18 +212,15 @@ def polish(client, settings):
     for optStep in range(settings['numOptimizerSteps']):
         populationDict, rawPopulations = regressor.generatePopulationDict(N)
 
-        # futures = []
+        svEng = evaluator.evaluate(populationDict, 'energy')
+
         for svName in populationDict:
             for el, pop in populationDict[svName].items():
                 populationDict[svName][el] = client.scatter(pop, broadcast=True)
-                # futures.append(populationDict[svName][el])
         
-        # from dask.distributed import wait
-        # wait(futures)
+        svFcs = evaluator.evaluate(populationDict, 'forces')
 
-        svResults = evaluator.evaluate(populationDict)
-
-        energies, forces = regressor.evaluateTrees(svResults, N)
+        energies, forces = regressor.evaluateTrees(svEng, svFcs, N)
 
         # Save the (per-struct) errors and the single-value costs
         errors = computeErrors(

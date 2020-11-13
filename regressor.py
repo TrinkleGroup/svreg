@@ -123,7 +123,7 @@ class SVRegressor:
             self.trees = treesToAdd
 
 
-    def evaluateTrees(self, svResults, N):
+    def evaluateTrees(self, svEng, svFcs, N):
         """
         Updates the SVNode objects in the trees with the given values, then
         evaluate the trees
@@ -141,8 +141,8 @@ class SVRegressor:
                 {structName: [tree.eval() for tree in self.trees]}
         """
 
-        svEng = svResults['energy']
-        svFcs = svResults['forces']
+        # svEng = svResults['energy']
+        # svFcs = svResults['forces']
 
         energies = {struct:[] for struct in svEng.keys()}
         forces   = {struct:[] for struct in svFcs.keys()}

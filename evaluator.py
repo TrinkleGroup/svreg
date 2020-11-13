@@ -15,7 +15,7 @@ class SVEvaluator:
 
   
     # @profile
-    def evaluate(self, populationDict):
+    def evaluate(self, populationDict, evalType):
         """
         Evaluates all of the populations on all of their corresponding structure
         vectors in the database.
@@ -26,13 +26,12 @@ class SVEvaluator:
 
         Returns:
             svResults (dict):
-                svResults[evalType][structName][svName][elem]
+                svResults[structName][svName][elem]
         """
 
         structNames = list(self.database.attrs['structNames'])
         allSVnames  = list(self.database.attrs['svNames'])
         elements    = list(self.database.attrs['elements'])
-        evalTypes   = ['energy', 'forces']
 
         results = []
         for struct in structNames:
@@ -40,35 +39,25 @@ class SVEvaluator:
                 for elem in elements:
                     if elem not in populationDict[svName]: continue
 
-                    for evalType in evalTypes:
+                    sv = self.database[struct][svName][elem][evalType]
+                    pop = populationDict[svName][elem]
 
-                        sv = self.database[struct][svName][elem][evalType]
-                        pop = populationDict[svName][elem]
-
-                        # TODO: can I use JIT somehow? Like make a wrapper to
-                        # .dot()?
-                        # if evalType == 'energy':
-                        #     results.append(sv.dot(pop))
-                        # else:
-                        #     results.append(delayedEval(sv, pop))
-
+                    # TODO: can I use JIT somehow? Like make a wrapper to
+                    # .dot()?
+                    if evalType == 'energy':
+                        results.append(sv.dot(pop))
+                    else:
                         results.append(delayedEval(sv, pop))
 
         # Now sum by chunks before computing to avoid extra communication
-        # summedResults = [[eng[el].sum() for el in elements] for eng in engs]
-
-        # TODO: profile communication costs for this data structure
         summedResults = {
-            evalType: {
-                structName: {
-                    svName: {
-                        elem: None for elem in elements
-                    }
-                    for svName in allSVnames
+            structName: {
+                svName: {
+                    elem: None for elem in elements
                 }
-                for structName in structNames
+                for svName in allSVnames
             }
-            for evalType in evalTypes
+            for structName in structNames
         }
 
         # TODO: consider dask computing before reshapes (comm while work?)
@@ -77,25 +66,21 @@ class SVEvaluator:
                 for elem in elements[::-1]:
                     if elem not in populationDict[svName]: continue
 
-                    for evalType in evalTypes[::-1]:
+                    res = results.pop()
 
-                        res = results.pop()
+                    # Parse the per-structure results
+                    val = None
+                    if evalType == 'energy':
+                        val = res.sum(axis=0)
+                    elif evalType == 'forces':
+                        val = res
 
-                        # Parse the per-structure results
-                        val = None
-                        if evalType == 'energy':
-                            val = res.sum(axis=0)
-                        elif evalType == 'forces':
-                            val = res
+                        n = self.database.attrs['natoms'][struct]
+                        nhost = val.shape[0]//3//n
 
-                            n = self.database.attrs['natoms'][struct]
-                            nhost = val.shape[0]//3//n
+                        val = val.T.reshape(res.shape[1], 3, nhost, n)
+                        val = val.sum(axis=-1).swapaxes(1, 2)
 
-                            val = val.T.reshape(res.shape[1], 3, nhost, n)
-                            val = val.sum(axis=-1).swapaxes(1, 2)
-
-                        summedResults[evalType][struct][svName][elem] = val
+                    summedResults[struct][svName][elem] = val
                 
-        # summedResults = self.client.gather(self.client.compute(summedResults))
-        
         return summedResults
