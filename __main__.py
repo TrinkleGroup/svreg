@@ -216,7 +216,7 @@ def polish(client, settings):
 
         for svName in populationDict:
             for el, pop in populationDict[svName].items():
-                populationDict[svName][el] = client.scatter(pop, broadcast=True)
+                populationDict[svName][el] = client.scatter(pop)
         
         svFcs = evaluator.evaluate(populationDict, 'forces')
 
@@ -335,6 +335,8 @@ def computeErrors(client, refStruct, energies, forces, database):
             and S is the number of structures being evaluated.
     """
 
+    energies = dask.compute(energies)[0]
+    forces = dask.compute(forces)[0]
 
     trueValues = database.trueValues
     natoms = database.attrs['natoms']
@@ -370,14 +372,14 @@ def computeErrors(client, refStruct, energies, forces, database):
             ]
 
             fcsErrors = [abs(err) for err in fcsErrors]
-            fcsErrors = [delayedAverage(err) for err in fcsErrors]
+            # fcsErrors = [delayedAverage(err) for err in fcsErrors]
+            fcsErrors = [np.average(err, axis=(1, 2)) for err in fcsErrors]
 
             treeErrors.append(engErrors)
             treeErrors.append(sum(fcsErrors))
 
-        errors.append(treeErrors)
+        errors.append(np.stack(treeErrors))
 
-    errors = list(dask.compute(errors)[0])
     errors = [np.stack(err).T for err in errors]
 
     return errors

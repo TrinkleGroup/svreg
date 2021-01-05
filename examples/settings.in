@@ -13,11 +13,11 @@ runType     POLISH
 # Database settings
 ################################################################################
 
-# refStruct           Ground_state_crystal
-# databasePath        ../svreg_data/mlearn/Mo/Mo.hdf5-fixed
+refStruct           Ground_state_crystal
+databasePath        ../svreg_data/mlearn/Mo/Mo.hdf5-fixed-newformat0
 
-refStruct           Ti48Mo80_type1_c12
-databasePath        ../svreg_data/hyojung/hj.hdf5-fixed-f32
+# refStruct           Ti48Mo80_type1_c12
+# databasePath        ../svreg_data/hyojung/hj.hdf5-fixed-f32
 # databasePath        ../svreg_data/hyojung/hj.hdf5-fixed-f32-superarray
 # databasePath        ../svreg_data/hyojung/hj.hdf5-fixed-f32-new-redo0-superarray-mini
 
@@ -33,20 +33,20 @@ costFxn             MAE
 optimizer           CMA
 
 numberOfTrees       20
-tournamentSize      2
+tournamentSize      4
 
 optimizerPopSize    100
 
 crossoverProb       0.2
 pointMutateProb     0.2
-maxTreeDepth        3
+maxTreeDepth        2
 
 numRegressorSteps   1
-numOptimizerSteps   10
+numOptimizerSteps   4000
 
 energyWeight        100
 forcesWeight        1
 
-ridgePenalty        1e-2
+ridgePenalty        0.0
 
 ################################################################################

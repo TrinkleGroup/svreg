@@ -1,6 +1,12 @@
 import dask
 import numpy as np
 
+from numba import jit
+
+@dask.delayed
+@jit(nopython=True)
+def jittedEval(sv, pop):
+    return sv @ pop
 
 @dask.delayed
 def delayedEval(sv, pop):
@@ -12,6 +18,13 @@ class SVEvaluator:
         self.client     = client
         self.database   = database
         self.settings   = settings
+
+                        # n = self.database.attrs['natoms'][struct]
+                        # nhost = val.shape[0]//3//n
+
+                        # val = val.T.reshape(res.shape[1], 3, nhost, n)
+                        # val = val.sum(axis=-1).swapaxes(1, 2)
+
 
   
     # @profile
@@ -47,7 +60,8 @@ class SVEvaluator:
                     if evalType == 'energy':
                         results.append(sv.dot(pop))
                     else:
-                        results.append(delayedEval(sv, pop))
+                        # results.append(delayedEval(sv, pop))
+                        results.append(jittedEval(sv, pop))
 
         # Now sum by chunks before computing to avoid extra communication
         summedResults = {
@@ -59,6 +73,14 @@ class SVEvaluator:
             }
             for structName in structNames
         }
+
+        @dask.delayed
+        def delayedReshape(val, k, nhost, n):
+            return val.T.reshape(k, 3, nhost, n)
+        
+        @dask.delayed
+        def delayedSum(val):
+            return val.sum(axis=-1).swapaxes(1, 2)
 
         # TODO: consider dask computing before reshapes (comm while work?)
         for struct in structNames[::-1]:
@@ -78,8 +100,11 @@ class SVEvaluator:
                         n = self.database.attrs['natoms'][struct]
                         nhost = val.shape[0]//3//n
 
-                        val = val.T.reshape(res.shape[1], 3, nhost, n)
-                        val = val.sum(axis=-1).swapaxes(1, 2)
+                        # val = val.T.reshape(res.shape[1], 3, nhost, n)
+                        # val = val.sum(axis=-1).swapaxes(1, 2)
+
+                        val = delayedReshape(val, res.shape[1], nhost, n)
+                        val = delayedSum(val)
 
                     summedResults[struct][svName][elem] = val
                 

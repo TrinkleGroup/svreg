@@ -62,12 +62,6 @@ class SVDatabase(dict):
             'natoms': {s: h5pyFile[s].attrs['natoms'] for s in structNames},
         }
 
-        # self.attrs['structNames'] = np.char.decode(
-        #     self.attrs['structNames'].astype(np.bytes_)
-        # )
-
-        import time
-        start = time.time()
         elements = list(h5pyFile[structNames[0]][svNames[0]].keys())
 
         futures = []
@@ -88,14 +82,6 @@ class SVDatabase(dict):
                     group = h5pyFile[struct][sv][elem]
                     forceData = group['forces']
 
-                    print(
-                        "Database loading:", struct, sv, elem,
-                        group['energy'].shape,
-                        forceData.shape,
-                        forceData.dtype,
-                        flush=True
-                    )
-
                     self[struct][sv][elem]['energy'] = group['energy'][()]
 
                     self[struct][sv][elem]['forces'] = da.from_array(
@@ -106,4 +92,3 @@ class SVDatabase(dict):
                     futures.append(self[struct][sv][elem]['forces'])
 
         wait(futures)
-        print("Full load time: {} (s)".format(time.time() - start))

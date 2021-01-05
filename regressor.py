@@ -90,6 +90,7 @@ class SVRegressor:
             )
 
         self.trees = []
+        self.populationDict = None
 
 
     def initializeTrees(self, elements):
@@ -141,6 +142,14 @@ class SVRegressor:
                 {structName: [tree.eval() for tree in self.trees]}
         """
 
+        @dask.delayed
+        def delayedReshapeEng(val, numNodes, N):
+            return val.reshape((numNodes, N))
+
+        @dask.delayed
+        def delayedReshapeFcs(val, numNodes, N):
+            return val.reshape((numNodes, N, val.shape[1], val.shape[2]))
+
         # svEng = svResults['energy']
         # svFcs = svResults['forces']
 
@@ -160,10 +169,13 @@ class SVRegressor:
                     # numNodes = stackedEng.shape[0]//N
                     numNodes = self.numNodes[svName][elem]
 
-                    nodeEng = stackedEng.reshape((numNodes, N))
-                    nodeFcs = stackedFcs.reshape(
-                        (numNodes, N, stackedFcs.shape[1], stackedFcs.shape[2])
-                    )
+                    nodeEng = delayedReshapeEng(stackedEng, numNodes, N)
+                    nodeFcs = delayedReshapeFcs(stackedFcs, numNodes, N)
+
+                    # nodeEng = stackedEng.reshape((numNodes, N))
+                    # nodeFcs = stackedFcs.reshape(
+                    #     (numNodes, N, stackedFcs.shape[1], stackedFcs.shape[2])
+                    # )
 
                     unstackedValues = []
                     # for val1, val2 in zip(nodeEng, nodeFcs):
@@ -328,11 +340,16 @@ class SVRegressor:
                 dat = np.concatenate(popList, axis=0).T
                 populationDict[svName][elem] = dat
 
-                # populationDict[svName][elem] = dask.array.from_array(
-                #     dat,
-                #     chunks=dat.shape,
-                #     # chunks=(100, popList[0].shape[1]),
-                # )
+        #         if self.populationDict is None:
+        #             populationDict[svName][elem] = da.from_array(
+        #                 dat,
+        #                 chunks=dat.shape,
+        #             )
+        #         else:
+        #             populationDict[svName][elem][:] = dat
+
+        # if self.populationDict is None:
+        #     self.populationDict = populationDict
 
         return populationDict, rawPopulations
 
