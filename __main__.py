@@ -12,9 +12,10 @@ import numpy as np
 
 from dask_mpi import initialize
 initialize(
-    nthreads=2,
-    memory_limit='2 GB',
-    #interface='ipogif0',
+    nthreads=8,
+    memory_limit='16 GB',
+    interface='ipogif0',
+    local_directory='/u/sciteam/vita/scratch/svreg/hyojung/hj_dask_prof_int',
 )
 
 import dask
@@ -55,8 +56,11 @@ args = parser.parse_args()
 ################################################################################
 # Main functions
 
+start = time.time()
+
 # @profile
 def main(client, settings):
+    global start
 
     # Setup
     with h5py.File(settings['databasePath'], 'r') as h5pyFile:
@@ -156,90 +160,115 @@ def main(client, settings):
 
 def polish(client, settings):
 
+    print("Beginning... {}".format(time.time() - start), flush=True)
+
     # Setup
     with h5py.File(settings['databasePath'], 'r') as h5pyFile:
         database = SVDatabase(h5pyFile)
 
         evaluator = SVEvaluator(client, database, settings)
 
-    regressor = SVRegressor(settings, database)
+        print("Loaded database... {}".format(time.time() - start), flush=True)
 
-    costFxn = buildCostFunction(settings, len(database.attrs['natoms']))
+        regressor = SVRegressor(settings, database)
 
-    from nodes import FunctionNode
-    from tree import MultiComponentTree as MCTree
-    tree = MCTree(['Mo', 'Ti'])
+        costFxn = buildCostFunction(settings, len(database.attrs['natoms']))
 
-    from copy import deepcopy
+        from nodes import FunctionNode
+        from tree import MultiComponentTree as MCTree
+        tree = MCTree(['Mo', 'Ti'])
 
-    treeMo = SVTree()
-    treeMo.nodes = [
-        FunctionNode('add'),
-        deepcopy(regressor.svNodePool[0]),
-        FunctionNode('add'),
-        deepcopy(regressor.svNodePool[1]),
-        FunctionNode('add'),
-        deepcopy(regressor.svNodePool[2]),
-        FunctionNode('add'),
-        deepcopy(regressor.svNodePool[3]),
-        deepcopy(regressor.svNodePool[4]),
-    ]
+        from copy import deepcopy
 
-    treeTi = SVTree()
-    treeTi.nodes = [
-        FunctionNode('add'),
-        deepcopy(regressor.svNodePool[0]),
-        FunctionNode('add'),
-        deepcopy(regressor.svNodePool[1]),
-        FunctionNode('add'),
-        deepcopy(regressor.svNodePool[2]),
-        FunctionNode('add'),
-        deepcopy(regressor.svNodePool[3]),
-        deepcopy(regressor.svNodePool[4]),
-    ]
+        treeMo = SVTree()
+        treeMo.nodes = [
+            FunctionNode('add'),
+            deepcopy(regressor.svNodePool[0]),
+            FunctionNode('add'),
+            deepcopy(regressor.svNodePool[1]),
+            FunctionNode('add'),
+            deepcopy(regressor.svNodePool[2]),
+            FunctionNode('add'),
+            deepcopy(regressor.svNodePool[3]),
+            deepcopy(regressor.svNodePool[4]),
+        ]
 
-    tree.chemistryTrees['Mo'] = treeMo
-    tree.chemistryTrees['Ti'] = treeTi
+        treeTi = SVTree()
+        treeTi.nodes = [
+            FunctionNode('add'),
+            deepcopy(regressor.svNodePool[0]),
+            FunctionNode('add'),
+            deepcopy(regressor.svNodePool[1]),
+            FunctionNode('add'),
+            deepcopy(regressor.svNodePool[2]),
+            FunctionNode('add'),
+            deepcopy(regressor.svNodePool[3]),
+            deepcopy(regressor.svNodePool[4]),
+        ]
 
-    tree.updateSVNodes()
+        tree.chemistryTrees['Mo'] = treeMo
+        tree.chemistryTrees['Ti'] = treeTi
 
-    regressor.trees = [tree]
-    regressor.initializeOptimizers()
+        tree.updateSVNodes()
 
-    N = settings['optimizerPopSize']
+        regressor.trees = [tree]
+        regressor.initializeOptimizers()
 
-    optStart = time.time()
-    for optStep in range(settings['numOptimizerSteps']):
-        populationDict, rawPopulations = regressor.generatePopulationDict(N)
+        N = settings['optimizerPopSize']
 
-        svEng = evaluator.evaluate(populationDict, 'energy')
+        print("Prepared regressor... {}".format(time.time() - start), flush=True)
 
-        for svName in populationDict:
-            for el, pop in populationDict[svName].items():
-                populationDict[svName][el] = client.scatter(pop)
-        
-        svFcs = evaluator.evaluate(populationDict, 'forces')
+        optStart = time.time()
+        for optStep in range(settings['numOptimizerSteps']):
+            print("Starting loop... {}".format(time.time() - start), flush=True)
 
-        energies, forces = regressor.evaluateTrees(svEng, svFcs, N)
+            populationDict, rawPopulations = regressor.generatePopulationDict(N)
 
-        # Save the (per-struct) errors and the single-value costs
-        errors = computeErrors(
-            client, settings['refStruct'], energies, forces, database
-        )
+            print("Generated population... {}".format(time.time() - start), flush=True)
 
-        costs = costFxn(errors)
+            # svEng = evaluator.evaluate(populationDict, 'energy')
+            # print("Evaluated energies... {}".format(time.time() - start), flush=True)
 
-        # Add ridge regression penalty
-        penalties = np.array([
-            np.linalg.norm(pop, axis=1)*settings['ridgePenalty']
-            for pop in rawPopulations
-        ])
+            futures = []
+            for svName in populationDict:
+                for el, pop in populationDict[svName].items():
+                    populationDict[svName][el] = client.scatter(pop)
+                    futures.append(populationDict[svName][el])
 
-        printTreeCosts(optStep, costs, penalties, optStart)
+            # from dask.distributed import wait
+            # wait(futures)
+            print("Scattered population... {}".format(time.time() - start), flush=True)
 
-        # Update optimizers
-        regressor.updateOptimizers(rawPopulations, costs, penalties)
+            # svEng = evaluator.evaluate(populationDict, 'energy')
+            # svFcs = evaluator.evaluate(populationDict, 'forces')
+            svResults = evaluator.evaluate(populationDict)
+            svEng = svResults['energy']; svFcs = svResults['forces']
 
+            energies, forces = regressor.evaluateTrees(svEng, svFcs, N)
+
+            results = {'energies': energies, 'forces': forces}
+
+            # Save the (per-struct) errors and the single-value costs
+            errors = computeErrors(
+                # client, settings['refStruct'], energies, forces, database
+                client, settings['refStruct'], results, database
+            )
+
+            costs = costFxn(errors)
+
+            print("Evaluated trees and costs... {}".format(time.time() - start), flush=True)
+
+            # Add ridge regression penalty
+            penalties = np.array([
+                np.linalg.norm(pop, axis=1)*settings['ridgePenalty']
+                for pop in rawPopulations
+            ])
+
+            printTreeCosts(optStep, costs, penalties, optStart)
+
+            # Update optimizers
+            regressor.updateOptimizers(rawPopulations, costs, penalties)
+            print("Updated optimizers... {}".format(time.time() - start), flush=True)
 
 
 ################################################################################
@@ -311,7 +340,8 @@ def buildCostFunction(settings, numStructs):
 
 
 # @profile
-def computeErrors(client, refStruct, energies, forces, database):
+# def computeErrors(client, refStruct, energies, forces, database):
+def computeErrors(client, refStruct, results, database):
     """
     Takes in dictionaries of energies and forces and returns the energy/force
     errors for each structure for each tree. Sorts structure names first.
@@ -335,8 +365,16 @@ def computeErrors(client, refStruct, energies, forces, database):
             and S is the number of structures being evaluated.
     """
 
-    energies = dask.compute(energies)[0]
-    forces = dask.compute(forces)[0]
+    global start
+
+    results = dask.compute(results)[0]
+    energies = results['energies']; forces = results['forces']
+
+    # print("Beginning energy compute...{}".format(time.time() - start), flush=True)
+    # energies = dask.compute(energies)[0]
+    # print("Beginning forces compute...{}".format(time.time() - start), flush=True)
+    # forces = dask.compute(forces)[0]
+    # print("Done with computes...{}".format(time.time() - start), flush=True)
 
     trueValues = database.trueValues
     natoms = database.attrs['natoms']
@@ -379,7 +417,9 @@ def computeErrors(client, refStruct, energies, forces, database):
             treeErrors.append(sum(fcsErrors))
 
         errors.append(np.stack(treeErrors))
+        # errors.append(treeErrors)
 
+    # errors = list(dask.compute(errors)[0])
     errors = [np.stack(err).T for err in errors]
 
     return errors
@@ -435,16 +475,26 @@ if __name__ == '__main__':
     #         ]
     #         
     # ) as cluster, Client(cluster) as client:
-    with Client() as client:
+    with Client(silence_logs='error') as client:
+        from mpi4py import MPI
+        size = MPI.COMM_WORLD.Get_size()
 
         print()
         print(
             'Dask dashboard info: {}'.format(
-                client.scheduler_info()
+                client.scheduler_info()['address']
             ),
             flush=True
         )
         print()
+
+        num = (size-2)//100*100
+        print(
+            "Waiting for at least {} workers to connect before starting...".format(num),
+            flush=True
+        )
+
+        client.wait_for_workers(n_workers=(size-2)//100*100)
 
         # Begin run
         if settings['runType'] == 'GA':

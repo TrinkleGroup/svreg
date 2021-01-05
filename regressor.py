@@ -142,14 +142,6 @@ class SVRegressor:
                 {structName: [tree.eval() for tree in self.trees]}
         """
 
-        @dask.delayed
-        def delayedReshapeEng(val, numNodes, N):
-            return val.reshape((numNodes, N))
-
-        @dask.delayed
-        def delayedReshapeFcs(val, numNodes, N):
-            return val.reshape((numNodes, N, val.shape[1], val.shape[2]))
-
         # svEng = svResults['energy']
         # svFcs = svResults['forces']
 
@@ -169,13 +161,10 @@ class SVRegressor:
                     # numNodes = stackedEng.shape[0]//N
                     numNodes = self.numNodes[svName][elem]
 
-                    nodeEng = delayedReshapeEng(stackedEng, numNodes, N)
-                    nodeFcs = delayedReshapeFcs(stackedFcs, numNodes, N)
-
-                    # nodeEng = stackedEng.reshape((numNodes, N))
-                    # nodeFcs = stackedFcs.reshape(
-                    #     (numNodes, N, stackedFcs.shape[1], stackedFcs.shape[2])
-                    # )
+                    nodeEng = stackedEng.reshape((numNodes, N))
+                    nodeFcs = stackedFcs.reshape(
+                        (numNodes, N, stackedFcs.shape[1], stackedFcs.shape[2])
+                    )
 
                     unstackedValues = []
                     # for val1, val2 in zip(nodeEng, nodeFcs):
@@ -333,20 +322,32 @@ class SVRegressor:
                     populationDict[svName][elem].append(popDict[elem][svName])
                     self.numNodes[svName][elem] += 1
 
+        futures = []
         # Stack each group
         for svName in populationDict:
             for elem, popList in populationDict[svName].items():
                 # TODO: convert this to Dask array?
                 dat = np.concatenate(popList, axis=0).T
+
+                # if self.populationDict is None:
+                #     populationDict[svName][elem] = da.from_array(
+                #         dat,
+                #         chunks=dat.shape
+                #     )#.persist()
+                #     futures.append(populationDict[svName][elem])
+                # else:
+                #     populationDict[svName][elem][:] = dat
+
                 populationDict[svName][elem] = dat
 
-        #         if self.populationDict is None:
-        #             populationDict[svName][elem] = da.from_array(
-        #                 dat,
-        #                 chunks=dat.shape,
-        #             )
-        #         else:
-        #             populationDict[svName][elem][:] = dat
+                # populationDict[svName][elem] = dask.array.from_array(
+                #     dat,
+                #     chunks=dat.shape,
+                #     # chunks=(100, popList[0].shape[1]),
+                # )
+
+        # from dask.distributed import wait
+        # wait(futures)
 
         # if self.populationDict is None:
         #     self.populationDict = populationDict

@@ -5,8 +5,11 @@ from numba import jit
 
 @dask.delayed
 @jit(nopython=True)
-def jittedEval(sv, pop):
+def jitEval(sv, pop):
     return sv @ pop
+
+def futureEval(sv, pop):
+    return sv.dot(pop)
 
 @dask.delayed
 def delayedEval(sv, pop):
@@ -19,16 +22,9 @@ class SVEvaluator:
         self.database   = database
         self.settings   = settings
 
-                        # n = self.database.attrs['natoms'][struct]
-                        # nhost = val.shape[0]//3//n
-
-                        # val = val.T.reshape(res.shape[1], 3, nhost, n)
-                        # val = val.sum(axis=-1).swapaxes(1, 2)
-
-
   
     # @profile
-    def evaluate(self, populationDict, evalType):
+    def evaluate(self, populationDict):
         """
         Evaluates all of the populations on all of their corresponding structure
         vectors in the database.
@@ -46,66 +42,99 @@ class SVEvaluator:
         allSVnames  = list(self.database.attrs['svNames'])
         elements    = list(self.database.attrs['elements'])
 
+        engResults = []
+        fcsResults = []
         results = []
         for struct in structNames:
             for svName in allSVnames:
                 for elem in elements:
-                    if elem not in populationDict[svName]: continue
+                    for evalType in ['energy', 'forces']:
+                        if elem not in populationDict[svName]: continue
 
-                    sv = self.database[struct][svName][elem][evalType]
-                    pop = populationDict[svName][elem]
+                        sv = self.database[struct][svName][elem][evalType]
+                        pop = populationDict[svName][elem]
 
-                    # TODO: can I use JIT somehow? Like make a wrapper to
-                    # .dot()?
-                    if evalType == 'energy':
-                        results.append(sv.dot(pop))
-                    else:
-                        # results.append(delayedEval(sv, pop))
-                        results.append(jittedEval(sv, pop))
+                        # TODO: can I use JIT somehow? Like make a wrapper to .dot()?
+                        # if evalType == 'energy':
+                        #     # results.append(sv.dot(pop))
+                        #     engResults.append(delayedEval(sv, pop))
+                        # else:
+                        #     # results.append(delayedEval(sv, pop))
+                        #     fcsResults.append(delayedEval(sv, pop))
+
+                        results.append(delayedEval(sv, pop))
+
+                    # results.append(delayedEval(sv, pop))
+                    # results.append(self.client.submit(futureEval, sv, pop))
+
+        # results = self.client.compute(results)
+        # engResults = self.client.compute(engResults)
+        # fcsResults = self.client.compute(fcsResults)
+
+        # if evalType == 'forces':
+        #     from dask.distributed import wait
+        #     wait(results)
+
+        # results = self.client.gather(results)
 
         # Now sum by chunks before computing to avoid extra communication
         summedResults = {
-            structName: {
-                svName: {
-                    elem: None for elem in elements
+            evalType: {
+                structName: {
+                    svName: {
+                        elem: None for elem in elements
+                    }
+                    for svName in allSVnames
                 }
-                for svName in allSVnames
+                for structName in structNames
             }
-            for structName in structNames
+            for evalType in ['energy', 'forces']
         }
 
         @dask.delayed
-        def delayedReshape(val, k, nhost, n):
-            return val.T.reshape(k, 3, nhost, n)
+        def delayedReshape(val, n):
+            nhost = val.shape[0]//3//n
+            return val.T.reshape(val.shape[1], 3, nhost, n)
         
         @dask.delayed
         def delayedSum(val):
             return val.sum(axis=-1).swapaxes(1, 2)
 
+        @dask.delayed
+        def delayedEngSum(val):
+            return val.sum(axis=0)
+
+        futures = []
         # TODO: consider dask computing before reshapes (comm while work?)
         for struct in structNames[::-1]:
             for svName in allSVnames[::-1]:
                 for elem in elements[::-1]:
-                    if elem not in populationDict[svName]: continue
+                    for evalType in ['forces', 'energy']:
+                        if elem not in populationDict[svName]: continue
 
-                    res = results.pop()
+                        res = results.pop()
 
-                    # Parse the per-structure results
-                    val = None
-                    if evalType == 'energy':
-                        val = res.sum(axis=0)
-                    elif evalType == 'forces':
-                        val = res
+                        # Parse the per-structure results
+                        val = None
+                        if evalType == 'energy':
+                            # val = res.sum(axis=0)
+                            val = delayedEngSum(res)
+                        elif evalType == 'forces':
+                            val = res#.result()
 
-                        n = self.database.attrs['natoms'][struct]
-                        nhost = val.shape[0]//3//n
+                            n = self.database.attrs['natoms'][struct]
+                            # nhost = val.shape[0]//3//n
 
-                        # val = val.T.reshape(res.shape[1], 3, nhost, n)
-                        # val = val.sum(axis=-1).swapaxes(1, 2)
+                            # val = val.T.reshape(val.shape[1], 3, nhost, n)
+                            # val = val.sum(axis=-1).swapaxes(1, 2)
+                            val = delayedReshape(val, n)
+                            val = delayedSum(val)
 
-                        val = delayedReshape(val, res.shape[1], nhost, n)
-                        val = delayedSum(val)
-
-                    summedResults[struct][svName][elem] = val
-                
+                        summedResults[evalType][struct][svName][elem] = val
+                        futures.append(val)
+                    
+        self.client.compute(futures)
+        # summedResults = self.client.gather(summedResults)
+        # summedResults = self.client.gather(self.client.compute(summedResults))
+        # summedResults = self.client.compute(summedResults)
         return summedResults
