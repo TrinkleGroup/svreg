@@ -212,6 +212,8 @@ def polish(client, settings):
 
     tree.chemistryTrees['Mo'] = treeMo
     tree.chemistryTrees['Ti'] = treeTi
+    
+    print(tree)
 
     tree.updateSVNodes()
 

@@ -139,7 +139,7 @@ _function_map = {'add': add2,
                 # 'cos': cos1,
                 # 'tan': tan1,
                 # 'arctan': arctan1,
-                'exp': exp,
+                # 'exp': exp,
                 'sig': sig,
                  }
 
@@ -149,7 +149,7 @@ _arities = {
         # 'log',
         # 'inv',
         # 'sin',
-        'cos',
+        # 'cos',
         # 'tan',
         # 'arctan',
         # 'exp',
@@ -157,7 +157,7 @@ _arities = {
     ],
     2: [
         'add',
-        'mul'
+        # 'mul'
     ],
 }
 

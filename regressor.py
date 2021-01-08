@@ -177,6 +177,9 @@ class SVRegressor:
                         (numNodes, N, stackedFcs.shape[1], stackedFcs.shape[2])
                     )
 
+                    # if structName == 'B2':
+                    #     print(structName, svName, elem, 'nodeEng:', nodeEng.shape)
+
                     unstackedValues = []
                     # for val1, val2 in zip(nodeEng, nodeFcs):
                     for valIdx in range(numNodes):
@@ -185,18 +188,14 @@ class SVRegressor:
 
                         unstackedValues.append((val1, val2))
 
-                    # TODO: don't need to reverse here?
-                    unstackedValues = unstackedValues[::-1]
+                    # # # TODO: don't need to reverse here?
+                    # unstackedValues = unstackedValues[::-1]
 
                     # Loop backwards over the list of values
                     for tree in self.trees[::-1]:
-                        for svNode in tree.chemistryTrees[elem].svNodes:
+                        for svNode in tree.chemistryTrees[elem].svNodes[::-1]:
                             # Only update the SVNode objects of the current type
                             if svNode.description == svName:
-                                # TODO: I could put dask.compute() here, but it
-                                # would involve a lot more dask calls. The advantage
-                                # is that it would be more asynchronous and might be
-                                # able to load balance better.
                                 svNode.values = unstackedValues.pop()
 
                     # Error check to see if there are leftovers
@@ -288,12 +287,6 @@ class SVRegressor:
             print(treeNum, t)
 
         print('\t\t\t', ''.join(['{:<10}'.format(i) for i in range(10)]))
-
-    
-    @dask.delayed
-    @staticmethod
-    def delayedPop(opt, N):
-        return da.from_array(opt.ask(N))
 
 
     def generatePopulationDict(self, N):
