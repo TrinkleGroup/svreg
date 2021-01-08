@@ -7,8 +7,11 @@ from numba import jit
 
 @dask.delayed
 @jit(nopython=True)
-def jittedEval(sv, pop):
+def jitEval(sv, pop):
     return sv @ pop
+
+def futureEval(sv, pop):
+    return sv.dot(pop)
 
 @dask.delayed
 def delayedEval(sv, pop):
@@ -20,13 +23,6 @@ class SVEvaluator:
         self.client     = client
         self.database   = database
         self.settings   = settings
-
-                        # n = self.database.attrs['natoms'][struct]
-                        # nhost = val.shape[0]//3//n
-
-                        # val = val.T.reshape(res.shape[1], 3, nhost, n)
-                        # val = val.sum(axis=-1).swapaxes(1, 2)
-
 
   
     # @profile
@@ -61,19 +57,10 @@ class SVEvaluator:
                     sv = self.database[struct][svName][elem][evalType]
                     pop = populationDict[svName][elem]
 
-                    # # TODO: can I use JIT somehow? Like make a wrapper to
-                    # # .dot()?
                     if evalType == 'energy':
                         results.append(sv.dot(pop))
                     else:
-                        # results.append(client.submit(dask.array.dot, sv, pop))
                         results.append(delayedEval(sv, pop))
-                        # results.append(jittedEval(sv, pop))
-
-                    # print(struct, svName, elem, evalType, 'sv:', type(sv))
-                    # print(svName, elem, 'pop:', type(pop))
-
-                    # results.append(sv.dot(pop))
 
         # Now sum by chunks before computing to avoid extra communication
         summedResults = {
@@ -87,13 +74,15 @@ class SVEvaluator:
         }
 
         @dask.delayed
-        def delayedReshape(val, k, nhost, n):
-            return val.T.reshape(k, 3, nhost, n)
+        def delayedReshape(val, n):
+            nhost = val.shape[0]//3//n
+            return val.T.reshape(val.shape[1], 3, nhost, n)
         
         @dask.delayed
         def delayedSum(val):
             return val.sum(axis=-1).swapaxes(1, 2)
 
+        futures = []
         # TODO: consider dask computing before reshapes (comm while work?)
         for struct in structNames[::-1]:
             for svName in allSVnames[::-1]:
@@ -112,12 +101,11 @@ class SVEvaluator:
                         val = res
 
                         n = self.database.attrs['natoms'][struct]
-                        nhost = val.shape[0]//3//n
 
                         # val = val.T.reshape(res.shape[1], 3, nhost, n)
                         # val = val.sum(axis=-1).swapaxes(1, 2)
 
-                        val = delayedReshape(val, res.shape[1], nhost, n)
+                        val = delayedReshape(val, n)
                         val = delayedSum(val)
 
                     summedResults[struct][svName][elem] = val

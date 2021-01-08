@@ -1,11 +1,11 @@
 # Imports
 from tree import SVTree
-import matplotlib.pyplot as plt
 import os
 import time
 import h5py
 import shutil
 import argparse
+from mpi4py import MPI
 
 import random
 import numpy as np
@@ -13,8 +13,9 @@ import numpy as np
 from dask_mpi import initialize
 initialize(
     nthreads=2,
-    memory_limit='2 GB',
-    #interface='ipogif0',
+    memory_limit='4 GB',
+    # interface='ipogif0',
+    # local_directory='/u/sciteam/vita/scratch/svreg/hyojung/hj_dask_prof_int',
 )
 
 import dask
@@ -55,8 +56,11 @@ args = parser.parse_args()
 ################################################################################
 # Main functions
 
+start = time.time()
+
 # @profile
 def main(client, settings):
+    global start
 
     # Setup
     with h5py.File(settings['databasePath'], 'r') as h5pyFile:
@@ -174,9 +178,7 @@ def polish(client, settings):
 
         evaluator = SVEvaluator(client, database, settings)
 
-    regressor = SVRegressor(settings, database)
-
-    costFxn = buildCostFunction(settings, len(database.attrs['natoms']))
+        regressor = SVRegressor(settings, database)
 
     from nodes import FunctionNode
     from tree import MultiComponentTree as MCTree
@@ -220,25 +222,41 @@ def polish(client, settings):
     regressor.trees = [tree]
     regressor.initializeOptimizers()
 
+    costFxn = buildCostFunction(settings, len(database.attrs['natoms']))
+
     N = settings['optimizerPopSize']
 
     optStart = time.time()
     for optStep in range(settings['numOptimizerSteps']):
+
         populationDict, rawPopulations = regressor.generatePopulationDict(N)
 
-        svEng = evaluator.evaluate(populationDict, 'energy')
+        # svEng = evaluator.evaluate(populationDict, 'energy')
+        # print("Evaluated energies... {}".format(time.time() - start), flush=True)
 
-        for svName in populationDict:
-            for el, pop in populationDict[svName].items():
-                populationDict[svName][el] = client.scatter(pop)
-        
+        # futures = []
+        # for svName in populationDict:
+        #     for el, pop in populationDict[svName].items():
+        #         populationDict[svName][el] = client.scatter(pop)
+        #         futures.append(populationDict[svName][el])
+
+        # from dask.distributed import wait
+        # wait(futures)
+
+        svEng = evaluator.evaluate(populationDict, 'energy')
         svFcs = evaluator.evaluate(populationDict, 'forces')
 
+        # svResults = evaluator.evaluate(populationDict)
+        # svEng = svResults['energy']; svFcs = svResults['forces']
+
         energies, forces = regressor.evaluateTrees(svEng, svFcs, N)
+
+        results = {'energies': energies, 'forces': forces}
 
         # Save the (per-struct) errors and the single-value costs
         errors = computeErrors(
             client, settings['refStruct'], energies, forces, database
+            # client, settings['refStruct'], results, database
         )
 
         costs = costFxn(errors)
@@ -253,8 +271,6 @@ def polish(client, settings):
 
         # Update optimizers
         regressor.updateOptimizers(rawPopulations, costs, penalties)
-
-
 
 ################################################################################
 # Helper functions
@@ -326,6 +342,7 @@ def buildCostFunction(settings, numStructs):
 
 # @profile
 def computeErrors(client, refStruct, energies, forces, database):
+# def computeErrors(client, refStruct, results, database):
     """
     Takes in dictionaries of energies and forces and returns the energy/force
     errors for each structure for each tree. Sorts structure names first.
@@ -349,8 +366,7 @@ def computeErrors(client, refStruct, energies, forces, database):
             and S is the number of structures being evaluated.
     """
 
-    # energies = dask.compute(energies)[0]
-    # forces = dask.compute(forces)[0]
+    global start
 
     trueValues = database.trueValues
     natoms = database.attrs['natoms']
@@ -362,11 +378,6 @@ def computeErrors(client, refStruct, energies, forces, database):
     # numStructs = len(keys)
 
     keys = list(energies.keys())
-    errors = []
-
-    @dask.delayed
-    def delayedAverage(err):
-        return dask.array.mean(err, axis=(1, 2))
 
     errors = []
     for treeNum in range(numTrees):
@@ -407,6 +418,9 @@ def computeErrors(client, refStruct, energies, forces, database):
 # Script entry point
 
 if __name__ == '__main__':
+
+    size = MPI.COMM_WORLD.Get_size()
+
     # Load settings
     settings = Settings.from_file(args.settings)
     settings['PROCS_PER_PHYS_NODE'] = args.procs_per_node
@@ -443,6 +457,14 @@ if __name__ == '__main__':
             flush=True
         )
         print()
+
+        num = (size-2)//100*100
+        print(
+            "Waiting for at least {} workers to connect before starting...".format(num),
+            flush=True
+        )
+
+        client.wait_for_workers(n_workers=(size-2)//100*100)
 
         # Begin run
         if settings['runType'] == 'GA':
