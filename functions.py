@@ -15,43 +15,43 @@ of (value, derivative) pairs, then to define functions that operate on the
 tuples. This allows for much simpler software implementation.
 """
 
-@dask.delayed
+#@dask.delayed
 def _derivative_add(a, b):
     """Derivative of a + b"""
     return a[1] + b[1]
 
 
-@dask.delayed
+#@dask.delayed
 def _derivative_tan(x):
     """Derivative of tan(x)"""
     return _protected_inverse(np.cos(x[1])**2)
 
 
-@dask.delayed
+#@dask.delayed
 def _derivative_sin(x):
     """Derivative of sin(x)"""
     return np.cos(x[1])
 
 
-@dask.delayed
+#@dask.delayed
 def _derivative_cos(x):
     """Derivative of cos(x)"""
     return -1*np.sin(x[1])
 
 
-@dask.delayed
+#@dask.delayed
 def _derivative_inv(x):
     """Derivative of x**-1"""
     return -1*(_protected_inverse(x[1])**2)
 
 
-@dask.delayed
+#@dask.delayed
 def _derivative_log(x):
     """Derivative of natural log"""
     return _protected_inverse(x[1])
 
 
-@dask.delayed
+#@dask.delayed
 def _derivative_mul(a, b):
     """a*(db/dx) + (da/dx)*b"""
     return (
@@ -60,24 +60,24 @@ def _derivative_mul(a, b):
     )
 
 
-@dask.delayed
+#@dask.delayed
 def _derivative_sqrt(x):
     """(1/2)x**(-1/2)"""
     return 0.5*_protected_inverse(_protected_sqrt(x[1]))
 
 
-@dask.delayed
+#@dask.delayed
 def _derivative_exp(x):
     """Derivative of e(x)"""
     return np.exp(x[1])
 
 
-@dask.delayed
+#@dask.delayed
 def sigmoid(x):
     return 1/(1+np.exp(-x))
 
 
-@dask.delayed
+#@dask.delayed
 def _derivative_sigmoid(x):
     return sigmoid(x[1])*(1-sigmoid(x[1]))
 
@@ -131,15 +131,15 @@ exp   = _Function(function=np.exp, name='exp', arity=1)
 sig   = _Function(function=sigmoid, name='sig', arity=1)
 
 _function_map = {'add': add2,
-                 'mul': mul2,
+                #  'mul': mul2,
                  'sqrt': sqrt1,
                  # 'log': log1,
                  # 'inv': inv1,
                 #  'sin': sin1,
-                'cos': cos1,
+                # 'cos': cos1,
                 # 'tan': tan1,
                 # 'arctan': arctan1,
-                # 'exp': exp,
+                'exp': exp,
                 'sig': sig,
                  }
 

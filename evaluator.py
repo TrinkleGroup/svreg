@@ -1,4 +1,6 @@
 import dask
+import dask.array
+from dask.distributed import get_client
 import numpy as np
 
 from numba import jit
@@ -46,22 +48,32 @@ class SVEvaluator:
         allSVnames  = list(self.database.attrs['svNames'])
         elements    = list(self.database.attrs['elements'])
 
+        client = get_client()
+
         results = []
         for struct in structNames:
             for svName in allSVnames:
+                if svName not in populationDict: continue
+
                 for elem in elements:
                     if elem not in populationDict[svName]: continue
 
                     sv = self.database[struct][svName][elem][evalType]
                     pop = populationDict[svName][elem]
 
-                    # TODO: can I use JIT somehow? Like make a wrapper to
-                    # .dot()?
+                    # # TODO: can I use JIT somehow? Like make a wrapper to
+                    # # .dot()?
                     if evalType == 'energy':
                         results.append(sv.dot(pop))
                     else:
-                        # results.append(delayedEval(sv, pop))
-                        results.append(jittedEval(sv, pop))
+                        # results.append(client.submit(dask.array.dot, sv, pop))
+                        results.append(delayedEval(sv, pop))
+                        # results.append(jittedEval(sv, pop))
+
+                    # print(struct, svName, elem, evalType, 'sv:', type(sv))
+                    # print(svName, elem, 'pop:', type(pop))
+
+                    # results.append(sv.dot(pop))
 
         # Now sum by chunks before computing to avoid extra communication
         summedResults = {
@@ -85,6 +97,8 @@ class SVEvaluator:
         # TODO: consider dask computing before reshapes (comm while work?)
         for struct in structNames[::-1]:
             for svName in allSVnames[::-1]:
+                if svName not in populationDict: continue
+
                 for elem in elements[::-1]:
                     if elem not in populationDict[svName]: continue
 
@@ -108,4 +122,5 @@ class SVEvaluator:
 
                     summedResults[struct][svName][elem] = val
                 
+        summedResults = client.gather(client.compute(summedResults))
         return summedResults

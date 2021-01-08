@@ -169,13 +169,13 @@ class SVRegressor:
                     # numNodes = stackedEng.shape[0]//N
                     numNodes = self.numNodes[svName][elem]
 
-                    nodeEng = delayedReshapeEng(stackedEng, numNodes, N)
-                    nodeFcs = delayedReshapeFcs(stackedFcs, numNodes, N)
+                    # nodeEng = delayedReshapeEng(stackedEng, numNodes, N)
+                    # nodeFcs = delayedReshapeFcs(stackedFcs, numNodes, N)
 
-                    # nodeEng = stackedEng.reshape((numNodes, N))
-                    # nodeFcs = stackedFcs.reshape(
-                    #     (numNodes, N, stackedFcs.shape[1], stackedFcs.shape[2])
-                    # )
+                    nodeEng = stackedEng.reshape((numNodes, N))
+                    nodeFcs = stackedFcs.reshape(
+                        (numNodes, N, stackedFcs.shape[1], stackedFcs.shape[2])
+                    )
 
                     unstackedValues = []
                     # for val1, val2 in zip(nodeEng, nodeFcs):
@@ -307,13 +307,12 @@ class SVRegressor:
         """
 
         rawPopulations = [np.array(opt.ask(N)) for opt in self.optimizers]
-        # rawPopulations = [self.delayedPop(opt, N) for opt in self.optimizers]
-        # rawPopulations = [da.from_array(opt.ask(N)) for opt in self.optimizers]
 
         # Used for parsing later
         self.numNodes = {}
 
         # Now parse the populations and group them by SV type
+
         # populationDict[svName][elem]
         populationDict = {}
         for pop, tree in zip(rawPopulations, self.trees):
@@ -324,13 +323,25 @@ class SVRegressor:
                 for svName in popDict[elem]:
                     if svName not in populationDict:
                         populationDict[svName] = {}
-                        self.numNodes[svName] = {}
 
                     if elem not in populationDict[svName]:
                         populationDict[svName][elem] = []
-                        self.numNodes[svName][elem] = 0
 
                     populationDict[svName][elem].append(popDict[elem][svName])
+
+
+        # Count the number of each node to help with parsing results later
+        for tree in self.trees:
+            for elem in tree.chemistryTrees:
+                for svNode in tree.chemistryTrees[elem].svNodes:
+                    svName = svNode.description
+
+                    if svName not in self.numNodes:
+                        self.numNodes[svName] = {}
+
+                    if elem not in self.numNodes[svName]:
+                        self.numNodes[svName][elem] = 0
+
                     self.numNodes[svName][elem] += 1
 
         # Stack each group

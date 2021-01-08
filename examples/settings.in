@@ -7,17 +7,17 @@
 ################################################################################
 
 seed        1123
-runType     POLISH
+runType     GA
 
 ################################################################################
 # Database settings
 ################################################################################
 
-refStruct           Ground_state_crystal
-databasePath        ../svreg_data/mlearn/Mo/Mo.hdf5-fixed-newformat0
+# refStruct           Ground_state_crystal
+# databasePath        ../svreg_data/mlearn/Mo/Mo.hdf5-fixed-newformat0
 
-# refStruct           Ti48Mo80_type1_c12
-# databasePath        ../svreg_data/hyojung/hj.hdf5-fixed-f32
+refStruct           Ti48Mo80_type1_c12
+databasePath        ../svreg_data/hyojung/hj.hdf5-fixed-f32
 # databasePath        ../svreg_data/hyojung/hj.hdf5-fixed-f32-superarray
 # databasePath        ../svreg_data/hyojung/hj.hdf5-fixed-f32-new-redo0-superarray-mini
 
@@ -32,8 +32,8 @@ costFxn             MAE
 
 optimizer           CMA
 
-numberOfTrees       20
-tournamentSize      4
+numberOfTrees       7
+tournamentSize      2
 
 optimizerPopSize    100
 

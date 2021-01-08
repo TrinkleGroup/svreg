@@ -20,7 +20,7 @@ initialize(
 import dask
 import dask.array
 from dask_jobqueue import PBSCluster
-from dask.distributed import Client, LocalCluster
+from dask.distributed import Client, wait
 
 from archive import Archive
 from settings import Settings
@@ -95,9 +95,19 @@ def main(client, settings):
                     for elem in populationDict[svName]:
                         print(svName, elem, populationDict[svName][elem].shape)
 
-            svResults = evaluator.evaluate(populationDict)
+            svEng = evaluator.evaluate(populationDict, 'energy')
 
-            energies, forces = regressor.evaluateTrees(svResults, N)
+            # scatterFutures = []
+            # for svName in populationDict:
+            #     for el, pop in populationDict[svName].items():
+            #         populationDict[svName][el] = client.scatter(pop)
+            #         scatterFutures.append(populationDict[svName][el])
+
+            # wait(scatterFutures)
+
+            svFcs = evaluator.evaluate(populationDict, 'forces')
+
+            energies, forces = regressor.evaluateTrees(svEng, svFcs, N)
 
             # Save the (per-struct) errors and the single-value costs
             errors = computeErrors(
@@ -116,6 +126,8 @@ def main(client, settings):
 
             # Update optimizers
             regressor.updateOptimizers(rawPopulations, costs, penalties)
+
+            client.profile()
 
         # Update archive once the optimizers have finished running
         archive.update(
@@ -335,8 +347,8 @@ def computeErrors(client, refStruct, energies, forces, database):
             and S is the number of structures being evaluated.
     """
 
-    energies = dask.compute(energies)[0]
-    forces = dask.compute(forces)[0]
+    # energies = dask.compute(energies)[0]
+    # forces = dask.compute(forces)[0]
 
     trueValues = database.trueValues
     natoms = database.attrs['natoms']
@@ -358,13 +370,18 @@ def computeErrors(client, refStruct, energies, forces, database):
     for treeNum in range(numTrees):
         treeErrors = []
         for structName in sorted(keys):
-            eng = energies[structName][treeNum]/natoms[structName] \
-                - energies[refStruct][treeNum]/natoms[refStruct]
+
+            structEng  = np.sum(energies[structName][treeNum], axis=0)
+            structEng /= natoms[structName]
+
+            refEng  = np.sum(energies[refStruct][treeNum], axis=0)
+            refEng /= natoms[refStruct]
+
+            ediff = structEng - refEng
+
+            engErrors = abs(ediff - trueValues[structName]['energy'])
 
             fcs =   forces[structName][treeNum]
-
-            totalEng = sum([eng[ii] for ii in range(len(elements))])
-            engErrors = totalEng - trueValues[structName]['energy']
 
             fcsErrors = [
                 fcs[ii] - trueValues[structName]['forces_'+el]
@@ -372,7 +389,6 @@ def computeErrors(client, refStruct, energies, forces, database):
             ]
 
             fcsErrors = [abs(err) for err in fcsErrors]
-            # fcsErrors = [delayedAverage(err) for err in fcsErrors]
             fcsErrors = [np.average(err, axis=(1, 2)) for err in fcsErrors]
 
             treeErrors.append(engErrors)
@@ -414,33 +430,13 @@ if __name__ == '__main__':
 
     os.mkdir(settings['outputPath'])
 
-    # Start Dask client
-    # with LocalCluster(
-    #     n_workers=4,
-    #     processes=True,  # default; need to test out False
-    #     threads_per_worker=2,
-    #     # worker_dashboard_address='40025'
-    # with PBSCluster(
-    #         queue='normal',
-    #         project='bbas',
-    #         local_directory=os.getcwd(),
-    #         cores=16,
-    #         memory='64 GB',
-    #         python='aprun -n 1 -N 1 python',
-    #         resource_spec='nodes=1:ppn=32:xe',
-    #         env_extra=[
-    #             'cd /scratch/sciteam/$USER/svreg/hyojung/$PBS_JOBNAME',
-    #             'export PATH=$PATH:/scratch/sciteam/$USER/svreg/hyojung/$PBS_JOBNAME',
-    #             'source ~/bin/svregEnv',
-    #         ]
-    #         
-    # ) as cluster, Client(cluster) as client:
     with Client() as client:
 
         print()
         print(
             'Dask dashboard info: {}'.format(
-                client.scheduler_info()
+                client.scheduler_info()['address'],
+                client.scheduler_info()['services'],
             ),
             flush=True
         )
