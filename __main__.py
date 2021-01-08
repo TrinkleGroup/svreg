@@ -101,13 +101,9 @@ def main(client, settings):
 
             svEng = evaluator.evaluate(populationDict, 'energy')
 
-            # scatterFutures = []
-            # for svName in populationDict:
-            #     for el, pop in populationDict[svName].items():
-            #         populationDict[svName][el] = client.scatter(pop)
-            #         scatterFutures.append(populationDict[svName][el])
-
-            # wait(scatterFutures)
+            for svName in populationDict:
+                for el, pop in populationDict[svName].items():
+                    populationDict[svName][el] = client.scatter(pop, broadcast=True)
 
             svFcs = evaluator.evaluate(populationDict, 'forces')
 
