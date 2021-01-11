@@ -99,9 +99,9 @@ def main(client, settings):
 
         svEng = evaluator.evaluate(populationDict, 'energy')
 
-        for svName in populationDict:
-            for el, pop in populationDict[svName].items():
-                populationDict[svName][el] = client.scatter(pop, broadcast=True)
+        # for svName in populationDict:
+        #     for el, pop in populationDict[svName].items():
+        #         populationDict[svName][el] = client.scatter(pop, broadcast=True)
 
         svFcs = evaluator.evaluate(populationDict, 'forces')
 
@@ -120,14 +120,19 @@ def main(client, settings):
             for pop in rawPopulations
         ])
 
-        printTreeCosts(fxnEvals, costs, penalties, start)
-
         # Update optimizers
         updatedOpts = regressor.updateOptimizers(
             rawPopulations, costs, penalties
         )
 
         regressor.optimizers = client.gather(client.compute(updatedOpts))
+
+        printTreeCosts(
+            fxnEvals,
+            [opt.result.fbest for opt in regressor.optimizers],
+            penalties,
+            start
+        )
 
         fxnEvals += 1
 
@@ -333,9 +338,10 @@ def printTreeCosts(optStep, costs, penalties, startTime):
     string = '\t\t'
 
     for c, p in zip(firstN, firstNPen):
-        argmin = np.argmin(c)
+        # argmin = np.argmin(c)
         # string += '{:.4f} ({:.4f})\t'.format(c[argmin], p[argmin])
-        string += '{:.6f}\t'.format(c[argmin])
+        # string += '{:.6f}\t'.format(c[argmin])
+        string += '{:.6f}\t'.format(c)
 
     print(
         optStep,
@@ -361,17 +367,23 @@ def buildCostFunction(settings, numStructs):
     scaler[::2]  *= settings['energyWeight']
     scaler[1::2] *= settings['forcesWeight']
         
+    @dask.delayed
+    def delayedMAE(err):
+        return np.average(np.multiply(err, scaler), axis=1)
+
     # @profile
     def mae(errors):
 
         costs = []
         for treeErr in errors:
-            costs.append(np.average(np.multiply(treeErr, scaler), axis=1))
+            # costs.append(np.average(np.multiply(treeErr, scaler), axis=1))
+            costs.append(delayedMAE(treeErr))
             # costs.append(
             #     np.average(np.multiply(np.stack(treeErr).T, scaler), axis=1)
             # )
 
-        return np.array(costs)
+        # return np.array(costs)
+        return costs
 
     def rmse(errors):
         
@@ -431,6 +443,19 @@ def computeErrors(client, refStruct, energies, forces, database):
 
     keys = list(energies.keys())
 
+    @dask.delayed
+    def delayedAvg(err):
+        # return np.average(err, axis=(1,2))
+        return dask.array.average(err, axis=(1,2))
+
+    @dask.delayed
+    def delayedStack(err):
+        return dask.array.stack(err)
+
+    @dask.delayed
+    def delayedStackT(err):
+        return dask.array.stack(err).T
+
     errors = []
     for treeNum in range(numTrees):
         treeErrors = []
@@ -454,14 +479,20 @@ def computeErrors(client, refStruct, energies, forces, database):
             ]
 
             fcsErrors = [abs(err) for err in fcsErrors]
-            fcsErrors = [np.average(err, axis=(1, 2)) for err in fcsErrors]
+            # fcsErrors = [np.average(err, axis=(1, 2)) for err in fcsErrors]
+            # fcsErrors = [delayedAvg(err) for err in fcsErrors]
+            fcsErrors = [dask.array.average(err, axis=(1,2)) for err in fcsErrors]
 
             treeErrors.append(engErrors)
             treeErrors.append(sum(fcsErrors))
 
-        errors.append(np.stack(treeErrors))
+        # errors.append(np.stack(treeErrors))
+        # errors.append(delayedStack(treeErrors))
+        errors.append(dask.array.stack(treeErrors))
 
-    errors = [np.stack(err).T for err in errors]
+    # errors = [np.stack(err).T for err in errors]
+    # errors = [delayedStackT(err) for err in errors]
+    errors = [dask.array.transpose(dask.array.stack((err))) for err in errors]
 
     return errors
 
