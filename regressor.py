@@ -10,6 +10,7 @@ from tree import SVTree
 from tree import MultiComponentTree as MCTree
 
 import dask
+import dask.bag
 import dask.array as da
 
 # TODO: may be able to merge this into ga.py, it really only initializes
@@ -220,7 +221,7 @@ class SVRegressor:
             )
             for tree in self.trees
         ]
-    
+
 
     # def tournament(self):
     #     """
@@ -341,6 +342,7 @@ class SVRegressor:
         """
 
         rawPopulations = [np.array(opt.ask(N)) for opt in self.optimizers]
+        # rawPopulations = self.optimizers.map(_ask, N).compute()
 
         # Used for parsing later
         self.numNodes = {}
@@ -412,11 +414,23 @@ class SVRegressor:
 
     
     def updateOptimizers(self, rawPopulations, costs, penalties):
+
+        @dask.delayed
+        def _update(opt, pop, cost):
+            opt.tell(pop, cost)
+            return opt
+
+        updatedOpts = []
+
         for treeIdx in range(len(self.optimizers)):
             fullCost = costs[treeIdx] + penalties[treeIdx]
 
             opt = self.optimizers[treeIdx]
-            opt.tell(rawPopulations[treeIdx], fullCost)
+
+            # opt.tell(rawPopulations[treeIdx], fullCost)
+            updatedOpts.append(_update(opt, rawPopulations[treeIdx], fullCost))
+
+        return updatedOpts
 
 
     def checkStale(self):
