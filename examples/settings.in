@@ -7,7 +7,7 @@
 ################################################################################
 
 seed        1123
-runType     POLISH
+runType     GA
 
 ################################################################################
 # Database settings
@@ -28,25 +28,25 @@ overwrite           True
 #  Regressor settings
 ################################################################################
 
-costFxn             MAE
+costFxn                 MAE
 
-optimizer           CMA
+optimizer               CMA
 
-numberOfTrees       7
-tournamentSize      2
+numberOfTrees           7
+tournamentSize          2
 
-optimizerPopSize    100
+optimizerPopSize        100
 
-crossoverProb       0.2
-pointMutateProb     0.2
-maxTreeDepth        2
+crossoverProb           0.2
+pointMutateProb         0.2
+maxTreeDepth            2
 
-numRegressorSteps   1
-numOptimizerSteps   4000
+numRegressorSteps       10
+maxNumOptimizerSteps    10
 
-energyWeight        100
-forcesWeight        1
+energyWeight            100
+forcesWeight            1
 
-ridgePenalty        0.0
+ridgePenalty            0.0
 
 ################################################################################

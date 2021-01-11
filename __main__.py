@@ -28,6 +28,7 @@ from settings import Settings
 from database import SVDatabase
 from regressor import SVRegressor
 from evaluator import SVEvaluator
+from population import Population
 
 ################################################################################
 # Parse all command-line arguments
@@ -83,85 +84,220 @@ def main(client, settings):
     errors          = None
     costs           = None
 
-    regStart = time.time()
-    for regStep in range(settings['numRegressorSteps']):
+    population = Population(settings, regressor.svNodePool)
+    archive = Archive(os.path.join(settings['outputPath'], 'archive'))
 
-        regressor.printTop10Header(regStep)
+    numCompletedTrees = 0
+    maxNumTrees = settings['numRegressorSteps']*settings['numberOfTrees']
 
-        optStart = time.time()
-        for optStep in range(settings['numOptimizerSteps']):
-            populationDict, rawPopulations = regressor.generatePopulationDict(N)
+    start = time.time()
+    fxnEvals = 1
+    while numCompletedTrees < maxNumTrees:
 
-            if optStep == 0:
-                print("Total population shapes:")
+        # Continue optimization of currently active trees
+        populationDict, rawPopulations = regressor.generatePopulationDict(N)
 
-                for svName in populationDict:
-                    for elem in populationDict[svName]:
-                        print(svName, elem, populationDict[svName][elem].shape)
+        svEng = evaluator.evaluate(populationDict, 'energy')
 
-            svEng = evaluator.evaluate(populationDict, 'energy')
+        for svName in populationDict:
+            for el, pop in populationDict[svName].items():
+                populationDict[svName][el] = client.scatter(pop, broadcast=True)
 
-            for svName in populationDict:
-                for el, pop in populationDict[svName].items():
-                    populationDict[svName][el] = client.scatter(pop, broadcast=True)
+        svFcs = evaluator.evaluate(populationDict, 'forces')
 
-            svFcs = evaluator.evaluate(populationDict, 'forces')
+        energies, forces = regressor.evaluateTrees(svEng, svFcs, N)
 
-            energies, forces = regressor.evaluateTrees(svEng, svFcs, N)
-
-            # Save the (per-struct) errors and the single-value costs
-            errors = computeErrors(
-                client, settings['refStruct'], energies, forces, database
-            )
-
-            costs = costFxn(errors)
-
-            # Add ridge regression penalty
-            penalties = np.array([
-                np.linalg.norm(pop, axis=1)*settings['ridgePenalty']
-                for pop in rawPopulations
-            ])
-
-            printTreeCosts(optStep, costs, penalties, optStart)
-
-            # Update optimizers
-            regressor.updateOptimizers(rawPopulations, costs, penalties)
-
-            client.profile()
-
-        # Update archive once the optimizers have finished running
-        archive.update(
-            regressor.trees, costs, errors, rawPopulations,
-            regressor.optimizers
+        # Save the (per-struct) errors and the single-value costs
+        errors = computeErrors(
+            client, settings['refStruct'], energies, forces, database
         )
 
-        archive.log()
-        archive.printStatus([str(t) for t in regressor.trees])
+        costs = costFxn(errors)
 
-        if regStep + 1 < settings['numRegressorSteps']:
+        # Add ridge regression penalty
+        penalties = np.array([
+            np.linalg.norm(pop, axis=1)*settings['ridgePenalty']
+            for pop in rawPopulations
+        ])
 
-            # Sample tournamentSize number of trees to use as parents
-            sampledTrees, opts = archive.sample(settings['tournamentSize'])
-            regressor.trees = sampledTrees
+        printTreeCosts(fxnEvals, costs, penalties, start)
 
-            # Finish populating trees by mating/mutating
-            newTrees = regressor.evolvePopulation()
+        # Update optimizers
+        regressor.updateOptimizers(rawPopulations, costs, penalties)
 
-            # Remove duplicate trees, and load remaining from archive
-            uniqueTrees, uniqueOptimizers = archive.pruneAndLoad(
-                sampledTrees, newTrees, opts, regressor
+        fxnEvals += 1
+
+        # Remove any converged trees, update population, and print new results
+        staleIndices = regressor.checkStale()
+
+        populationChanged = False
+
+        # A tree has finished optimizing
+        for staleIdx in staleIndices:
+            candidate   = regressor.trees[staleIdx]
+            opt         = regressor.optimizers[staleIdx]
+
+            candidate.cost = opt.result.fbest
+
+            numCompletedTrees += 1
+
+            # Log completed tree
+            archive.update(
+                # candidate, costs[staleIdx], errors[staleIdx],
+                # rawPopulations[staleIdx], regressor.optimizers[staleIdx]
+                candidate, candidate.cost, opt.result.xbest, opt
             )
 
-            # # Now pull old trees to ensure population size is the same
-            # keys = list(self.keys())
-            # while len(uniqueTrees) < self.settings['numberOfTrees']:
-            #     randomTree = random.choice(keys)
-            #     if randomTree not in uniqueTrees:
-            #         uniqueTrees.append(archive[randomTree].tree)
-            #         uniqueOptimizers.append(archive[randomTree].optimizer)
+            archive.log()
 
-            regressor.trees = uniqueTrees
-            regressor.optimizers = uniqueOptimizers
+            # print("All archived results")
+            # archive.printStatus([str(t) for t in regressor.trees])
+
+            # Randomly insert into current population
+            inserted = population.attemptInsert(candidate)
+
+            if inserted:
+                populationChanged = True
+
+            # Replace completed tree with new tree
+
+            # Make sure new tree isn't already in archive or active population
+            currentRegNames = [str(t) for t in regressor.trees]
+
+            newTree = population.newIndividual()
+
+            generatedNew = False
+            while not generatedNew:
+
+                treeName = str(newTree)
+
+                inArchive   = treeName in archive
+                inReg       = treeName in currentRegNames
+
+                if (not inArchive) and (not inReg):
+                    generatedNew = True
+                else:
+                    newTree = population.newIndividual()
+
+            # Insert new tree into list of trees being optimized
+            newOpt = regressor.optimizer(
+                newTree.populate(N=1)[0],
+                *regressor.optimizerArgs
+            )
+
+            regressor.trees[staleIdx]        = newTree
+            regressor.optimizers[staleIdx]   = newOpt
+
+        if populationChanged:
+            # Print current population if it was updated
+            print()
+            print()
+            print("Current population:")
+
+            popCosts = [t.cost for t in population]
+            argsort = np.argsort(popCosts)
+
+            for idx in argsort:
+                print(population[idx].cost, population[idx])
+
+            print()
+        else:
+            print()
+            print()
+            print("No new fitted trees were added to the population.")
+            print()
+
+        if staleIndices:
+            print()
+            print("Currently optimizing:")
+
+            for pidx, t in enumerate(regressor.trees):
+                print(pidx, t)
+            print()
+            print()
+
+
+
+
+    # regStart = time.time()
+    # for regStep in range(settings['numRegressorSteps']):
+
+    #     regressor.printTop10Header(regStep)
+
+    #     optStart = time.time()
+    #     for optStep in range(settings['numOptimizerSteps']):
+    #         populationDict, rawPopulations = regressor.generatePopulationDict(N)
+
+    #         if optStep == 0:
+    #             print("Total population shapes:")
+
+    #             for svName in populationDict:
+    #                 for elem in populationDict[svName]:
+    #                     print(svName, elem, populationDict[svName][elem].shape)
+
+    #         svEng = evaluator.evaluate(populationDict, 'energy')
+
+    #         for svName in populationDict:
+    #             for el, pop in populationDict[svName].items():
+    #                 populationDict[svName][el] = client.scatter(pop, broadcast=True)
+
+    #         svFcs = evaluator.evaluate(populationDict, 'forces')
+
+    #         energies, forces = regressor.evaluateTrees(svEng, svFcs, N)
+
+    #         # Save the (per-struct) errors and the single-value costs
+    #         errors = computeErrors(
+    #             client, settings['refStruct'], energies, forces, database
+    #         )
+
+    #         costs = costFxn(errors)
+
+    #         # Add ridge regression penalty
+    #         penalties = np.array([
+    #             np.linalg.norm(pop, axis=1)*settings['ridgePenalty']
+    #             for pop in rawPopulations
+    #         ])
+
+    #         printTreeCosts(optStep, costs, penalties, optStart)
+
+    #         # Update optimizers
+    #         regressor.updateOptimizers(rawPopulations, costs, penalties)
+
+    #         # TODO: Remove any stale trees from the population
+
+        # Update archive once the optimizers have finished running
+        # archive.update(
+        #     regressor.trees, costs, errors, rawPopulations,
+        #     regressor.optimizers
+        # )
+
+        # archive.log()
+        # archive.printStatus([str(t) for t in regressor.trees])
+
+        # if regStep + 1 < settings['numRegressorSteps']:
+
+        #     # Sample tournamentSize number of trees to use as parents
+        #     sampledTrees, opts = archive.sample(settings['tournamentSize'])
+        #     regressor.trees = sampledTrees
+
+        #     # Finish populating trees by mating/mutating
+        #     newTrees = regressor.evolvePopulation()
+
+        #     # Remove duplicate trees, and load remaining from archive
+        #     uniqueTrees, uniqueOptimizers = archive.pruneAndLoad(
+        #         sampledTrees, newTrees, opts, regressor
+        #     )
+
+        #     # # Now pull old trees to ensure population size is the same
+        #     # keys = list(self.keys())
+        #     # while len(uniqueTrees) < self.settings['numberOfTrees']:
+        #     #     randomTree = random.choice(keys)
+        #     #     if randomTree not in uniqueTrees:
+        #     #         uniqueTrees.append(archive[randomTree].tree)
+        #     #         uniqueOptimizers.append(archive[randomTree].optimizer)
+
+        #     regressor.trees = uniqueTrees
+        #     regressor.optimizers = uniqueOptimizers
 
     print('Done')
 
@@ -272,18 +408,21 @@ def polish(client, settings):
 # Helper functions
 
 def printTreeCosts(optStep, costs, penalties, startTime):
-    first10 = costs[:10]
-    first10Pen = penalties[:10]
+    n = len(costs)
+
+    firstN = costs[:n]
+    firstNPen = penalties[:n]
 
     string = '\t\t'
 
-    for c, p in zip(first10, first10Pen):
+    for c, p in zip(firstN, firstNPen):
         argmin = np.argmin(c)
-        string += '{:.2f} ({:.2f})\t'.format(c[argmin], p[argmin])
+        # string += '{:.4f} ({:.4f})\t'.format(c[argmin], p[argmin])
+        string += '{:.6f}\t'.format(c[argmin])
 
     print(
         optStep,
-        '({:.2f} s)'.format(time.time() - startTime),
+        '({:.4f} s)'.format(time.time() - startTime),
         string,
         flush=True
     )

@@ -63,7 +63,15 @@ class SVRegressor:
             self.optimizer = cma.CMAEvolutionStrategy
             self.optimizerArgs = [
                 1.0,  # defaulted sigma0 value
-                {'verb_disp': 0, 'popsize':settings['optimizerPopSize']}
+                {
+                    'verb_disp': 0,
+                    'popsize': settings['optimizerPopSize'],
+                    'maxiter': settings['maxNumOptimizerSteps'],
+                    'tolx': 1e-8,  # changes in x-values
+                    'tolfunhist': 1e-6,
+                    'tolfun': 1e-6,
+                    'tolfunrel': 1e-3,
+                }
             ]
         elif settings['optimizer'] == 'GA':
             self.optimizer = GAWrapper
@@ -71,7 +79,11 @@ class SVRegressor:
                 {
                     'verb_disp': 0,
                     'popsize': settings['optimizerPopSize'],
-                    'pointMutateProb': settings['pointMutateProb']
+                    'maxiter': settings['maxNumOptimizerSteps'],
+                    'tolx': 1e-8,  # changes in x-values
+                    'tolfunhist': 1e-6,
+                    'tolfun': 1e-6,
+                    'tolfunrel': 1e-3,
                 }
             ]
         elif settings['optimizer'] == 'Sofomore':
@@ -210,21 +222,62 @@ class SVRegressor:
         ]
     
 
-    def tournament(self):
+    # def tournament(self):
+    #     """
+    #     Finds the lowest cost individual from the current set of trees
+
+    #     Return:
+    #         A deep copy (to avoid multiple trees pointing to the same nodes) of
+    #         the best individual.
+    #     """
+
+    #     # contenders = random.sample(range(len(self.trees)), len(self.trees))
+    #     contenders = [random.choice(range(len(self.trees)))]
+
+    #     costs = [self.trees[idx].cost for idx in contenders]
+
+    #     return deepcopy(self.trees[np.argmin(costs)])
+
+
+    def tournament(self, topN):
         """
-        Finds the lowest cost individual from the current set of trees
+        Randomly return a random individual from the topN individuals in the
+        population.
 
         Return:
             A deep copy (to avoid multiple trees pointing to the same nodes) of
             the best individual.
         """
 
-        # contenders = random.sample(range(len(self.trees)), len(self.trees))
-        contenders = [random.choice(range(len(self.trees)))]
+        indices = np.arange(len(self.trees))
+        costs = [t.cost for t in self.trees]
 
-        costs = [self.trees[idx].cost for idx in contenders]
+        argsort = np.argsort(costs)
+        costs = costs[argsort]
+        indices = indices[argsort]
 
-        return deepcopy(self.trees[np.argmin(costs)])
+        return deepcopy(self.trees[random.choice(indices[:topN])])
+
+
+    def newIndividual(self):
+        """
+        Generates a new individual using the current population. Allow for
+        random point mutation.
+        """
+
+        newTree = self.tournament(self.settings['tournamentSize'])
+        donor   = self.tournament(self.settings['tournamentSize'])
+
+        newTree.crossover(donor)
+
+        if random.random() < self.settings['pointMutateProb']:
+            newTree.pointMutate(
+                self.svNodePool, self.settings['pointMutateProb']
+            )
+
+        newTree.updateSVNodes()
+
+        return newTree
 
     
     def evolvePopulation(self):
@@ -236,24 +289,26 @@ class SVRegressor:
 
         newTrees = []
         for _ in range(self.settings['numberOfTrees'] - len(self.trees)):
-            parent = deepcopy(random.choice(self.trees))
+            # parent = deepcopy(random.choice(self.trees))
 
-            # For handling only allowing crossover OR point mutation
-            pmProb = self.settings['crossoverProb']\
-                + self.settings['pointMutateProb']
+            # # For handling only allowing crossover OR point mutation
+            # pmProb = self.settings['crossoverProb']\
+            #     + self.settings['pointMutateProb']
 
-            rand = random.random()
-            if rand < self.settings['crossoverProb']:
-                # Randomly perform crossover operation
-                donor = self.tournament()
-                parent.crossover(donor)
-            elif rand < pmProb:
-                parent.pointMutate(
-                    self.svNodePool, self.settings['pointMutateProb']
-                )
+            # rand = random.random()
+            # if rand < self.settings['crossoverProb']:
+            #     # Randomly perform crossover operation
+            #     donor = self.tournament()
+            #     parent.crossover(donor)
+            # elif rand < pmProb:
+            #     parent.pointMutate(
+            #         self.svNodePool, self.settings['pointMutateProb']
+            #     )
 
-            parent.updateSVNodes()
-            newTrees.append(parent)
+            # parent.updateSVNodes()
+            # newTrees.append(parent)
+
+            newTrees.append(self.newIndividual())
         
         return newTrees
 
@@ -364,6 +419,21 @@ class SVRegressor:
             opt.tell(rawPopulations[treeIdx], fullCost)
 
 
+    def checkStale(self):
+        """
+        Returns a list of the indices of any trees that have finished
+        optimizing.
+        """
+
+        stale = []
+
+        for i, opt in enumerate(self.optimizers):
+            if opt.stop():
+                stale.append(i)
+
+        return stale
+
+
 def buildSVNodePool(database):
     """Prepare svNodePool for use in tree construction"""
 
@@ -417,4 +487,3 @@ def buildSVNodePool(database):
         )
 
     return svNodePool
-

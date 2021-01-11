@@ -107,12 +107,12 @@ _valid_options = {
                     'available computational resources, then stop early '\
                         'if regressor begins to converge.'
     ),
-    'numOptimizerSteps': Option(
-        'numOptimizerSteps', int, None, [10, 100],
-        'The number of steps to take when optimizing tree parameters.'\
-            'Should be kept relatively small. The final tree should be '\
-                're-parameterized anyways, so "sloppy" trees are okay '\
-                    'during regression.'
+    'maxNumOptimizerSteps': Option(
+        'maxNumOptimizerSteps', int, None, [100, 1000],
+        'The maximum number of steps to take when optimizing tree parameters.'\
+            'Should be kept relatively small, but large enough that the tree'\
+                'is mostly converged. The final tree should be polished later'\
+                    'anyways, so "sloppy" trees are okay during regression.'
     ),
     'energyWeight': Option(
         'energyWeight', float, (0,), 1,
