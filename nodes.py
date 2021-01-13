@@ -96,12 +96,15 @@ class SVNode(Node):
 
     def __init__(
         self, description, components, constructor, numParams,
-        restrictions=None, paramRanges=None
+        restrictions=None, paramRanges=None, inputTypes=None
         ):
 
         Node.__init__(self, description)
         self.components = components
         self.constructor = constructor
+
+        # Used for tracking allowed neighbor types during direct evaluations
+        self.inputTypes = inputTypes
 
         # Load any restricted knot values
         tmp = restrictions

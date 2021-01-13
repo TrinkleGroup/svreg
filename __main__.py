@@ -99,9 +99,15 @@ def main(client, settings):
 
         svEng = evaluator.evaluate(populationDict, 'energy')
 
-        # for svName in populationDict:
-        #     for el, pop in populationDict[svName].items():
-        #         populationDict[svName][el] = client.scatter(pop, broadcast=True)
+        # futures = []
+        for svName in populationDict:
+            for el, pop in populationDict[svName].items():
+                populationDict[svName][el] = client.scatter(pop, broadcast=True)
+                # futures.append(populationDict[svName][el])
+
+        # futures = client.gather(futures)
+
+        # print('futures', futures)
 
         svFcs = evaluator.evaluate(populationDict, 'forces')
 
@@ -109,7 +115,7 @@ def main(client, settings):
 
         # Save the (per-struct) errors and the single-value costs
         errors = computeErrors(
-            client, settings['refStruct'], energies, forces, database
+            settings['refStruct'], energies, forces, database
         )
 
         costs = costFxn(errors)
@@ -121,11 +127,9 @@ def main(client, settings):
         ])
 
         # Update optimizers
-        updatedOpts = regressor.updateOptimizers(
+        regressor.updateOptimizers(
             rawPopulations, costs, penalties
         )
-
-        regressor.optimizers = client.gather(client.compute(updatedOpts))
 
         printTreeCosts(
             fxnEvals,
@@ -148,6 +152,11 @@ def main(client, settings):
 
             candidate.cost = opt.result.fbest
 
+            print()
+            print()
+            print("Completed tree:")
+            print("\t", candidate.cost, candidate)
+
             numCompletedTrees += 1
 
             # Log completed tree
@@ -168,7 +177,7 @@ def main(client, settings):
             # Make sure new tree isn't already in archive or active population
             currentRegNames = [str(t) for t in regressor.trees]
 
-            newTree = population.newIndividual()
+            newTree, parent1, parent2 = population.newIndividual()
 
             generatedNew = False
             while not generatedNew:
@@ -181,7 +190,14 @@ def main(client, settings):
                 if (not inArchive) and (not inReg):
                     generatedNew = True
                 else:
-                    newTree = population.newIndividual()
+                    newTree, parent1, parent2 = population.newIndividual()
+
+            print("New tree:")
+            print('\t', parent1)
+            print('\t+')
+            print('\t', parent2)
+            print('\t=')
+            print('\t', newTree)
 
             # Insert new tree into list of trees being optimized
             newOpt = regressor.optimizer(
@@ -309,7 +325,7 @@ def polish(client, settings):
 
         # Save the (per-struct) errors and the single-value costs
         errors = computeErrors(
-            client, settings['refStruct'], energies, forces, database
+            settings['refStruct'], energies, forces, database
             # client, settings['refStruct'], results, database
         )
 
@@ -376,13 +392,8 @@ def buildCostFunction(settings, numStructs):
 
         costs = []
         for treeErr in errors:
-            # costs.append(np.average(np.multiply(treeErr, scaler), axis=1))
-            costs.append(delayedMAE(treeErr))
-            # costs.append(
-            #     np.average(np.multiply(np.stack(treeErr).T, scaler), axis=1)
-            # )
+            costs.append(np.average(np.multiply(treeErr, scaler), axis=1))
 
-        # return np.array(costs)
         return costs
 
     def rmse(errors):
@@ -405,8 +416,7 @@ def buildCostFunction(settings, numStructs):
 
 
 # @profile
-def computeErrors(client, refStruct, energies, forces, database):
-# def computeErrors(client, refStruct, results, database):
+def computeErrors(refStruct, energies, forces, database):
     """
     Takes in dictionaries of energies and forces and returns the energy/force
     errors for each structure for each tree. Sorts structure names first.
@@ -438,23 +448,8 @@ def computeErrors(client, refStruct, energies, forces, database):
 
     keys = list(energies.keys())
     numTrees   = len(energies[keys[0]])
-    # numPots    = energies[keys[0]][0][0].shape[0] # [struct][tree][elem]
-    # numStructs = len(keys)
 
     keys = list(energies.keys())
-
-    @dask.delayed
-    def delayedAvg(err):
-        # return np.average(err, axis=(1,2))
-        return dask.array.average(err, axis=(1,2))
-
-    @dask.delayed
-    def delayedStack(err):
-        return dask.array.stack(err)
-
-    @dask.delayed
-    def delayedStackT(err):
-        return dask.array.stack(err).T
 
     errors = []
     for treeNum in range(numTrees):
@@ -479,20 +474,14 @@ def computeErrors(client, refStruct, energies, forces, database):
             ]
 
             fcsErrors = [abs(err) for err in fcsErrors]
-            # fcsErrors = [np.average(err, axis=(1, 2)) for err in fcsErrors]
-            # fcsErrors = [delayedAvg(err) for err in fcsErrors]
-            fcsErrors = [dask.array.average(err, axis=(1,2)) for err in fcsErrors]
+            fcsErrors = [np.average(err, axis=(1, 2)) for err in fcsErrors]
 
             treeErrors.append(engErrors)
             treeErrors.append(sum(fcsErrors))
 
-        # errors.append(np.stack(treeErrors))
-        # errors.append(delayedStack(treeErrors))
-        errors.append(dask.array.stack(treeErrors))
+        errors.append(np.stack(treeErrors))
 
-    # errors = [np.stack(err).T for err in errors]
-    # errors = [delayedStackT(err) for err in errors]
-    errors = [dask.array.transpose(dask.array.stack((err))) for err in errors]
+    errors = [np.stack(err).T for err in errors]
 
     return errors
 

@@ -69,6 +69,7 @@ class Population(list):
         """
 
         newTree = self.tournament(self.settings['tournamentSize'])
+        parentCopy = deepcopy(newTree)
         donor   = self.tournament(self.settings['tournamentSize'])
 
         newTree.crossover(donor)
@@ -80,5 +81,5 @@ class Population(list):
 
         newTree.updateSVNodes()
 
-        return newTree
+        return newTree, parentCopy, donor
 

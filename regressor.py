@@ -10,8 +10,6 @@ from tree import SVTree
 from tree import MultiComponentTree as MCTree
 
 import dask
-import dask.bag
-import dask.array as da
 
 # TODO: may be able to merge this into ga.py, it really only initializes
 # trees/optimizers and evaluates the trees.
@@ -414,23 +412,11 @@ class SVRegressor:
 
     
     def updateOptimizers(self, rawPopulations, costs, penalties):
-
-        @dask.delayed
-        def _update(opt, pop, cost):
-            opt.tell(pop, cost)
-            return opt
-
-        updatedOpts = []
-
         for treeIdx in range(len(self.optimizers)):
             fullCost = costs[treeIdx] + penalties[treeIdx]
 
             opt = self.optimizers[treeIdx]
-
-            # opt.tell(rawPopulations[treeIdx], fullCost)
-            updatedOpts.append(_update(opt, rawPopulations[treeIdx], fullCost))
-
-        return updatedOpts
+            opt.tell(rawPopulations[treeIdx], fullCost)
 
 
     def checkStale(self):
@@ -497,6 +483,7 @@ def buildSVNodePool(database):
                 numParams=numParams,
                 restrictions=restr,
                 paramRanges=pRanges,
+                inputTypes=database.attrs[svName]['inputTypes']
             )
         )
 

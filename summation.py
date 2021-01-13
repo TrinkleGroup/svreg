@@ -1,6 +1,7 @@
 import itertools
 import numpy as np
 from numba import jit
+from copy import deepcopy
 from scipy.sparse import diags
 from scipy.interpolate import CubicSpline
 from ase.neighborlist import NeighborList
@@ -37,6 +38,10 @@ class Summation:
         components (list):
             A list of the names of the different components of the SV.
 
+        inputTypes (set):
+            The set of allowed neighbor element types. Used for looping over
+            only the specified neighbor types.
+
         numParams (dict):
             A dictionary where the key is the name of a component, and the value
             is the number of fitting parameters for that component (without
@@ -70,9 +75,18 @@ class Summation:
         ):
 
         self.name           = name
-        self.elements       = elements
-        self.components     = components
-        self.inputTypes     = inputTypes
+        self.inputTypes     = set([
+            t.decode('utf-8') if isinstance(t, bytes) else t
+            for t in inputTypes
+        ])
+
+        # By sorting these two lists, it ensures that the components can be
+        # indexed in order to identify which elements single-input components
+        # correspond to without having to use another data structure. Note that
+        # currently 
+        self.elements       = sorted(elements)
+        self.components     = sorted(components)
+
         self.numParams      = numParams
         self.restrictions   = restrictions
         self.paramRanges    = paramRanges
@@ -84,7 +98,7 @@ class Summation:
         self.bc_type        = bc_type
 
 
-    def loop(self, atoms, evalType):
+    def loop(self, atoms, evalType, hostType=None):
         """
         Loops over the desired properties of the structure, and returns the
         specified evaluation type.
@@ -97,6 +111,11 @@ class Summation:
                 One of 'energy', 'forces', or 'vector'. 'vector' returns the
                 actual vector representation of the structure vector, which is
                 used for constructing databases.
+
+            hostType (str):
+                The host atom type. Used with multi-component trees when it may
+                be necessary to loop over atoms only with a given type. If
+                hostType is None then it loops over all atoms.
 
         Returns:
             Depends upon specified `evalType`. If `energy`, returns a single
@@ -114,66 +133,55 @@ class FFG(Summation):
     def  __init__(self, *args, **kwargs):
         Summation.__init__(self, *args, **kwargs)
 
-        # An FFG spline has one `f` spline for each element, and one `g` spline
-        # for each unique bond type
-        # self.components = []
-        self.fSplines = []
-        self.gSplines = []
-        for i in range(self.numElements):
+        self.fSplines = {}
+        self.gSplines = {}
+
+        for el1 in kwargs['elements']:
             # TODO: if numParams or knot positions are ever not the same for all
             # splines, then this section is going to need to change
 
             # TODO: currently assumes components is only [f_A, g_AA]; won't be
             # true for multi-component
 
-            # self.components.append('f_{}'.format(i))
-            self.fSplines.append(
-                # Append a F spline
-                Spline(
+            self.fSplines[el1] = Spline(
+                knots=np.linspace(
+                    self.cutoffs[0], self.cutoffs[1],
+                    self.numParams[self.components[0]]
+                    + len(self.restrictions[self.components[0]]) - 2
+                ),
+                bc_type=('natural', 'fixed')
+                if self.bc_type == 'natural'
+                else ('fixed', 'fixed')
+                # bc_type=('fixed', 'fixed')
+            )
+
+            for el2 in kwargs['elements']:
+                key = '_'.join(sorted(list(set([el1, el2]))))
+
+                self.gSplines[key] = Spline(
                     knots=np.linspace(
-                        self.cutoffs[0], self.cutoffs[1],
-                        self.numParams[self.components[0]]
-                        + len(self.restrictions[self.components[0]]) - 2
+                        -1, 1,
+                        self.numParams[self.components[1]]
+                        + len(self.restrictions[self.components[1]]) - 2
                     ),
-                    bc_type=('natural', 'fixed')
+                    bc_type=('natural', 'natural')
                     if self.bc_type == 'natural'
                     else ('fixed', 'fixed')
                     # bc_type=('fixed', 'fixed')
                 )
-            )
 
-            tmpG = []
-
-            for j in range(self.numElements):
-                tmpG.append(
-                    # Append a G spline
-                    Spline(
-                        knots=np.linspace(
-                            -1, 1,
-                            self.numParams[self.components[1]]
-                            + len(self.restrictions[self.components[1]]) - 2
-                        ),
-                        bc_type=('natural', 'natural')
-                        if self.bc_type == 'natural'
-                        else ('fixed', 'fixed')
-                        # bc_type=('fixed', 'fixed')
-                    )
-                )
-
-            self.gSplines.append(tmpG)
-
-        
         # Pointers to the currently active splines; updated constantly in loop()
         self.fjSpline = None
         self.fkSpline = None
         self.gSpline  = None
 
     
-    def loop(self, atoms, evalType):
+    def loop(self, atoms, evalType, hostType=None):
         types = sorted(list(set(atoms.get_chemical_symbols())))
 
+        atomTypesStrings = atoms.get_chemical_symbols()
         atomTypes = np.array(
-            list(map(lambda s: types.index(s), atoms.get_chemical_symbols()))
+            list(map(lambda s: types.index(s), atomTypesStrings))
         )
 
         N = len(atoms)
@@ -207,7 +215,11 @@ class FFG(Summation):
         cell = atoms.get_cell()
 
         for i, atom in enumerate(atoms):
-            itype = atomTypes[i]
+
+            if hostType is not None:
+                if atomTypesStrings[i] != hostType:
+                   continue 
+
             ipos = atom.position
 
             neighbors, offsets = nl.get_neighbors(i)
@@ -219,8 +231,12 @@ class FFG(Summation):
             for j, offsetj in zip(neighbors, offsets):
                 # j = atomic ID, so it can be used for indexing
                 jtype = atomTypes[j]
+                jtypeStr = atomTypesStrings[j]
 
-                self.fjSpline = self.fSplines[jtype]
+                if atomTypesStrings[j] not in self.inputTypes:
+                    continue
+
+                self.fjSpline = self.fSplines[jtypeStr]
 
                 # offset accounts for periodic images
                 jpos = atoms[j].position + np.dot(offsetj, cell)
@@ -246,9 +262,23 @@ class FFG(Summation):
                 jIdx += 1
                 for k, offsetk in zip(neighbors[jIdx:], offsets[jIdx:]):
                     ktype = atomTypes[k]
+                    ktypeStr = atomTypesStrings[k]
 
-                    self.fkSpline = self.fSplines[ktype]
-                    self.gSpline  = self.gSplines[jtype][ktype] 
+                    neighTypes = set([atomTypesStrings[j], atomTypesStrings[k]])
+                    if neighTypes != self.inputTypes:
+                        continue
+
+                    # TODO: need to make sure that AB and BA both point to the
+                    # same gSPline
+
+                    # TODO: the problem is that ktype indexes into 1, but there
+                    # aren't that many inputTypes
+
+                    self.fkSpline = self.fSplines[ktypeStr]
+
+                    key = '_'.join(sorted(list(set([jtypeStr, ktypeStr]))))
+
+                    self.gSpline  = self.gSplines[key] 
 
                     kpos = atoms[k].position + np.dot(offsetk, cell)
 
@@ -412,51 +442,72 @@ class FFG(Summation):
         ])[:-1]
         splitParams = np.array_split(params, splits)
 
-        fCopy = list(self.fSplines[::-1])
-        gCopy = list([list(l[::-1]) for l in self.gSplines[::-1]])
+        # fCopy = list(self.fSplines[::-1])
+        # gCopy = list([list(l[::-1]) for l in self.gSplines[::-1]])
+
+        # fCopy = deepcopy(self.fSplines)
+        # gCopy = deepcopy(self.gSplines)
+
+        fIndexer  = 0
+        gIndexers = [None, None]
 
         for y, cname in zip(splitParams, self.components):
+
             if isinstance(cname, bytes):
                 cname = cname.decode('utf-8')
             if 'f' in cname:
-                fCopy[-1].buildDirectEvaluator(y)
-                fCopy.pop()
+                el1 = self.elements[fIndexer]
+                self.fSplines[el1].buildDirectEvaluator(y)
+
+                gIndexers[fIndexer] = el1
+                fIndexer += 1
+
+                # fCopy[-1].buildDirectEvaluator(y)
+                # fCopy.pop()
             else:
-                gCopy[-1][-1].buildDirectEvaluator(y)
-                gCopy[-1].pop()
-                if len(gCopy[-1]) == 0:
-                    gCopy.pop()
+                el1 = gIndexers[0]
+                el2 = gIndexers[1]
+                if el2 is None:
+                    el2 = el1
+
+                key = '_'.join(sorted(list(set([el1, el2]))))
+
+                self.gSplines[key].buildDirectEvaluator(y)
+
+                # gCopy[-1][-1].buildDirectEvaluator(y)
+                # gCopy[-1].pop()
+                # if len(gCopy[-1]) == 0:
+                #     gCopy.pop()
 
 
 class Rho(Summation):
     def  __init__(self, *args, **kwargs):
         Summation.__init__(self, *args, **kwargs)
 
-        self.splines = []
-        for i in range(self.numElements):
-            self.splines.append(
-                Spline(
-                    knots=np.linspace(
-                        self.cutoffs[0], self.cutoffs[1],
-                        self.numParams[self.components[0]]
-                        + len(self.restrictions[self.components[0]]) - 2
-                    ),
-                    bc_type=('natural', 'fixed')
-                    if self.bc_type == 'natural'
-                    else ('fixed', 'fixed')
-                    # bc_type=('fixed', 'fixed')
-                )
+        self.splines = {}
+        for el in kwargs['elements']:
+            self.splines[el] = Spline(
+                knots=np.linspace(
+                    self.cutoffs[0], self.cutoffs[1],
+                    self.numParams[self.components[0]]
+                    + len(self.restrictions[self.components[0]]) - 2
+                ),
+                bc_type=('natural', 'fixed')
+                if self.bc_type == 'natural'
+                else ('fixed', 'fixed')
+                # bc_type=('fixed', 'fixed')
             )
 
         self.rho = None
 
 
-    def loop(self, atoms, evalType):
+    def loop(self, atoms, evalType, hostType=None):
 
         types = sorted(list(set(atoms.get_chemical_symbols())))
 
+        atomTypesStrings = atoms.get_chemical_symbols()
         atomTypes = np.array(
-            list(map(lambda s: types.index(s), atoms.get_chemical_symbols()))
+            list(map(lambda s: types.index(s), atomTypesStrings))
         )
 
         N = len(atoms)
@@ -494,19 +545,24 @@ class Rho(Summation):
 
         for i, atom in enumerate(atoms):
             itype = atomTypes[i]
+
+            if hostType is not None:
+                if atomTypesStrings[i] != hostType:
+                    continue
+
             ipos = atom.position
 
             neighbors, offsets = nl.get_neighbors(i)
 
-            if evalType == 'forces':
-                iForces = np.zeros((3,))
-
-            jIdx = 0
             for j, offsetj in zip(neighbors, offsets):
                 # j = atomic ID, so it can be used for indexing
                 jtype = atomTypes[j]
+                jtypeStr = atomTypesStrings[j]
 
-                self.rho = self.splines[jtype]
+                if atomTypesStrings[j] not in self.inputTypes:
+                    continue
+
+                self.rho = self.splines[jtypeStr]
 
                 # offset accounts for periodic images
                 jpos = atoms[j].position + np.dot(offsetj, cell)
@@ -568,14 +624,18 @@ class Rho(Summation):
         ])[:-1]
         splitParams = np.array_split(params, splits)
 
-        rhoCopy = list(self.splines[::-1])
+        # rhoCopy = list(self.splines[::-1])
 
+        rhoIndexer = 0
         for y, cname in zip(splitParams, self.components):
-            if isinstance(cname, bytes):
-                cname = cname.decode('utf-8')
+            self.splines[self.elements[rhoIndexer]].buildDirectEvaluator(y)
+            rhoIndexer += 1
+
+            # if isinstance(cname, bytes):
+            #     cname = cname.decode('utf-8')
             
-            rhoCopy[-1].buildDirectEvaluator(y)
-            rhoCopy.pop()
+            # rhoCopy[-1].buildDirectEvaluator(y)
+            # rhoCopy.pop()
 
 
 class Spline:
@@ -626,6 +686,11 @@ class Spline:
 
         self.M = build_M(len(knots), knots[1] - knots[0], bc_type)
 
+        self.cutoff = (self.knots[0], self.knots[-1])
+
+        # TODO: assumes equally-spaced knots
+        self.h = self.knots[1] - self.knots[0]
+
     
     def buildDirectEvaluator(self, y):
         """
@@ -651,10 +716,6 @@ class Spline:
                 bc.append((1, tmp[i]))
 
         self._scipy_cs = CubicSpline(self.knots, y[:-2], bc_type=bc)
-        self.cutoff = (self.knots[0], self.knots[-1])
-
-        # TODO: assumes equally-spaced knots
-        self.h = self.knots[1] - self.knots[0]
 
     
     def in_range(self, x):

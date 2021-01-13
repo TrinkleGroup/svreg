@@ -7,8 +7,6 @@ from scipy.interpolate import CubicSpline
 from nodes import FunctionNode, SVNode, _node_types
 from summation import Summation, _implemented_sums
 
-import dask
-import dask.array as da
 
 class SVTree(list):
     """
@@ -639,7 +637,7 @@ class SVTree(list):
         ])
 
 
-    def directEvaluation(self, y, atoms, evalType, bc_type):
+    def directEvaluation(self, y, atoms, evalType, bc_type, elements, hostType=None):
         """
         Evaluates a tree by performing SV summations directly, rather than
         using the SV representation.
@@ -659,6 +657,15 @@ class SVTree(list):
                 conditions for LHS boundaries of radial functions and for both
                 boundaries of non-radial functions.
 
+            elements (list):
+                A list of strings of all elements in the system.
+
+            hostType (str):
+                Used to work with multi-component trees, where a Summation
+                object might be intended for use with only a given host atom
+                type. If hostType is not None, then loop() only iterates over
+                atoms with the given hostType.
+
         Returns:
             If `evalType` == 'energy', returns the total energy of the system.
             If `evalType` == 'forces', returns the atomic forces.
@@ -673,18 +680,43 @@ class SVTree(list):
         # Clone the tree, but replace SVNode objects with Summation objects
         nodes = []
         for node in self.nodes[::-1]:
-            if node.description in _implemented_sums:
+
+            # TODO: node.description could be something like ffg_AB
+
+            nodeType = node.description.split('_')[0]
+
+            # if node.description in _implemented_sums:
+            if nodeType in _implemented_sums:
+                nelem = None
+                if nodeType == 'rho':
+                    nelem = 1
+                if nodeType == 'ffg':
+                    if len(node.components) == 2:
+                        nelem = 1
+                    elif len(node.components) == 3:
+                        nelem = 2
+                    else:
+                        raise NotImplementedError(
+                            "Only numElements <=2 supported currently"
+                        )
+
                 nodes.append(
-                    _implemented_sums[node.description](
+                    # _implemented_sums[node.description](
+                    #     name=node.description,
+                    _implemented_sums[nodeType](
                         name=node.description,
+                        elements=elements,
                         components=node.components,
-                        numParams=node.numParams,
+                        inputTypes=node.inputTypes,
+                        numParams=node.numFreeParams,
                         restrictions=node.restrictions,
                         paramRanges=node.paramRanges,
-                        bonds=node.bonds,
+                        # bonds=node.bonds,
+                        bonds=None,
+                        bondMapping='lambda x: x',
+                        numElements=nelem,
                         cutoffs=(2.4, 5.2),
-                        numElements=1,
-                        bc_type=bc_type
+                        bc_type=bc_type,
                     )
                 )
 
@@ -694,9 +726,11 @@ class SVTree(list):
 
         nodes = nodes[::-1]
 
+        # Resume: figure out, for each node, how to specify neighTypes
+
         # Check for single-node tree
         if isinstance(nodes[0], Summation):
-            return nodes[0].loop(atoms, evalType)
+            return nodes[0].loop(atoms, evalType, hostType)
 
         # Constructs a list-of-lists where each sub-list is a sub-tree for a
         # function at a given recursion depth. The first node of a sub-tree
@@ -714,13 +748,14 @@ class SVTree(list):
 
             # If the sub-tree is complete, evaluate its function
             while len(subTrees[-1]) == subTrees[-1][0].function.arity + 1:
+
                 args = []
                 for n in subTrees[-1][1:]:
                     if isinstance(n, Summation):
-                        eng = np.array([n.loop(atoms, 'energy')])
+                        eng = np.array([n.loop(atoms, 'energy', hostType)])
 
                         if evalType == 'forces':
-                            fcs = np.array([n.loop(atoms, evalType)])
+                            fcs = np.array([n.loop(atoms, evalType, hostType)])
                         else:
                             fcs = None
 
@@ -912,6 +947,22 @@ class MultiComponentTree(SVTree):
 
         self.totalNumFreeParams = sum(self.numFreeParams.values())
         self.totalNumParams = sum(self.numParams.values())
+
+
+    def directEvaluation(self, y, atoms, evalType, bc_type):
+        splits = np.cumsum([
+            self.chemistryTrees[el].totalNumParams for el in self.elements
+        ])
+
+        splitPop = np.array_split(y, splits)
+
+        return sum([
+            self.chemistryTrees[el].directEvaluation(
+                splitPop[ii], atoms, evalType, bc_type, self.elements,
+                hostType=el
+            )
+            for ii, el in enumerate(self.elements)
+        ])
 
 
     def __str__(self):

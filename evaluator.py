@@ -44,8 +44,6 @@ class SVEvaluator:
         allSVnames  = list(self.database.attrs['svNames'])
         elements    = list(self.database.attrs['elements'])
 
-        client = get_client()
-
         results = []
         for struct in structNames:
             for svName in allSVnames:
@@ -57,12 +55,12 @@ class SVEvaluator:
                     sv = self.database[struct][svName][elem][evalType]
                     pop = populationDict[svName][elem]
 
-                    # if evalType == 'energy':
-                    #     results.append(sv.dot(pop))
-                    # else:
-                    #     results.append(delayedEval(sv, pop))
+                    if evalType == 'energy':
+                        results.append(sv.dot(pop))
+                    else:
+                        results.append(delayedEval(sv, pop))
 
-                    results.append(sv.dot(pop))
+                    # results.append(sv.dot(pop))
 
         # Now sum by chunks before computing to avoid extra communication
         summedResults = {
@@ -84,7 +82,6 @@ class SVEvaluator:
         def delayedSum(val):
             return val.sum(axis=-1).swapaxes(1, 2)
 
-        futures = []
         # TODO: consider dask computing before reshapes (comm while work?)
         for struct in structNames[::-1]:
             for svName in allSVnames[::-1]:
@@ -105,13 +102,15 @@ class SVEvaluator:
                         n = self.database.attrs['natoms'][struct]
                         nhost = val.shape[0]//3//n
 
-                        val = val.T.reshape(res.shape[1], 3, nhost, n)
-                        val = val.sum(axis=-1).swapaxes(1, 2)
+                        # val = val.T.reshape(res.shape[1], 3, nhost, n)
+                        # val = val.sum(axis=-1).swapaxes(1, 2)
 
-                        # val = delayedReshape(val, n)
-                        # val = delayedSum(val)
+                        val = delayedReshape(val, n)
+                        val = delayedSum(val)
 
                     summedResults[struct][svName][elem] = val
                 
-        # summedResults = client.gather(client.compute(summedResults))
+        client = get_client()
+        summedResults = client.gather(client.compute(summedResults))
+
         return summedResults
