@@ -1,5 +1,4 @@
 # Imports
-from tree import SVTree
 import os
 import time
 import h5py
@@ -23,12 +22,13 @@ import dask.array
 from dask_jobqueue import PBSCluster
 from dask.distributed import Client, wait
 
-from archive import Archive
-from settings import Settings
-from database import SVDatabase
-from regressor import SVRegressor
-from evaluator import SVEvaluator
-from population import Population
+from svreg.tree import SVTree
+from svreg.archive import Archive
+from svreg.settings import Settings
+from svreg.database import SVDatabase
+from svreg.regressor import SVRegressor
+from svreg.evaluator import SVEvaluator
+from svreg.population import Population
 
 ################################################################################
 # Parse all command-line arguments
@@ -59,7 +59,7 @@ args = parser.parse_args()
 
 start = time.time()
 
-# @profile
+@profile
 def main(client, settings):
     global start
 
@@ -78,13 +78,25 @@ def main(client, settings):
     regressor.initializeTrees(elements=database.attrs['elements'])
     regressor.initializeOptimizers()
 
+    print()
+    print("Currently optimizing:")
+
+    for pidx, t in enumerate(regressor.trees):
+        print(pidx, t)
+
+    print()
+    print()
+
     N = settings['optimizerPopSize']
 
     rawPopulations  = None
     errors          = None
     costs           = None
 
-    population = Population(settings, regressor.svNodePool)
+    population = Population(
+        settings, regressor.svNodePool, database.attrs['elements']
+    )
+
     archive = Archive(os.path.join(settings['outputPath'], 'archive'))
 
     numCompletedTrees = 0
@@ -110,6 +122,8 @@ def main(client, settings):
         # print('futures', futures)
 
         svFcs = evaluator.evaluate(populationDict, 'forces')
+        svFcs = client.compute(svFcs)
+        svFcs = client.gather(svFcs)
 
         energies, forces = regressor.evaluateTrees(svEng, svFcs, N)
 
@@ -150,7 +164,12 @@ def main(client, settings):
             candidate   = regressor.trees[staleIdx]
             opt         = regressor.optimizers[staleIdx]
 
-            candidate.cost = opt.result.fbest
+            # candidate.cost = opt.result.fbest
+
+            # TODO: this might not agree perfectly with opt.result.fbest
+            candidateParamsIdx  = np.argmin(costs[staleIdx])
+            candidate.cost      = costs[staleIdx][candidateParamsIdx]
+            err                 = errors[staleIdx][candidateParamsIdx]
 
             print()
             print()
@@ -161,7 +180,7 @@ def main(client, settings):
 
             # Log completed tree
             archive.update(
-                candidate, candidate.cost, opt.result.xbest, opt
+                candidate, candidate.cost, err, opt.result.xbest, opt
             )
 
             archive.log()

@@ -1,7 +1,6 @@
 import os
 import pickle
 import shutil
-import random
 import numpy as np
 from scipy.special import erf
 
@@ -86,8 +85,8 @@ class Archive(dict):
         os.mkdir(self.savePath)
 
 
-    # def update(self, tree, cost, errors, params, optimizer):
-    def update(self, tree, cost, params, optimizer):
+    def update(self, tree, cost, errors, params, optimizer):
+    # def update(self, tree, cost, params, optimizer):
         # Check if tree in archive, otherwise create a new entry for it
         key = str(tree)
         # entry = self.get(key, Entry(tree, self.savePath))
@@ -103,6 +102,7 @@ class Archive(dict):
 
         entry.cost = cost
         entry.bestParams = params
+        entry.bestErrors = errors
 
         # # Update best cost and parameter set of entry
         # bestIdx = np.argmin(cost)

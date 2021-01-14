@@ -4,8 +4,8 @@ import numpy as np
 from copy import deepcopy
 from scipy.interpolate import CubicSpline
 
-from nodes import FunctionNode, SVNode, _node_types
-from summation import Summation, _implemented_sums
+from svreg.nodes import FunctionNode, SVNode, _node_types
+from svreg.summation import Summation, _implemented_sums
 
 
 class SVTree(list):
@@ -216,25 +216,6 @@ class SVTree(list):
         return np.hstack(population)
 
 
-    def getPopulation(self):
-        """Return a 2D array of all SVNode parameters"""
-
-        raise NotImplementedError
-    
-
-    def setPopulation(self, population):
-        """
-        Parse a 2D array of parameters (formatted the same as in
-        getPopulation()), then update the parameters corresponding nodes.
-
-        Args:
-            population (np.arr):
-                The population to be assigned to the SVNode objects
-        """
-
-        raise NotImplementedError
-
-
     def parseDict2Arr(self, population, N):
         """
         Converts a dictionary of {svName: np.vstack-ed array of parameters} to
@@ -316,7 +297,9 @@ class SVTree(list):
                 The population to be parsed
 
             fillFixedKnots (bool):
-                If True, inserts fixed knots into rawPopulation.
+                If True, inserts fixed knots into rawPopulation. Note that
+                fillFixedKnots==True does not change the shape of the population,
+                it just updates the fixed knots with their specified values.
 
         Returns:
             parameters (dict):

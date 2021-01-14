@@ -5,8 +5,8 @@ Module for Node objects, which are the elements in an equation tree.
 import random
 import numpy as np
 
-from functions import _function_map, _arities, _latex
-from exceptions import StaleValueException
+from svreg.functions import _function_map, _arities, _latex
+from svreg.exceptions import StaleValueException
 
 # collection of types of nodes that can be added; used for growing trees
 _node_types = ['function', 'parameter', 'sv']
@@ -81,12 +81,15 @@ class SVNode(Node):
             recent populate() call.
 
         restrictions (list):
-            A list of tuples for each component specifying any non-free knots,
-            and their values. [[(knotIdx, value), ...] for each component]
+            A list of lists of tuples for each component specifying any non-free
+            knots, and their values.
 
-        paramRanges (tuple):
-            A length-2 tuple of the (low, high) range of allowed parameters.
-            Default is (0, 1).
+            e.g. [[(knotIdx, value), ...] for each component]
+
+        paramRanges (dict):
+            A dictionary of length-2 tuples of the (low, high) range of allowed
+            parameters. If paramRanges is None, each component is automatically
+            given a default range of (0, 1).
 
         values (np.arr):
             The values of the evaluated SVs (i.e. the energies/forces).

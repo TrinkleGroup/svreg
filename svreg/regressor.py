@@ -3,11 +3,11 @@ import numpy as np
 from copy import deepcopy
 
 import cma
-from optimizers import GAWrapper, SofomoreWrapper
+from svreg.optimizers import GAWrapper, SofomoreWrapper
 
-from nodes import SVNode
-from tree import SVTree
-from tree import MultiComponentTree as MCTree
+from svreg.nodes import SVNode
+from svreg.tree import SVTree
+from svreg.tree import MultiComponentTree as MCTree
 
 import dask
 
@@ -112,7 +112,8 @@ class SVRegressor:
         if numElements < 1:
             raise RuntimeError("numElements must be >= 1 in initializeTrees()")
 
-        if numElements == 1:
+        # if numElements == 1:
+        if False:
             self.trees = [
                 SVTree.random(
                     svNodePool=self.svNodePool,

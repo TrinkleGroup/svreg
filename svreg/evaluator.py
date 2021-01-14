@@ -1,7 +1,5 @@
 import dask
 import dask.array
-from dask.distributed import get_client
-import numpy as np
 
 from numba import jit
 
@@ -110,7 +108,4 @@ class SVEvaluator:
 
                     summedResults[struct][svName][elem] = val
                 
-        client = get_client()
-        summedResults = client.gather(client.compute(summedResults))
-
         return summedResults

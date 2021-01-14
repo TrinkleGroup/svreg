@@ -2,6 +2,7 @@ import random
 import numpy as np
 from copy import deepcopy
 
+from svreg.tree import MultiComponentTree as MCTree
 
 class Population(list):
     """
@@ -11,10 +12,11 @@ class Population(list):
     tracks the trees that are currently being optimized.
     """
 
-    def __init__(self, settings, svNodePool):
+    def __init__(self, settings, svNodePool, elements):
         list.__init__(self,)
         self.settings = settings
         self.svNodePool = svNodePool
+        self.elements = elements
 
     
     def attemptInsert(self, newTree):
@@ -65,8 +67,16 @@ class Population(list):
     def newIndividual(self):
         """
         Generates a new individual using the current population. Allow for
-        random point mutation.
+        random point mutation. Returns a new random tree if population is not
+        full-sized yet.
         """
+
+        if len(self) < self.settings['numberOfTrees']:
+            return MCTree.random(
+                svNodePool=self.svNodePool,
+                maxDepth=random.randint(0, self.settings['maxTreeDepth']),
+                elements=self.elements
+            ), None, None
 
         newTree = self.tournament(self.settings['tournamentSize'])
         parentCopy = deepcopy(newTree)
