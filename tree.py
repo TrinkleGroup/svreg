@@ -4,8 +4,8 @@ import numpy as np
 from copy import deepcopy
 from scipy.interpolate import CubicSpline
 
-from svreg.nodes import FunctionNode, SVNode, _node_types
-from svreg.summation import Summation, _implemented_sums
+from nodes import FunctionNode, SVNode, _node_types
+from summation import Summation, _implemented_sums
 
 
 class SVTree(list):

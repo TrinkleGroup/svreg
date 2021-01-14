@@ -1,5 +1,6 @@
 import dask
 import dask.array
+import dask.bag
 
 from numba import jit
 

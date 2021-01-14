@@ -19,16 +19,15 @@ initialize(
 
 import dask
 import dask.array
-from dask_jobqueue import PBSCluster
-from dask.distributed import Client, wait
+from dask.distributed import Client
 
-from svreg.tree import SVTree
-from svreg.archive import Archive
-from svreg.settings import Settings
-from svreg.database import SVDatabase
-from svreg.regressor import SVRegressor
-from svreg.evaluator import SVEvaluator
-from svreg.population import Population
+from tree import SVTree
+from archive import Archive
+from settings import Settings
+from database import SVDatabase
+from regressor import SVRegressor
+from evaluator import SVEvaluator
+from population import Population
 
 ################################################################################
 # Parse all command-line arguments
@@ -106,54 +105,6 @@ def main(client, settings):
     fxnEvals = 1
     while numCompletedTrees < maxNumTrees:
 
-        # Continue optimization of currently active trees
-        populationDict, rawPopulations = regressor.generatePopulationDict(N)
-
-        svEng = evaluator.evaluate(populationDict, 'energy')
-
-        # futures = []
-        for svName in populationDict:
-            for el, pop in populationDict[svName].items():
-                populationDict[svName][el] = client.scatter(pop, broadcast=True)
-                # futures.append(populationDict[svName][el])
-
-        # futures = client.gather(futures)
-
-        # print('futures', futures)
-
-        svFcs = evaluator.evaluate(populationDict, 'forces')
-        svFcs = client.compute(svFcs)
-        svFcs = client.gather(svFcs)
-
-        energies, forces = regressor.evaluateTrees(svEng, svFcs, N)
-
-        # Save the (per-struct) errors and the single-value costs
-        errors = computeErrors(
-            settings['refStruct'], energies, forces, database
-        )
-
-        costs = costFxn(errors)
-
-        # Add ridge regression penalty
-        penalties = np.array([
-            np.linalg.norm(pop, axis=1)*settings['ridgePenalty']
-            for pop in rawPopulations
-        ])
-
-        # Update optimizers
-        regressor.updateOptimizers(
-            rawPopulations, costs, penalties
-        )
-
-        printTreeCosts(
-            fxnEvals,
-            [opt.result.fbest for opt in regressor.optimizers],
-            penalties,
-            start
-        )
-
-        fxnEvals += 1
-
         # Remove any converged trees, update population, and print new results
         staleIndices = regressor.checkStale()
 
@@ -164,16 +115,16 @@ def main(client, settings):
             candidate   = regressor.trees[staleIdx]
             opt         = regressor.optimizers[staleIdx]
 
-            # candidate.cost = opt.result.fbest
+            candidate.cost = opt.result.fbest
 
             # TODO: this might not agree perfectly with opt.result.fbest
             candidateParamsIdx  = np.argmin(costs[staleIdx])
-            candidate.cost      = costs[staleIdx][candidateParamsIdx]
+            # candidate.cost      = costs[staleIdx][candidateParamsIdx]
             err                 = errors[staleIdx][candidateParamsIdx]
 
             print()
             print()
-            print("Completed tree:")
+            print("Completed tree {}:".format(staleIdx))
             print("\t", candidate.cost, candidate)
 
             numCompletedTrees += 1
@@ -206,9 +157,14 @@ def main(client, settings):
                 inArchive   = treeName in archive
                 inReg       = treeName in currentRegNames
 
-                if (not inArchive) and (not inReg):
-                    generatedNew = True
+                if inArchive:
+                    print("Already in archive:", newTree)
+                elif inReg:
+                    print("Already being optimized:", newTree)
                 else:
+                    generatedNew = True
+                
+                if not generatedNew:
                     newTree, parent1, parent2 = population.newIndividual()
 
             print("New tree:")
@@ -255,6 +211,55 @@ def main(client, settings):
                 print(pidx, t)
             print()
             print()
+
+        # Continue optimization of currently active trees
+        populationDict, rawPopulations = regressor.generatePopulationDict(N)
+
+        svEng = evaluator.evaluate(populationDict, 'energy')
+
+        # futures = []
+        for svName in populationDict:
+            for el, pop in populationDict[svName].items():
+                populationDict[svName][el] = client.scatter(pop, broadcast=True)
+                # futures.append(populationDict[svName][el])
+
+        # futures = client.gather(futures)
+
+        # print('futures', futures)
+
+        svFcs = evaluator.evaluate(populationDict, 'forces')
+        
+        svFcs = client.compute(svFcs)
+        svFcs = client.gather(svFcs)
+
+        energies, forces = regressor.evaluateTrees(svEng, svFcs, N)
+
+        # Save the (per-struct) errors and the single-value costs
+        errors = computeErrors(
+            settings['refStruct'], energies, forces, database
+        )
+
+        costs = costFxn(errors)
+
+        # Add ridge regression penalty
+        penalties = np.array([
+            np.linalg.norm(pop, axis=1)*settings['ridgePenalty']
+            for pop in rawPopulations
+        ])
+
+        # Update optimizers
+        regressor.updateOptimizers(
+            rawPopulations, costs, penalties
+        )
+
+        printTreeCosts(
+            fxnEvals,
+            [opt.result.fbest for opt in regressor.optimizers],
+            penalties,
+            start
+        )
+
+        fxnEvals += 1
 
     print('Done')
 
