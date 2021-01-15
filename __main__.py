@@ -47,6 +47,7 @@ args = parser.parse_args()
 
 start = time.time()
 
+@profile
 def main(client, settings):
     global start
 
