@@ -1,4 +1,5 @@
 # Imports
+from tree import SVTree  # Importing here helps avoid BW issues for some reason
 import os
 import time
 import h5py
@@ -21,7 +22,6 @@ import dask
 import dask.array
 from dask.distributed import Client
 
-from tree import SVTree
 from archive import Archive
 from settings import Settings
 from database import SVDatabase
@@ -58,7 +58,6 @@ args = parser.parse_args()
 
 start = time.time()
 
-@profile
 def main(client, settings):
     global start
 
