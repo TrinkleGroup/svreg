@@ -1,5 +1,5 @@
 # Imports
-from tree import SVTree  # Importing here helps avoid BW issues for some reason
+from svreg.tree import SVTree  # Importing here helps avoid BW issues for some reason
 import os
 import time
 import h5py
@@ -22,12 +22,12 @@ import dask
 import dask.array
 from dask.distributed import Client
 
-from archive import Archive
-from settings import Settings
-from database import SVDatabase
-from regressor import SVRegressor
-from evaluator import SVEvaluator
-from population import Population
+from svreg.archive import Archive
+from svreg.settings import Settings
+from svreg.database import SVDatabase
+from svreg.regressor import SVRegressor
+from svreg.evaluator import SVEvaluator
+from svreg.population import Population
 
 ################################################################################
 # Parse all command-line arguments
@@ -35,17 +35,6 @@ parser = argparse.ArgumentParser()
 parser.add_argument(
     '-s', '--settings', type=str,
     help='The path to the settings file.'
-)
-parser.add_argument(
-    '-ppn', '--procs_per_node', type=int,
-    help='The number of cores on each physical compute node'
-)
-parser.add_argument(
-    '-ppm', '--procs_per_manager', type=int,
-    help='Used for tuning the parallelization. Given S structures, M'\
-        'processors per manager, and C processors per compute node, the number'\
-            'of structures loaded onto each compute node is equal to S/(M/C)'\
-                '(approximately, accounting for imperfect division).'
 )
 parser.add_argument(
     '-n', '--names', type=str,
@@ -518,8 +507,8 @@ if __name__ == '__main__':
 
     # Load settings
     settings = Settings.from_file(args.settings)
-    settings['PROCS_PER_PHYS_NODE'] = args.procs_per_node
-    settings['PROCS_PER_MANAGER'] = args.procs_per_manager
+    # settings['PROCS_PER_PHYS_NODE'] = args.procs_per_node
+    # settings['PROCS_PER_MANAGER'] = args.procs_per_manager
 
     random.seed(settings['seed'])
     np.random.seed(settings['seed'])

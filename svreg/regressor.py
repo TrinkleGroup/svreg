@@ -3,10 +3,10 @@ import numpy as np
 from copy import deepcopy
 
 import cma
-from optimizers import GAWrapper, SofomoreWrapper
-from nodes import SVNode
-from tree import SVTree
-from tree import MultiComponentTree as MCTree
+from svreg.optimizers import GAWrapper, SofomoreWrapper
+from svreg.nodes import SVNode
+from svreg.tree import SVTree
+from svreg.tree import MultiComponentTree as MCTree
 
 import dask
 

@@ -2,7 +2,7 @@ import random
 import numpy as np
 from copy import deepcopy
 
-from tree import MultiComponentTree as MCTree
+from svreg.tree import MultiComponentTree as MCTree
 
 class Population(list):
     """
