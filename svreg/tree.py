@@ -184,6 +184,7 @@ class SVTree(list):
                         (intermediateEng, intermediateFcs)
                     )
                 else:  # Done evaluating all sub-trees
+
                     return intermediateEng, intermediateFcs
 
         raise RuntimeError("Something went wrong in tree evaluation")
@@ -829,6 +830,7 @@ class MultiComponentTree(SVTree):
     
     def eval(self):
         vals = [self.chemistryTrees[el].eval() for el in self.elements]
+
         eng, fcs = zip(*vals)
 
         # eng/fcs = [val for val in element_vals]

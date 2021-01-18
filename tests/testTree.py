@@ -1,5 +1,8 @@
 import unittest
 import numpy as np
+from copy import deepcopy
+
+from ase import Atoms
 
 from svreg.tree import SVTree
 from svreg.nodes import FunctionNode, SVNode
@@ -163,6 +166,80 @@ class Test_SVTree(unittest.TestCase):
 
         np.testing.assert_equal(population, population2)
 
+
+class Test_SVTree_Real(unittest.TestCase):
+
+    def setUp(self):
+        self.rhoNode = SVNode(
+            description='rho',
+            components=['rho_A'],
+            constructor=['rho_A'],
+            numParams=[9],
+            restrictions=[(6, 0), (8, 0)],
+            paramRanges=[None],
+            inputTypes=['Mo'],
+        )
+
+        self.ffgNode = SVNode(
+            description='ffg',
+            components=['f_A', 'g_AA'],
+            constructor=['f_A', 'f_A', 'g_AA'],
+            numParams=[9, 9, 9],
+            restrictions=[[(6, 0), (8, 0)], []],
+            paramRanges=[None, None],
+            inputTypes=['Mo'],
+        )
+
+        r0 = 3.0
+        dimer_aa = Atoms([1, 1], positions=[[0, 0, 0], [r0, 0, 0]]) 
+        dimer_aa.set_chemical_symbols(['Mo', 'Mo'])
+
+        self.dimer = dimer_aa
+
+    
+    def test_directEval_onerho_dimer(self):
+
+        tree = SVTree(
+            nodes=[
+                deepcopy(self.rhoNode),
+            ],
+        )
+
+
+        eng = tree.directEvaluation(
+            np.array([1, 1, 1, 1, 1, 1, 1, 0, 0]),
+            self.dimer,
+            evalType='energy',
+            bc_type='fixed',
+            elements=['Mo'],
+        )
+
+        self.assertEqual(eng, 2.0)
+
+    
+    def test_directEval_tworho_dimer(self):
+
+        tree = SVTree(
+            nodes=[
+                FunctionNode('add'),
+                deepcopy(self.rhoNode),
+                deepcopy(self.rhoNode),
+            ],
+        )
+
+
+        eng = tree.directEvaluation(
+            np.concatenate([
+                np.array([1, 1, 1, 1, 1, 1, 1, 0, 0]),
+                np.array([1, 1, 1, 1, 1, 1, 1, 0, 0]),
+            ]),
+            self.dimer,
+            evalType='energy',
+            bc_type='fixed',
+            elements=['Mo'],
+        )
+
+        self.assertEqual(eng, 4.0)
 
 
 if __name__ == '__main__':

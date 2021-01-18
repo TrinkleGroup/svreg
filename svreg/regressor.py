@@ -66,9 +66,9 @@ class SVRegressor:
                     'popsize': settings['optimizerPopSize'],
                     'maxiter': settings['maxNumOptimizerSteps'],
                     'tolx': 1e-8,  # changes in x-values
-                    'tolfunhist': 1e-6,
-                    'tolfun': 1e-6,
-                    'tolfunrel': 1e-3,
+                    'tolfunhist': 1e-12,
+                    'tolfun': 1e-12,
+                    'tolfunrel': 1e-6,
                 }
             ]
         elif settings['optimizer'] == 'GA':
@@ -79,9 +79,9 @@ class SVRegressor:
                     'popsize': settings['optimizerPopSize'],
                     'maxiter': settings['maxNumOptimizerSteps'],
                     'tolx': 1e-8,  # changes in x-values
-                    'tolfunhist': 1e-6,
-                    'tolfun': 1e-6,
-                    'tolfunrel': 1e-3,
+                    'tolfunhist': 1e-12,
+                    'tolfun': 1e-12,
+                    'tolfunrel': 1e-6,
                 }
             ]
         elif settings['optimizer'] == 'Sofomore':
@@ -141,8 +141,11 @@ class SVRegressor:
         evaluate the trees
 
         Args:
-            svResults (dict):
-                svResults[evalType][structName][svName][elem]
+            svEng (dict):
+                svEng[structName][svName][elem] = computed values for given node
+
+            svFcs (dict):
+                svFcs[structName][svName][elem] = computed values for given node
 
             N (int):
                 The number of parameter sets for each node. Used for splitting
@@ -153,11 +156,9 @@ class SVRegressor:
                 {structName: [tree.eval() for tree in self.trees]}
         """
 
-        # svEng = svResults['energy']
-        # svFcs = svResults['forces']
+        energies = {struct: [] for struct in svEng.keys()}
+        forces   = {struct: [] for struct in svFcs.keys()}
 
-        energies = {struct:[] for struct in svEng.keys()}
-        forces   = {struct:[] for struct in svFcs.keys()}
         for structName in energies:
             for svName in svEng[structName]:
                 for elem in svEng[structName][svName]:
@@ -204,6 +205,7 @@ class SVRegressor:
             for tree in self.trees:
                 # eng, fcs = tree.eval()
                 future = tree.eval()
+
                 energies[structName].append(future[0])
                 forces[structName].append(future[1])
 
@@ -386,10 +388,10 @@ class SVRegressor:
                 dat = np.concatenate(popList, axis=0).T
 
                 # if self.populationDict is None:
-                #     populationDict[svName][elem] = da.from_array(
+                #     populationDict[svName][elem] = dask.array.from_array(
                 #         dat,
                 #         chunks=dat.shape
-                #     )#.persist()
+                #     ).persist()
                 #     futures.append(populationDict[svName][elem])
                 # else:
                 #     populationDict[svName][elem][:] = dat
@@ -400,7 +402,8 @@ class SVRegressor:
                 #     dat,
                 #     chunks=dat.shape,
                 #     # chunks=(100, popList[0].shape[1]),
-                # )
+                # ).persist()
+                # futures.append(populationDict[svName][elem])
 
         # from dask.distributed import wait
         # wait(futures)

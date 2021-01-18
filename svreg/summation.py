@@ -75,10 +75,11 @@ class Summation:
         ):
 
         self.name           = name
-        self.inputTypes     = set([
+
+        self.inputTypes     = list(set([
             t.decode('utf-8') if isinstance(t, bytes) else t
             for t in inputTypes
-        ])
+        ]))
 
         # By sorting these two lists, it ensures that the components can be
         # indexed in order to identify which elements single-input components
@@ -177,6 +178,19 @@ class FFG(Summation):
 
     
     def loop(self, atoms, evalType, hostType=None):
+
+        totalEnergy = None
+        energySV = None
+        forcesSV = None
+        partialsum = None
+        gVal = None
+        fkVal = None
+        fjPrime = None
+        fjVal = None
+        jForces = None
+        iForces = None
+        forces = None
+
         types = sorted(list(set(atoms.get_chemical_symbols())))
 
         atomTypesStrings = atoms.get_chemical_symbols()
@@ -251,7 +265,6 @@ class FFG(Summation):
                 # Since it assumed that each spline has the same number of knots
                 # and that each radial spline has the same cutoffs, we don't
                 # need to worry about indexing the components properly
-
                 if (evalType == 'energy') or (evalType == 'forces'):
                     fjVal = self.fjSpline(rij)
                     partialsum = 0.0
@@ -264,7 +277,7 @@ class FFG(Summation):
                     ktype = atomTypes[k]
                     ktypeStr = atomTypesStrings[k]
 
-                    neighTypes = set([atomTypesStrings[j], atomTypesStrings[k]])
+                    neighTypes = list(set([atomTypesStrings[j], atomTypesStrings[k]]))
                     if neighTypes != self.inputTypes:
                         continue
 
@@ -503,6 +516,11 @@ class Rho(Summation):
 
     def loop(self, atoms, evalType, hostType=None):
 
+        totalEnergy = None
+        energySV = None
+        forcesSV = None
+        forces = None
+
         types = sorted(list(set(atoms.get_chemical_symbols())))
 
         atomTypesStrings = atoms.get_chemical_symbols()
@@ -560,6 +578,7 @@ class Rho(Summation):
                 jtypeStr = atomTypesStrings[j]
 
                 if atomTypesStrings[j] not in self.inputTypes:
+                    print('uh...', atomTypesStrings[j], self.inputTypes)
                     continue
 
                 self.rho = self.splines[jtypeStr]
@@ -724,6 +743,8 @@ class Spline:
 
     def extrap(self, x):
         """Performs linear extrapolation past the endpoints of the spline"""
+
+        val = 0
 
         if x < self.cutoff[0]:
             val = self(self.knots[0]) - self.d0*(self.knots[0]-x)

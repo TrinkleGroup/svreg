@@ -1,5 +1,5 @@
+import numpy as np
 import dask.array as da
-from dask.distributed import wait
 
 
 class SVDatabase(dict):
@@ -65,8 +65,11 @@ class SVDatabase(dict):
         #     self.attrs['structNames'].astype(np.bytes_)
         # )
 
-        import time
-        start = time.time()
+    def load(self, h5pyFile, useDask=True):
+
+        structNames = self.attrs['structNames']
+        svNames = self.attrs['svNames']
+
         elements = list(h5pyFile[structNames[0]][svNames[0]].keys())
 
         futures = []
@@ -89,19 +92,16 @@ class SVDatabase(dict):
 
                     self[struct][sv][elem]['energy'] = group['energy'][()]
 
-                    # self[struct][sv][elem]['energy'] = da.from_array(
-                    #     group['energy'][()],
-                    #     chunks=group['energy'][()].shape
-                    # ).persist()
-
-                    self[struct][sv][elem]['forces'] = da.from_array(
-                        forceData,
-                        # chunks=(5000, forceData.shape[1]),
-                        chunks=forceData.shape
-                    ).persist()
+                    if useDask:
+                        self[struct][sv][elem]['forces'] = da.from_array(
+                            forceData,
+                            # chunks=(5000, forceData.shape[1]),
+                            chunks=forceData.shape
+                        ).persist()
+                    else:
+                        self[struct][sv][elem]['forces'] = np.array(forceData)
 
                     futures.append(self[struct][sv][elem]['energy'])
                     futures.append(self[struct][sv][elem]['forces'])
 
-        wait(futures)
-        print("Full load time: {} (s)".format(time.time() - start))
+        return futures

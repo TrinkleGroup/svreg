@@ -17,14 +17,13 @@ def delayedEval(sv, pop):
 
 class SVEvaluator:
 
-    def __init__(self, client, database, settings):
-        self.client     = client
+    def __init__(self, database, settings):
         self.database   = database
         self.settings   = settings
 
   
     # @profile
-    def evaluate(self, populationDict, evalType):
+    def evaluate(self, populationDict, evalType, useDask=True):
         """
         Evaluates all of the populations on all of their corresponding structure
         vectors in the database.
@@ -53,12 +52,13 @@ class SVEvaluator:
                     sv = self.database[struct][svName][elem][evalType]
                     pop = populationDict[svName][elem]
 
-                    if evalType == 'energy':
-                        results.append(sv.dot(pop))
+                    if useDask:
+                        if evalType == 'energy':
+                            results.append(sv.dot(pop))
+                        else:
+                            results.append(delayedEval(sv, pop))
                     else:
-                        results.append(delayedEval(sv, pop))
-
-                    # results.append(sv.dot(pop))
+                        results.append(sv.dot(pop))
 
         # Now sum by chunks before computing to avoid extra communication
         summedResults = {
@@ -80,7 +80,7 @@ class SVEvaluator:
         def delayedSum(val):
             return val.sum(axis=-1).swapaxes(1, 2)
 
-        # TODO: consider dask computing before reshapes (comm while work?)
+        # TODO: consider converting results to a dask bag?
         for struct in structNames[::-1]:
             for svName in allSVnames[::-1]:
                 if svName not in populationDict: continue
@@ -98,13 +98,15 @@ class SVEvaluator:
                         val = res
 
                         n = self.database.attrs['natoms'][struct]
-                        nhost = val.shape[0]//3//n
 
-                        # val = val.T.reshape(res.shape[1], 3, nhost, n)
-                        # val = val.sum(axis=-1).swapaxes(1, 2)
+                        if useDask:
+                            val = delayedReshape(val, n)
+                            val = delayedSum(val)
+                        else:
+                            nhost = val.shape[0]//3//n
 
-                        val = delayedReshape(val, n)
-                        val = delayedSum(val)
+                            val = val.T.reshape(res.shape[1], 3, nhost, n)
+                            val = val.sum(axis=-1).swapaxes(1, 2)
 
                     summedResults[struct][svName][elem] = val
                 

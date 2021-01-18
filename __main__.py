@@ -20,7 +20,7 @@ initialize(
 
 import dask
 import dask.array
-from dask.distributed import Client
+from dask.distributed import Client, wait
 
 from svreg.archive import Archive
 from svreg.settings import Settings
@@ -47,15 +47,16 @@ args = parser.parse_args()
 
 start = time.time()
 
-@profile
+# @profile
 def main(client, settings):
     global start
 
     # Setup
     with h5py.File(settings['databasePath'], 'r') as h5pyFile:
         database = SVDatabase(h5pyFile)
+        wait(database.load(h5pyFile))
 
-        evaluator = SVEvaluator(client, database, settings)
+        evaluator = SVEvaluator(database, settings)
 
     regressor = SVRegressor(settings, database)
     archive = Archive(os.path.join(settings['outputPath'], 'archive'))
@@ -106,7 +107,7 @@ def main(client, settings):
 
             candidate.cost = opt.result.fbest
 
-            # TODO: this might not agree perfectly with opt.result.fbest
+            # TODO: this might not agree perfectly with opt.result.xbest
             candidateParamsIdx  = np.argmin(costs[staleIdx])
             # candidate.cost      = costs[staleIdx][candidateParamsIdx]
             err                 = errors[staleIdx][candidateParamsIdx]
@@ -217,7 +218,6 @@ def main(client, settings):
         # print('futures', futures)
 
         svFcs = evaluator.evaluate(populationDict, 'forces')
-        
         svFcs = client.compute(svFcs)
         svFcs = client.gather(svFcs)
 
@@ -258,14 +258,18 @@ def polish(client, settings):
     # Setup
     with h5py.File(settings['databasePath'], 'r') as h5pyFile:
         database = SVDatabase(h5pyFile)
+        wait(database.load(h5pyFile))
 
-        evaluator = SVEvaluator(client, database, settings)
+        evaluator = SVEvaluator(database, settings)
 
-        regressor = SVRegressor(settings, database)
+    regressor = SVRegressor(settings, database)
+    costFxn = buildCostFunction(settings, len(database.attrs['natoms']))
 
-    from nodes import FunctionNode
-    from tree import MultiComponentTree as MCTree
-    tree = MCTree(['Mo', 'Ti'])
+    from svreg.nodes import FunctionNode
+    from svreg.tree import MultiComponentTree as MCTree
+
+    # tree = MCTree(['Mo', 'Ti'])
+    tree = MCTree(['Mo'])
 
     from copy import deepcopy
 
@@ -273,87 +277,106 @@ def polish(client, settings):
     treeMo.nodes = [
         FunctionNode('add'),
         deepcopy(regressor.svNodePool[0]),
-        FunctionNode('add'),
-        deepcopy(regressor.svNodePool[1]),
-        FunctionNode('add'),
-        deepcopy(regressor.svNodePool[2]),
-        FunctionNode('add'),
-        deepcopy(regressor.svNodePool[3]),
-        deepcopy(regressor.svNodePool[4]),
+        deepcopy(regressor.svNodePool[0]),
+        # FunctionNode('add'),
+        # deepcopy(regressor.svNodePool[1]),
+        # FunctionNode('add'),
+        # deepcopy(regressor.svNodePool[2]),
+        # FunctionNode('add'),
+        # deepcopy(regressor.svNodePool[3]),
+        # deepcopy(regressor.svNodePool[4]),
     ]
 
-    treeTi = SVTree()
-    treeTi.nodes = [
-        FunctionNode('add'),
-        deepcopy(regressor.svNodePool[0]),
-        FunctionNode('add'),
-        deepcopy(regressor.svNodePool[1]),
-        FunctionNode('add'),
-        deepcopy(regressor.svNodePool[2]),
-        FunctionNode('add'),
-        deepcopy(regressor.svNodePool[3]),
-        deepcopy(regressor.svNodePool[4]),
-    ]
+    # treeTi = SVTree()
+    # treeTi.nodes = [
+    #     FunctionNode('add'),
+    #     deepcopy(regressor.svNodePool[0]),
+    #     FunctionNode('add'),
+    #     deepcopy(regressor.svNodePool[1]),
+    #     FunctionNode('add'),
+    #     deepcopy(regressor.svNodePool[2]),
+    #     FunctionNode('add'),
+    #     deepcopy(regressor.svNodePool[3]),
+    #     deepcopy(regressor.svNodePool[4]),
+    # ]
 
     tree.chemistryTrees['Mo'] = treeMo
-    tree.chemistryTrees['Ti'] = treeTi
+    # tree.chemistryTrees['Ti'] = treeTi
     
-    print(tree)
+    print(tree, flush=True)
 
     tree.updateSVNodes()
 
     regressor.trees = [tree]
     regressor.initializeOptimizers()
 
-    costFxn = buildCostFunction(settings, len(database.attrs['natoms']))
 
     N = settings['optimizerPopSize']
 
-    optStart = time.time()
-    for optStep in range(settings['numOptimizerSteps']):
+    savePath = os.path.join(settings['outputPath'], 'polished')
 
-        populationDict, rawPopulations = regressor.generatePopulationDict(N)
+    if not os.path.isdir(savePath):
+        os.mkdir(savePath)
 
-        # svEng = evaluator.evaluate(populationDict, 'energy')
-        # print("Evaluated energies... {}".format(time.time() - start), flush=True)
+    from svreg.archive import Entry
+    entry = Entry(tree, savePath)
 
-        # futures = []
-        # for svName in populationDict:
-        #     for el, pop in populationDict[svName].items():
-        #         populationDict[svName][el] = client.scatter(pop)
-        #         futures.append(populationDict[svName][el])
+    prevBestCost = np.inf
 
-        # from dask.distributed import wait
-        # wait(futures)
+    import pickle
 
-        svEng = evaluator.evaluate(populationDict, 'energy')
-        svFcs = evaluator.evaluate(populationDict, 'forces')
+    with open(os.path.join(savePath, 'entry.pkl'), 'wb') as outfile:
 
-        # svResults = evaluator.evaluate(populationDict)
-        # svEng = svResults['energy']; svFcs = svResults['forces']
+        optStart = time.time()
+        for optStep in range(1, settings['maxNumOptimizerSteps']+1):
 
-        energies, forces = regressor.evaluateTrees(svEng, svFcs, N)
+            populationDict, rawPopulations = regressor.generatePopulationDict(N)
 
-        results = {'energies': energies, 'forces': forces}
+            svEng = evaluator.evaluate(populationDict, 'energy')
 
-        # Save the (per-struct) errors and the single-value costs
-        errors = computeErrors(
-            settings['refStruct'], energies, forces, database
-            # client, settings['refStruct'], results, database
-        )
+            for svName in populationDict:
+                for el, pop in populationDict[svName].items():
+                    populationDict[svName][el] = client.scatter(pop)
 
-        costs = costFxn(errors)
+            svFcs = evaluator.evaluate(populationDict, 'forces')
+            svFcs = client.compute(svFcs)
+            svFcs = client.gather(svFcs)
 
-        # Add ridge regression penalty
-        penalties = np.array([
-            np.linalg.norm(pop, axis=1)*settings['ridgePenalty']
-            for pop in rawPopulations
-        ])
+            energies, forces = regressor.evaluateTrees(svEng, svFcs, N)
 
-        printTreeCosts(optStep, costs, penalties, optStart)
+            # Save the (per-struct) errors and the single-value costs
+            errors = computeErrors(
+                settings['refStruct'], energies, forces, database
+            )
 
-        # Update optimizers
-        regressor.updateOptimizers(rawPopulations, costs, penalties)
+            costs = costFxn(errors)
+
+            # Add ridge regression penalty
+            penalties = np.array([
+                np.linalg.norm(pop, axis=1)*settings['ridgePenalty']
+                for pop in rawPopulations
+            ])
+
+            # Update optimizers
+            regressor.updateOptimizers(rawPopulations, costs, penalties)
+
+            printTreeCosts(
+                optStep,
+                [opt.result.fbest for opt in regressor.optimizers],
+                penalties,
+                optStart
+            )
+
+            if regressor.optimizers[0].result.fbest < prevBestCost:
+                prevBestCost = regressor.optimizers[0].result.fbest
+
+                entry.cost = regressor.optimizers[0].result.fbest
+                entry.bestParams = regressor.optimizers[0].result.xbest
+                entry.bestErrors = errors
+
+            if (optStep % 10) == 0:
+                pickle.dump(entry, outfile)
+
 
 ################################################################################
 # Helper functions
