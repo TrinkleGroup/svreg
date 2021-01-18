@@ -66,9 +66,9 @@ class SVRegressor:
                     'popsize': settings['optimizerPopSize'],
                     'maxiter': settings['maxNumOptimizerSteps'],
                     'tolx': 1e-8,  # changes in x-values
-                    'tolfunhist': 1e-12,
-                    'tolfun': 1e-12,
-                    'tolfunrel': 1e-6,
+                    'tolfunhist': 1e-8,
+                    'tolfun': 1e-8,
+                    'tolfunrel': 1e-8,
                 }
             ]
         elif settings['optimizer'] == 'GA':
@@ -79,9 +79,9 @@ class SVRegressor:
                     'popsize': settings['optimizerPopSize'],
                     'maxiter': settings['maxNumOptimizerSteps'],
                     'tolx': 1e-8,  # changes in x-values
-                    'tolfunhist': 1e-12,
-                    'tolfun': 1e-12,
-                    'tolfunrel': 1e-6,
+                    'tolfunhist': 1e-8,
+                    'tolfun': 1e-8,
+                    'tolfunrel': 1e-8,
                 }
             ]
         elif settings['optimizer'] == 'Sofomore':
@@ -429,12 +429,14 @@ class SVRegressor:
         """
 
         stale = []
+        messages = []
 
         for i, opt in enumerate(self.optimizers):
             if opt.stop():
                 stale.append(i)
+                messages.append(opt.stop())
 
-        return stale
+        return stale, messages
 
 
 def buildSVNodePool(database):

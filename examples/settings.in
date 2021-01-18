@@ -7,7 +7,7 @@
 ################################################################################
 
 seed        1123
-runType     POLISH
+runType     GA
 
 ################################################################################
 # Database settings
@@ -44,7 +44,7 @@ pointMutateProb         0.2
 maxTreeDepth            4
 
 numRegressorSteps       3
-maxNumOptimizerSteps    10
+maxNumOptimizerSteps    1000
 
 energyWeight            100
 forcesWeight            1

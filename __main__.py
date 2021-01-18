@@ -96,12 +96,12 @@ def main(client, settings):
     while numCompletedTrees < maxNumTrees:
 
         # Remove any converged trees, update population, and print new results
-        staleIndices = regressor.checkStale()
+        staleIndices, messages = regressor.checkStale()
 
         populationChanged = False
 
         # A tree has finished optimizing
-        for staleIdx in staleIndices:
+        for staleIdx, staleMessage in zip(staleIndices, messages):
             candidate   = regressor.trees[staleIdx]
             opt         = regressor.optimizers[staleIdx]
 
@@ -116,6 +116,7 @@ def main(client, settings):
             print()
             print("Completed tree {}:".format(staleIdx))
             print("\t", candidate.cost, candidate)
+            print("Stopping criterion:", staleMessage)
 
             numCompletedTrees += 1
 
