@@ -269,22 +269,25 @@ def polish(client, settings):
     from svreg.tree import MultiComponentTree as MCTree
 
     # tree = MCTree(['Mo', 'Ti'])
-    tree = MCTree(['Mo'])
+    tree1 = MCTree(['Mo'])
+    tree2 = MCTree(['Mo'])
 
     from copy import deepcopy
 
-    treeMo = SVTree()
-    treeMo.nodes = [
+    treeMo1 = SVTree()
+    treeMo1.nodes = [
         FunctionNode('add'),
         deepcopy(regressor.svNodePool[0]),
         deepcopy(regressor.svNodePool[0]),
-        # FunctionNode('add'),
-        # deepcopy(regressor.svNodePool[1]),
-        # FunctionNode('add'),
-        # deepcopy(regressor.svNodePool[2]),
-        # FunctionNode('add'),
-        # deepcopy(regressor.svNodePool[3]),
-        # deepcopy(regressor.svNodePool[4]),
+    ]
+
+    treeMo2 = SVTree()
+    treeMo2.nodes = [
+        FunctionNode('add'),
+        deepcopy(regressor.svNodePool[0]),
+        FunctionNode('add'),
+        deepcopy(regressor.svNodePool[0]),
+        deepcopy(regressor.svNodePool[1]),
     ]
 
     # treeTi = SVTree()
@@ -300,82 +303,98 @@ def polish(client, settings):
     #     deepcopy(regressor.svNodePool[4]),
     # ]
 
-    tree.chemistryTrees['Mo'] = treeMo
-    # tree.chemistryTrees['Ti'] = treeTi
+    tree1.chemistryTrees['Mo'] = treeMo1
+    tree2.chemistryTrees['Mo'] = treeMo2
     
-    print(tree, flush=True)
+    tree1.updateSVNodes()
+    tree2.updateSVNodes()
 
-    tree.updateSVNodes()
-
-    regressor.trees = [tree]
+    regressor.trees = [tree1, tree2]
     regressor.initializeOptimizers()
-
-
-    N = settings['optimizerPopSize']
 
     savePath = os.path.join(settings['outputPath'], 'polished')
 
     if not os.path.isdir(savePath):
         os.mkdir(savePath)
 
-    from svreg.archive import Entry
-    entry = Entry(tree, savePath)
+    for tree in regressor.trees:
+        print(tree)
 
-    prevBestCost = np.inf
+        # treePath = os.path.join(savePath, str(tree))
+
+        # if not os.path.isdir(treePath):
+        #     os.mkdir(treePath)
+
+    N = settings['optimizerPopSize']
+
+    from svreg.archive import Entry
+
+    entries = {str(t): Entry(t, savePath) for t in regressor.trees}
+    prevBestCosts = {str(t): np.inf for t in regressor.trees}
 
     import pickle
 
-    with open(os.path.join(savePath, 'entry.pkl'), 'wb') as outfile:
+    optStart = time.time()
+    for optStep in range(1, settings['maxNumOptimizerSteps']+1):
 
-        optStart = time.time()
-        for optStep in range(1, settings['maxNumOptimizerSteps']+1):
+        populationDict, rawPopulations = regressor.generatePopulationDict(N)
 
-            populationDict, rawPopulations = regressor.generatePopulationDict(N)
+        svEng = evaluator.evaluate(populationDict, 'energy')
 
-            svEng = evaluator.evaluate(populationDict, 'energy')
+        for svName in populationDict:
+            for el, pop in populationDict[svName].items():
+                populationDict[svName][el] = client.scatter(pop)
 
-            for svName in populationDict:
-                for el, pop in populationDict[svName].items():
-                    populationDict[svName][el] = client.scatter(pop)
+        svFcs = evaluator.evaluate(populationDict, 'forces')
+        svFcs = client.compute(svFcs)
+        svFcs = client.gather(svFcs)
 
-            svFcs = evaluator.evaluate(populationDict, 'forces')
-            svFcs = client.compute(svFcs)
-            svFcs = client.gather(svFcs)
+        energies, forces = regressor.evaluateTrees(svEng, svFcs, N)
 
-            energies, forces = regressor.evaluateTrees(svEng, svFcs, N)
+        # Save the (per-struct) errors and the single-value costs
+        errors = computeErrors(
+            settings['refStruct'], energies, forces, database
+        )
 
-            # Save the (per-struct) errors and the single-value costs
-            errors = computeErrors(
-                settings['refStruct'], energies, forces, database
-            )
+        costs = costFxn(errors)
 
-            costs = costFxn(errors)
+        # Add ridge regression penalty
+        penalties = np.array([
+            np.linalg.norm(pop, axis=1)*settings['ridgePenalty']
+            for pop in rawPopulations
+        ])
 
-            # Add ridge regression penalty
-            penalties = np.array([
-                np.linalg.norm(pop, axis=1)*settings['ridgePenalty']
-                for pop in rawPopulations
-            ])
+        # Update optimizers
+        regressor.updateOptimizers(rawPopulations, costs, penalties)
 
-            # Update optimizers
-            regressor.updateOptimizers(rawPopulations, costs, penalties)
+        printTreeCosts(
+            optStep,
+            [opt.result.fbest for opt in regressor.optimizers],
+            penalties,
+            optStart
+        )
 
-            printTreeCosts(
-                optStep,
-                [opt.result.fbest for opt in regressor.optimizers],
-                penalties,
-                optStart
-            )
+        for treeNum, tree in enumerate(regressor.trees):
+            opt = regressor.optimizers[treeNum]
+            treeName = str(tree)
 
-            if regressor.optimizers[0].result.fbest < prevBestCost:
-                prevBestCost = regressor.optimizers[0].result.fbest
+            entry = entries[treeName]
 
-                entry.cost = regressor.optimizers[0].result.fbest
-                entry.bestParams = regressor.optimizers[0].result.xbest
+            if opt.result.fbest < prevBestCosts[treeName]:
+                prevBestCosts[treeName] = opt.result.fbest
+
+                entry.cost = opt.result.fbest
+                entry.bestParams = opt.result.xbest
                 entry.bestErrors = errors
 
             if (optStep % 10) == 0:
-                pickle.dump(entry, outfile)
+                pickle.dump(
+                    entry,
+                    open(
+                        os.path.join(savePath, treeName, 'entry.pkl'),
+                        'wb'
+                    )
+                )
 
 
 ################################################################################
