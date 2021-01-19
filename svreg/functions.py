@@ -82,6 +82,16 @@ def _derivative_sigmoid(x):
     return sigmoid(x[1])*(1-sigmoid(x[1]))
 
 
+#@dask.delayed
+def softplus(x):
+    return np.log10(1+np.exp(x))
+
+
+#@dask.delayed
+def _derivative_softplus(x):
+    return np.exp(x)/(1+np.exp(x))
+
+
 _derivative_map = {
     'add': _derivative_add,
     'mul': _derivative_mul,
@@ -93,6 +103,7 @@ _derivative_map = {
     'tan': _derivative_tan,
     'exp': _derivative_exp,
     'sig': _derivative_sigmoid,
+    'splus': _derivative_softplus,
 }
 
 
@@ -129,6 +140,7 @@ tan1  = _Function(function=np.tan, name='tan', arity=1)
 # arctan1  = _Function(function=np.arctan, name='arctan', arity=1)
 exp   = _Function(function=np.exp, name='exp', arity=1)
 sig   = _Function(function=sigmoid, name='sig', arity=1)
+splus = _Function(function=softplus, name='splus', arity=1)
 
 _function_map = {'add': add2,
                  'mul': mul2,
@@ -140,7 +152,8 @@ _function_map = {'add': add2,
                 # 'tan': tan1,
                 # 'arctan': arctan1,
                 # 'exp': exp,
-                'sig': sig,
+                # 'sig': sig,
+                'splus': splus
                  }
 
 _arities = {
@@ -153,7 +166,8 @@ _arities = {
         # 'tan',
         # 'arctan',
         # 'exp',
-        'sig',
+        # 'sig',
+        'splus',
     ],
     2: [
         'add',
@@ -173,4 +187,5 @@ _latex = {
     'arctan': 'arctan({})',
     'exp': 'exp({})',
     'sig': 'sig({})',
+    'splus': 'softplus({})'
 }
