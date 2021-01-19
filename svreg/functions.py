@@ -84,12 +84,24 @@ def _derivative_sigmoid(x):
 
 #@dask.delayed
 def splus(x):
-    return np.log(1+np.exp(x))
+    # Truncated softplus function
+    res = np.log(1+np.exp(x))
+
+    badIndices = np.where(res > 1e6)
+
+    res[badIndices] = x[badIndices]
+    return res
 
 
 #@dask.delayed
 def _derivative_splus(x):
-    return np.exp(x[1])/(1+np.exp(x[1]))
+    check = np.log(1+np.exp(x[1]))
+    badIndices = np.where(check > 1e6)
+
+    res = np.exp(x[1])/(1+np.exp(x[1]))
+    res[badIndices] = 1
+
+    return res
 
 
 _derivative_map = {
