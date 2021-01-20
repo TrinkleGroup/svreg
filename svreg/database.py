@@ -99,7 +99,8 @@ class SVDatabase(dict):
                             chunks=forceData.shape
                         ).persist()
                     else:
-                        self[struct][sv][elem]['forces'] = np.array(forceData)
+                        # self[struct][sv][elem]['forces'] = np.array(forceData)
+                        self[struct][sv][elem]['forces'] = forceData
 
                     futures.append(self[struct][sv][elem]['energy'])
                     futures.append(self[struct][sv][elem]['forces'])

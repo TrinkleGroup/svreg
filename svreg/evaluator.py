@@ -1,5 +1,6 @@
 import dask
 import dask.array
+import numpy as np
 
 from numba import jit
 
@@ -58,7 +59,7 @@ class SVEvaluator:
                         else:
                             results.append(delayedEval(sv, pop))
                     else:
-                        results.append(sv.dot(pop))
+                        results.append(np.array(sv).dot(pop))
 
         # Now sum by chunks before computing to avoid extra communication
         summedResults = {
