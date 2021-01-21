@@ -3,6 +3,7 @@ import numpy as np
 from gplearn.functions import _function_map as _gp_function_map
 from gplearn.functions import _Function as _gp_Function
 
+import dask
 
 _protected_sqrt = _gp_function_map['sqrt'].function
 _protected_log  = _gp_function_map['log'].function
@@ -14,36 +15,43 @@ of (value, derivative) pairs, then to define functions that operate on the
 tuples. This allows for much simpler software implementation.
 """
 
+#@dask.delayed
 def _derivative_add(a, b):
     """Derivative of a + b"""
     return a[1] + b[1]
 
 
+#@dask.delayed
 def _derivative_tan(x):
     """Derivative of tan(x)"""
     return _protected_inverse(np.cos(x[1])**2)
 
 
+#@dask.delayed
 def _derivative_sin(x):
     """Derivative of sin(x)"""
     return np.cos(x[1])
 
 
+#@dask.delayed
 def _derivative_cos(x):
     """Derivative of cos(x)"""
     return -1*np.sin(x[1])
 
 
+#@dask.delayed
 def _derivative_inv(x):
     """Derivative of x**-1"""
     return -1*(_protected_inverse(x[1])**2)
 
 
+#@dask.delayed
 def _derivative_log(x):
     """Derivative of natural log"""
     return _protected_inverse(x[1])
 
 
+#@dask.delayed
 def _derivative_mul(a, b):
     """a*(db/dx) + (da/dx)*b"""
     return (
@@ -52,22 +60,47 @@ def _derivative_mul(a, b):
     )
 
 
+#@dask.delayed
 def _derivative_sqrt(x):
     """(1/2)x**(-1/2)"""
     return 0.5*_protected_inverse(_protected_sqrt(x[1]))
 
 
+#@dask.delayed
 def _derivative_exp(x):
     """Derivative of e(x)"""
     return np.exp(x[1])
 
 
+#@dask.delayed
 def sigmoid(x):
     return 1/(1+np.exp(-x))
 
 
+#@dask.delayed
 def _derivative_sigmoid(x):
     return sigmoid(x[1])*(1-sigmoid(x[1]))
+
+
+#@dask.delayed
+def splus(x):
+    # Truncated softplus function
+    res = np.log(1+np.exp(x))
+
+    badIndices = np.where(x > 1e6)
+    res[badIndices] = x[badIndices]
+
+    return res
+
+
+#@dask.delayed
+def _derivative_splus(x):
+    res = np.exp(x[1])/(1+np.exp(x[1]))
+
+    badIndices = np.where(x[1] > 1e6)
+    res[badIndices] = 1
+
+    return res
 
 
 _derivative_map = {
@@ -81,6 +114,7 @@ _derivative_map = {
     'tan': _derivative_tan,
     'exp': _derivative_exp,
     'sig': _derivative_sigmoid,
+    'softplus': _derivative_splus,
 }
 
 
@@ -117,35 +151,38 @@ tan1  = _Function(function=np.tan, name='tan', arity=1)
 # arctan1  = _Function(function=np.arctan, name='arctan', arity=1)
 exp   = _Function(function=np.exp, name='exp', arity=1)
 sig   = _Function(function=sigmoid, name='sig', arity=1)
+softplus = _Function(function=splus, name='softplus', arity=1)
 
 _function_map = {'add': add2,
-                 'mul': mul2,
-                 'sqrt': sqrt1,
+                #  'mul': mul2,
+                #  'sqrt': sqrt1,
                  # 'log': log1,
                  # 'inv': inv1,
                 #  'sin': sin1,
-                'cos': cos1,
+                # 'cos': cos1,
                 # 'tan': tan1,
                 # 'arctan': arctan1,
                 # 'exp': exp,
-                'sig': sig,
+                # 'sig': sig,
+                'softplus': softplus
                  }
 
 _arities = {
     1: [
-        'sqrt',
+        # 'sqrt',
         # 'log',
         # 'inv',
         # 'sin',
-        'cos',
+        # 'cos',
         # 'tan',
         # 'arctan',
         # 'exp',
-        'sig',
+        # 'sig',
+        'softplus',
     ],
     2: [
         'add',
-        'mul'
+        # 'mul'
     ],
 }
 
@@ -161,4 +198,5 @@ _latex = {
     'arctan': 'arctan({})',
     'exp': 'exp({})',
     'sig': 'sig({})',
+    'softplus': 'softplus({})'
 }

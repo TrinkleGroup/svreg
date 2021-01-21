@@ -1,33 +1,33 @@
-"""
-The main entry point for the svreg module.
-
-TODO: change this into a GA class, then make a new __main__.py
-"""
-################################################################################
 # Imports
-
+from svreg.tree import SVTree  # Importing here helps avoid BW issues for some reason
 import os
-import sys
-import cma, comocma
 import time
 import h5py
 import shutil
-import pickle
-import random
 import argparse
-import numpy as np
 from mpi4py import MPI
-from copy import deepcopy
 
-from settings import Settings
-from database import SVDatabase
-from regressor import SVRegressor
-from evaluator import SVEvaluator
-from nodes import SVNode, FunctionNode
-from tree import SVTree
-from archive import Archive, Entry
-from optimizers import GAWrapper, SofomoreWrapper
+import random
+import numpy as np
 
+from dask_mpi import initialize
+initialize(
+    nthreads=2,
+    memory_limit='4 GB',
+    # interface='ipogif0',
+    # local_directory='/u/sciteam/vita/scratch/svreg/hyojung/hj_dask_prof_int',
+)
+
+import dask
+import dask.array
+from dask.distributed import Client, wait
+
+from svreg.archive import Archive
+from svreg.settings import Settings
+from svreg.database import SVDatabase
+from svreg.regressor import SVRegressor
+from svreg.evaluator import SVEvaluator
+from svreg.population import Population
 
 ################################################################################
 # Parse all command-line arguments
@@ -37,535 +37,442 @@ parser.add_argument(
     help='The path to the settings file.'
 )
 parser.add_argument(
-    '-ppn', '--procs_per_node', type=int,
-    help='The number of cores on each physical compute node'
-)
-parser.add_argument(
-    '-ppm', '--procs_per_manager', type=int,
-    help='Used for tuning the parallelization. Given S structures, M'\
-        'processors per manager, and C processors per compute node, the number'\
-            'of structures loaded onto each compute node is equal to S/(M/C)'\
-                '(approximately, accounting for imperfect division).'
-)
-parser.add_argument(
     '-n', '--names', type=str,
     help='The path to a file containing the names of the structures to use.',
 )
 
 args = parser.parse_args()
 ################################################################################
+# Main functions
 
+start = time.time()
 
 # @profile
-def main(settings, worldComm, isMaster):
-    # Load database, build evaluator, and prepare list of structNames
-    with SVDatabase(settings['databasePath'], 'r') as database:
-        if args.names:
-            # Read in structure names if available
-            with open(args.names, 'r') as f:
-                lines = f.readlines()
-                structNames = [line.strip() for line in lines]
-        else:
-            # Otherwise just use all structures in the database
-            structNames = list(database.keys())
+def main(client, settings):
+    global start
 
-        if isMaster:
-            print("Loaded structures:")
-            for n in structNames:
-                print('\t', n)
-        
-        if settings['refStruct'] not in structNames:
-            raise RuntimeError(
-                "The reference structure must be included in structNames."
-            )
+    # Setup
+    with h5py.File(settings['databasePath'], 'r') as h5pyFile:
+        database = SVDatabase(h5pyFile)
+        wait(database.load(h5pyFile))
 
-        evaluator = SVEvaluator(worldComm, structNames, settings)
-        evaluator.distributeDatabase(database)
+        evaluator = SVEvaluator(database, settings)
 
-        svNodePool = buildSVNodePool(database[settings['refStruct']])
-        trueValues = database.loadTrueValues()
+    regressor = SVRegressor(settings, database)
+    archive = Archive(os.path.join(settings['outputPath'], 'archive'))
 
-        numStructs = len(trueValues)
+    costFxn = buildCostFunction(settings, len(database.attrs['natoms']))
 
-        natoms = {k: database[k].attrs['natoms'] for k in database}
-    
-    # Prepare regressor
-    if settings['optimizer'] == 'CMA':
-        optimizer = cma.CMAEvolutionStrategy
-        optimizerArgs = [
-            1.0,  # defaulted sigma0 value
-            {'verb_disp': 0, 'popsize':settings['optimizerPopSize']}
-        ]
-    elif settings['optimizer'] == 'GA':
-        optimizer = GAWrapper
-        optimizerArgs = [
-            {
-                'verb_disp': 0,
-                'popsize': settings['optimizerPopSize'],
-                'pointMutateProb': settings['pointMutateProb']
-            }
-        ]
-    elif settings['optimizer'] == 'Sofomore':
-        optimizer = SofomoreWrapper
-        optimizerArgs = {
-            'numStructs': numStructs,
-            'paretoDimensionality': 2,
-            'CMApopSize': settings['optimizerPopSize'],
-            'SofomorePopSize': settings['numberOfTrees'],  # Placeholder
-            # 'threads_per_node': settings['PROCS_PER_PHYS_NODE'],
-            'threads_per_node': None,
-        }
-    else:
-        raise NotImplementedError('Must be one of `GA`, `CMA`, or `Sofomore`.')
+    # Begin symbolic regression
+    regressor.initializeTrees(elements=database.attrs['elements'])
+    regressor.initializeOptimizers()
 
-    if isMaster:
-        archive = Archive(os.path.join(settings['outputPath'], 'archive'))
+    print()
+    print("Currently optimizing:")
 
-        regressor = SVRegressor(
-            settings, svNodePool, optimizer, optimizerArgs
-        )
+    for pidx, t in enumerate(regressor.trees):
+        print(pidx, t)
 
-        regressor.initializeTrees()
-        regressor.initializeOptimizers()
-        print()
+    print()
+    print()
 
     N = settings['optimizerPopSize']
 
-    costFxn = buildCostFunction(settings)
+    rawPopulations  = None
+    errors          = None
+    costs           = None
 
-    # Begin optimization
-    for regStep in range(settings['numRegressorSteps']):
-        if isMaster:
-            print(regStep, flush=True)
+    population = Population(
+        settings, regressor.svNodePool, database.attrs['elements']
+    )
 
-            for treeNum, t in enumerate(regressor.trees):
-                print(treeNum, t)
-    
-            print('\t\t\t', ''.join(['{:<10}'.format(i) for i in range(10)]))
+    archive = Archive(os.path.join(settings['outputPath'], 'archive'))
 
-        for optStep in range(settings['numOptimizerSteps']):
-            if isMaster:
-                rawPopulations = [
-                    np.array(opt.ask(N))# if not opt.stop()
-                    # else np.tile(opt.best.x, reps=(N,1))
-                    for opt in regressor.optimizers
-                ]
+    numCompletedTrees = 0
+    maxNumTrees = settings['numRegressorSteps']*settings['numberOfTrees']
 
-                # Need to parse populations so that they can be grouped easily
-                # treePopulation = [{svName: population} for tree in trees]
-                treePopulations = []
-                for pop, tree in zip(rawPopulations, regressor.trees):
-                    treePopulations.append(tree.parseArr2Dict(pop))
+    start = time.time()
+    fxnEvals = 1
+    while numCompletedTrees < maxNumTrees:
 
-                # Group all dictionaries into one
-                populationDict = {}
-                for svNode in svNodePool:
-                    populationDict[svNode.description] = {}
-                    for bondType in svNode.bonds:
-                        populationDict[svNode.description][bondType] = []
+        # Remove any converged trees, update population, and print new results
+        staleIndices, messages = regressor.checkStale()
 
-                for treeDict in treePopulations:
-                    for svName in treeDict.keys():
-                        for bondType, pop in treeDict[svName].items():
-                            populationDict[svName][bondType].append(pop)
+        populationChanged = False
 
-            else:
-                populationDict = None
+        # A tree has finished optimizing
+        for staleIdx, staleMessage in zip(staleIndices, messages):
+            candidate   = regressor.trees[staleIdx]
+            opt         = regressor.optimizers[staleIdx]
 
-            # Distribute energy/force calculations across compute nodes
-            svEng = evaluator.evaluate(populationDict, evalType='energy')
-            svFcs = evaluator.evaluate(populationDict, evalType='forces')
+            candidate.cost = opt.result.fbest
 
-            if isMaster:
-                # Eneriges/forces = {structName: [pop for tree in trees]}
-                energies, forces = regressor.evaluateTrees(svEng, svFcs, N)
+            # TODO: this might not agree perfectly with opt.result.xbest
+            candidateParamsIdx  = np.argmin(costs[staleIdx])
+            # candidate.cost      = costs[staleIdx][candidateParamsIdx]
+            err                 = errors[staleIdx][candidateParamsIdx]
 
-                # Save the (per-struct) errors and the single-value costs
-                errors = computeErrors(
-                    settings['refStruct'], energies, forces, trueValues, natoms
-                )
+            print()
+            print()
+            print("Completed tree {}:".format(staleIdx))
+            print("\t", candidate.cost, candidate)
+            print("Stopping criterion:", staleMessage)
 
-                costs = costFxn(errors)
+            numCompletedTrees += 1
 
-                # Add ridge regression penalty
-                penalties = np.array([
-                    np.linalg.norm(pop, axis=1)*settings['ridgePenalty']
-                    for pop in rawPopulations
-                ])
-
-                # # Add roughness penalties
-                # penalties= [
-                #     tree.roughnessPenalty(pop)*settings['ridgePenalty']
-                #     for tree, pop in zip(regressor.trees, rawPopulations)
-                # ]
-
-                # Print the cost of the best paramaterization of the best tree
-                printTreeCosts(optStep, costs, penalties)
-
-                # Update optimizers
-                for treeIdx in range(len(regressor.optimizers)):
-                    fullCost = costs[treeIdx] + penalties[treeIdx]
-
-                    opt = regressor.optimizers[treeIdx]
-                    opt.tell(rawPopulations[treeIdx], fullCost)
-
-        if isMaster:
+            # Log completed tree
             archive.update(
-                regressor.trees, costs, errors, rawPopulations,
-                regressor.optimizers
+                candidate, candidate.cost, err, opt.result.xbest, opt
             )
 
             archive.log()
 
+            # Randomly insert into current population
+            inserted = population.attemptInsert(candidate)
+
+            if inserted:
+                populationChanged = True
+
+            # Replace completed tree with new tree
+
+            # Make sure new tree isn't already in archive or active population
+            currentRegNames = [str(t) for t in regressor.trees]
+
+            newTree, parent1, parent2 = population.newIndividual()
+
+            generatedNew = False
+            while not generatedNew:
+
+                treeName = str(newTree)
+
+                inArchive   = treeName in archive
+                inReg       = treeName in currentRegNames
+
+                if inArchive:
+                    print("Already in archive:", newTree)
+                elif inReg:
+                    print("Already being optimized:", newTree)
+                else:
+                    generatedNew = True
+                
+                if not generatedNew:
+                    newTree, parent1, parent2 = population.newIndividual()
+
+            print("New tree:")
+            print('\t', parent1)
+            print('\t+')
+            print('\t', parent2)
+            print('\t=')
+            print('\t', newTree)
+
+            # Insert new tree into list of trees being optimized
+            newOpt = regressor.optimizer(
+                newTree.populate(N=1)[0],
+                *regressor.optimizerArgs
+            )
+
+            regressor.trees[staleIdx]        = newTree
+            regressor.optimizers[staleIdx]   = newOpt
+
+        if staleIndices:
+            if populationChanged:
+                # Print current population if it was updated
+                print()
+                print()
+                print("Current population:")
+
+                popCosts = [t.cost for t in population]
+                argsort = np.argsort(popCosts)
+
+                for idx in argsort:
+                    print(population[idx].cost, population[idx])
+
+                print()
+            else:
+                print()
+                print()
+                print("No new fitted trees were added to the population.")
+                print()
+
+        if staleIndices:
             print()
-            printNames = list(archive.keys())
-            printCosts = [archive[n].cost for n in printNames]
-            regressorNames = [str(t) for t in regressor.trees]
+            print("Currently optimizing:")
 
-            for idx in np.argsort(printCosts):
-                indicator = ''
-                if printNames[idx] in regressorNames:
-                    indicator = '->'
+            for pidx, t in enumerate(regressor.trees):
+                print(pidx, t)
+            print()
+            print()
 
-                print(
-                    '\t{}{:.2f}'.format(indicator, printCosts[idx]),
-                    printNames[idx],
-                )
-            print(flush=True)
+        # Continue optimization of currently active trees
+        populationDict, rawPopulations = regressor.generatePopulationDict(N)
 
-            if regStep + 1 < settings['numRegressorSteps']:
+        svEng = evaluator.evaluate(populationDict, 'energy')
 
-                # Sample tournamentSize number of trees to use as parents
-                trees, opts = archive.sample(settings['tournamentSize'])
-                regressor.trees = trees
+        # futures = []
+        for svName in populationDict:
+            for el, pop in populationDict[svName].items():
+                populationDict[svName][el] = client.scatter(pop, broadcast=True)
+                # futures.append(populationDict[svName][el])
 
-                # Finish populating trees by mating/mutating
-                newTrees = regressor.evolvePopulation(svNodePool)
+        # futures = client.gather(futures)
 
-                # Check if each tree is in the archive
-                currentTreeNames = [str(t) for t in trees]
+        # print('futures', futures)
 
-                uniqueTrees = trees
-                uniqueOptimizers = opts
-                for tree in newTrees:
-                    treeName = str(tree)
-                    if treeName not in currentTreeNames:
-                        # Not a duplicate
-                        uniqueTrees.append(tree)
+        svFcs = evaluator.evaluate(populationDict, 'forces')
+        svFcs = client.compute(svFcs)
+        svFcs = client.gather(svFcs)
 
-                        if treeName in archive:
-                            # Load archived optimizer
-                            uniqueOptimizers.append(archive[treeName].optimizer)
-                        else:
-                            # Create new optimizer
-                            uniqueOptimizers.append(
-                                regressor.optimizer(
-                                    tree.populate(N=1)[0],
-                                    *regressor.optimizerArgs
-                                )
-                            )
+        energies, forces = regressor.evaluateTrees(svEng, svFcs, N)
 
-                regressor.trees = uniqueTrees
-                regressor.optimizers = uniqueOptimizers
+        # Save the (per-struct) errors and the single-value costs
+        errors = computeErrors(
+            settings['refStruct'], energies, forces, database
+        )
+
+        costs = costFxn(errors)
+
+        # Add ridge regression penalty
+        penalties = np.array([
+            np.linalg.norm(pop, axis=1)*settings['ridgePenalty']
+            for pop in rawPopulations
+        ])
+
+        # Update optimizers
+        regressor.updateOptimizers(
+            rawPopulations, costs, penalties
+        )
+
+        printTreeCosts(
+            fxnEvals,
+            [opt.result.fbest for opt in regressor.optimizers],
+            penalties,
+            start
+        )
+
+        fxnEvals += 1
 
     print('Done')
 
 
-def fixedExample(settings, worldComm, isMaster):
-    """A function for running basic tests on example trees."""
+def polish(client, settings):
 
-    # Load database, build evaluator, and prepare list of structNames
-    with SVDatabase(settings['databasePath'], 'r') as database:
-        if args.names:
-            # Read in structure names if available
-            with open(args.names, 'r') as f:
-                lines = f.readlines()
-                structNames = [line.strip() for line in lines]
-        else:
-            # Otherwise just use all structures in the database
-            structNames = list(database.keys())
-        
-        if settings['refStruct'] not in structNames:
-            raise RuntimeError(
-                "The reference structure must be included in structNames."
-            )
+    # Setup
+    with h5py.File(settings['databasePath'], 'r') as h5pyFile:
+        database = SVDatabase(h5pyFile)
+        wait(database.load(h5pyFile))
 
-        evaluator = SVEvaluator(worldComm, structNames, settings)
-        evaluator.distributeDatabase(database)
+        evaluator = SVEvaluator(database, settings)
 
-        svNodePool = buildSVNodePool(database[settings['refStruct']])
-        trueValues = database.loadTrueValues()
+    regressor = SVRegressor(settings, database)
+    costFxn = buildCostFunction(settings, len(database.attrs['natoms']))
+
+    from svreg.nodes import FunctionNode
+    from svreg.tree import MultiComponentTree as MCTree
+
+    # tree = MCTree(['Mo', 'Ti'])
+    tree1 = MCTree(['Mo'])
+    tree2 = MCTree(['Mo'])
+
+    from copy import deepcopy
+
+    treeMo1 = SVTree()
+    treeMo1.nodes = [
+        FunctionNode('add'),
+        deepcopy(regressor.svNodePool[0]),
+        deepcopy(regressor.svNodePool[0]),
+    ]
+
+    treeMo2 = SVTree()
+    treeMo2.nodes = [
+        FunctionNode('add'),
+        deepcopy(regressor.svNodePool[0]),
+        FunctionNode('add'),
+        deepcopy(regressor.svNodePool[0]),
+        deepcopy(regressor.svNodePool[1]),
+    ]
+
+    # treeTi = SVTree()
+    # treeTi.nodes = [
+    #     FunctionNode('add'),
+    #     deepcopy(regressor.svNodePool[0]),
+    #     FunctionNode('add'),
+    #     deepcopy(regressor.svNodePool[1]),
+    #     FunctionNode('add'),
+    #     deepcopy(regressor.svNodePool[2]),
+    #     FunctionNode('add'),
+    #     deepcopy(regressor.svNodePool[3]),
+    #     deepcopy(regressor.svNodePool[4]),
+    # ]
+
+    tree1.chemistryTrees['Mo'] = treeMo1
+    tree2.chemistryTrees['Mo'] = treeMo2
     
-        numStructs = len(trueValues)
+    tree1.updateSVNodes()
+    tree2.updateSVNodes()
 
-        natoms = {k: database[k].attrs['natoms'] for k in database}
+    regressor.trees = [tree1, tree2]
+    regressor.initializeOptimizers()
 
-    # Prepare regressor
-    if settings['optimizer'] == 'CMA':
-        optimizer = cma.CMAEvolutionStrategy
-        optimizerArgs = [
-            1.0,  # defaulted sigma0 value
-            {'verb_disp': 1, 'popsize':settings['optimizerPopSize']}
-        ]
-    elif settings['optimizer'] == 'GA':
-        optimizer = GAWrapper
-        optimizerArgs = [
-            {
-                'verb_disp': 1,
-                'popsize': settings['optimizerPopSize'],
-                'pointMutateProb': settings['pointMutateProb']
-            }
-        ]
-    elif settings['optimizer'] == 'Sofomore':
-        optimizer = SofomoreWrapper
-        optimizerArgs = {
-            'numStructs': numStructs,
-            'structNames': structNames,
-            'paretoDimensionality': 2,
-            'CMApopSize': settings['optimizerPopSize'],
-            'SofomorePopSize': settings['numberOfTrees'],  # Placeholder
-            'threads_per_node': settings['PROCS_PER_PHYS_NODE'],
-            'opts': {'verb_disp': 1}
-        }
-    else:
-        raise NotImplementedError('Must be one of `GA`, `CMA`, or `Sofomore`.')
+    savePath = os.path.join(settings['outputPath'], 'polished')
 
-    if isMaster:
-        tree = SVTree()
+    if not os.path.isdir(savePath):
+        os.mkdir(savePath)
 
-        ffgNode = svNodePool[0]
-        rhoNode = svNodePool[1]
+    for tree in regressor.trees:
+        print(tree)
 
-        tree.nodes = [
-            FunctionNode('add'),
-            deepcopy(ffgNode),
-            FunctionNode('add'),
-            deepcopy(ffgNode),
-            deepcopy(rhoNode),
-        ]
+        # treePath = os.path.join(savePath, str(tree))
 
-        tree.svNodes = [n for n in tree.nodes if isinstance(n, SVNode)]
+        # if not os.path.isdir(treePath):
+        #     os.mkdir(treePath)
 
-        # archive = pickle.load(
-        #     open(
-        #         os.path.join('results', 'archive', 'archive.pkl'),
-        #         'rb'
-        #     )
-        # )
+    N = settings['optimizerPopSize']
 
-        # entry = archive['mul(add(inv(ffg), log(rho)), add(rho, mul(rho, ffg)))']
-        # tree = entry.tree
+    from svreg.archive import Entry
 
-        regressor = SVRegressor(
-            settings, svNodePool, optimizer, optimizerArgs
-        )
+    entries = {str(t): Entry(t, savePath) for t in regressor.trees}
+    prevBestCosts = {str(t): np.inf for t in regressor.trees}
 
-        regressor.trees = [tree]
-        regressor.initializeOptimizers()
-
-        print('Tree:\n\t', regressor.trees[0], flush=True)
-
-    if settings['optimizer'] == 'Sofomore':
-        # Sofomore.ask() returns the incumbents of each kernels,
-        # plus the populations of each kernel
-        N = settings['numberOfTrees']*(1 + settings['optimizerPopSize'])
-    else:
-        N = settings['optimizerPopSize']
-
-    costFxn = buildCostFunction(settings)
-
-    for optStep in range(settings['numOptimizerSteps']):
-        if isMaster:
-            rawPopulations = [
-                np.array(opt.ask(N)) for opt in regressor.optimizers
-            ]
-
-            # Need to parse populations so that they can be grouped easily
-            # treePopulation = [{svName: population} for tree in trees]
-            treePopulations = []
-            for pop, tree in zip(rawPopulations, regressor.trees):
-                treePopulations.append(tree.parseArr2Dict(pop))
-
-            # Group all dictionaries into one
-            populationDict = {}
-            for svNode in svNodePool:
-                populationDict[svNode.description] = {}
-                for bondType in svNode.bonds:
-                    populationDict[svNode.description][bondType] = []
-
-            for treeDict in treePopulations:
-                for svName in treeDict.keys():
-                    for bondType, pop in treeDict[svName].items():
-                        populationDict[svName][bondType].append(pop)
-
-        else:
-            populationDict = None
-
-        # Distribute energy/force calculations across compute nodes
-        svEng = evaluator.evaluate(populationDict, evalType='energy')
-        svFcs = evaluator.evaluate(populationDict, evalType='forces')
-
-        if isMaster:
-            # Eneriges/forces = {structName: [pop for tree in trees]}
-            energies, forces = regressor.evaluateTrees(svEng, svFcs, N)
-
-            errors = computeErrors(
-                settings['refStruct'], energies, forces, trueValues, natoms
-            )
-
-
-            costs = np.array([el.sum(axis=1) for el in errors])
-            costs = costFxn(errors)
-
-            # Add ridge regression penalty
-            penalties = np.array([
-                np.linalg.norm(pop, axis=1)*settings['ridgePenalty']
-                for pop in rawPopulations
-            ])
-
-            # # Add roughness penalties
-            # penalties= [
-            #     tree.roughnessPenalty(pop)*settings['ridgePenalty']
-            #     for tree, pop in zip(regressor.trees, rawPopulations)
-            # ]
-
-
-            # Print the cost of the best paramaterization of the best tree
-            # print('\t', optStep, min([min(c) for c in costs]), flush=True)
-
-            # Update optimizers
-            for treeIdx in range(len(regressor.optimizers)):
-                fullCost = costs[treeIdx] + penalties[treeIdx]
-
-                opt = regressor.optimizers[treeIdx]
-
-                if settings['optimizer'] == 'Sofomore':
-                    opt.tell(
-                        rawPopulations[treeIdx], errors[treeIdx], penalties
-                    )
-                else:
-                    opt.tell(rawPopulations[treeIdx], fullCost)
-
-                opt.disp()
-
-            if optStep % 10 == 0:
-                treeOutfilePath = os.path.join(
-                    settings['outputPath'], 'tree_{}.pkl'.format(optStep)
-                )
-
-                bestIdx = np.argmin(costs)
-                bestTree = bestIdx//N
-                saveTree = deepcopy(regressor.trees[bestTree])
-                saveTree.bestParams = saveTree.fillFixedKnots(
-                    rawPopulations[bestTree][bestIdx]
-                )[0]
-
-                errorsOutfilePath = os.path.join(
-                    settings['outputPath'], 'errors_{}.pkl'.format(optStep)
-                )
-
-                with open(treeOutfilePath, 'wb') as outfile:
-                    pickle.dump(saveTree, outfile)
-
-                with open(errorsOutfilePath, 'wb') as outfile:
-                    pickle.dump(errors[bestTree][bestIdx], outfile)
-
-
-def directTreeEval():
-    import os
     import pickle
 
-    from ase.io import read
+    optStart = time.time()
+    for optStep in range(1, settings['maxNumOptimizerSteps']+1):
 
-    basePath = 'results/mo_smooth2'
-    # treeName = 'add(mul(ffg, rho), cos(rho))'
-    # treeName = 'mul(ffg, ffg)'
-    treeName = 'rho'
-    archive = pickle.load(open(os.path.join(basePath, 'archive.pkl'), 'rb'))
+        populationDict, rawPopulations = regressor.generatePopulationDict(N)
 
-    fileName = os.path.join(basePath, treeName, 'tree.pkl')
+        svEng = evaluator.evaluate(populationDict, 'energy')
 
-    tree = pickle.load(open(fileName, 'rb'))
-    
-    entry = archive[treeName]
-    tree.bestParams = entry.bestParams
+        for svName in populationDict:
+            for el, pop in populationDict[svName].items():
+                populationDict[svName][el] = client.scatter(pop)
 
-    atomsFile = os.path.join(
-        '/home/jvita/scripts/s-meam/data/fitting_databases/',
-        'mlearn/data/Mo/lammps',
-        'Ground_state_crystal.data'
-    )
+        svFcs = evaluator.evaluate(populationDict, 'forces')
+        svFcs = client.compute(svFcs)
+        svFcs = client.gather(svFcs)
 
-    atoms = read(atomsFile, format='lammps-data', style='atomic')
-    y = tree.fillFixedKnots(tree.bestParams)[0]
-    # val = tree.directEvaluation(y, atoms, evalType='energy')
-    # print('energy:', val)
-    # val = tree.directEvaluation(y, atoms, evalType='forces')
-    # print('forces:', val.shape)
+        energies, forces = regressor.evaluateTrees(svEng, svFcs, N)
 
-
-    from summation import _implemented_sums
-    node = tree.svNodes[0]
-    summation = _implemented_sums[node.description](
-        name=node.description,
-        components=node.components,
-        numParams=node.numParams,
-        restrictions=node.restrictions,
-        paramRanges=node.paramRanges,
-        bonds=node.bonds,
-        cutoffs=(2.4, 5.2),
-        numElements=1,
-    )
-
-    val = summation.loop(atoms, evalType='vector', bondType='rho_A')
-    print('vectors:', val[0].shape, val[1].shape)
-
-    # from calculator import TreeCalculator
-    # atoms.calc = TreeCalculator(tree, y)
-
-    # eng = atoms.get_potential_energy()
-    # fcs = atoms.get_forces()
-
-    # print(eng, fcs.shape)
-
-
-def buildSVNodePool(group):
-    """Prepare svNodePool for use in tree construction"""
-
-    svNodePool = []
-
-    # `group` is a pointer to an entry for a structure in the database
-    for svName in sorted(group):
-        svGroup = group[svName]
-
-        restrictions = None
-        if 'restrictions' in svGroup.attrs:
-            restrictions = []
-            resList = svGroup.attrs['restrictions'].tolist()[::-1]
-            for num in svGroup.attrs['numRestrictions']:
-                tmp = []
-                for _ in range(num):
-                    tmp.append(tuple(resList.pop()))
-                restrictions.append(tmp)
-
-        svNodePool.append(
-            SVNode(
-                description=svName,
-                components=svGroup.attrs['components'],
-                numParams=svGroup.attrs['numParams'],
-                bonds={
-                    k:svGroup[k].attrs['components'] for k in svGroup.keys()
-                },
-                restrictions=restrictions,
-                paramRanges=svGroup.attrs['paramRanges']\
-                    if 'paramRanges' in group[svName].attrs else None
-            )
+        # Save the (per-struct) errors and the single-value costs
+        errors = computeErrors(
+            settings['refStruct'], energies, forces, database
         )
 
-    return svNodePool
+        costs = costFxn(errors)
+
+        # Add ridge regression penalty
+        penalties = np.array([
+            np.linalg.norm(pop, axis=1)*settings['ridgePenalty']
+            for pop in rawPopulations
+        ])
+
+        # Update optimizers
+        regressor.updateOptimizers(rawPopulations, costs, penalties)
+
+        printTreeCosts(
+            optStep,
+            [opt.result.fbest for opt in regressor.optimizers],
+            penalties,
+            optStart
+        )
+
+        for treeNum, tree in enumerate(regressor.trees):
+            opt = regressor.optimizers[treeNum]
+            treeName = str(tree)
+
+            entry = entries[treeName]
+
+            if opt.result.fbest < prevBestCosts[treeName]:
+                prevBestCosts[treeName] = opt.result.fbest
+
+                entry.cost = opt.result.fbest
+                entry.bestParams = opt.result.xbest
+                entry.bestErrors = errors
+
+            if (optStep % 10) == 0:
+                pickle.dump(
+                    entry,
+                    open(
+                        os.path.join(savePath, treeName, 'entry.pkl'),
+                        'wb'
+                    )
+                )
 
 
-def computeErrors(refStruct, energies, forces, trueValues, natoms):
+################################################################################
+# Helper functions
+
+def printTreeCosts(optStep, costs, penalties, startTime):
+    n = len(costs)
+
+    firstN = costs[:n]
+    firstNPen = penalties[:n]
+
+    string = '\t\t'
+
+    for c, p in zip(firstN, firstNPen):
+        # argmin = np.argmin(c)
+        # string += '{:.4f} ({:.4f})\t'.format(c[argmin], p[argmin])
+        # string += '{:.6f}\t'.format(c[argmin])
+        string += '{:.6f}\t'.format(c)
+
+    print(
+        optStep,
+        '({:.4f} s)'.format(time.time() - startTime),
+        string,
+        flush=True
+    )
+
+
+def buildCostFunction(settings, numStructs):
+    """
+    A function factory for building different types of cost functions. Assumes
+    that the cost function will take in a list of (P, S) arrays, where P is the
+    population size and S is the number of structures. The cost function will
+    return a single value for each entry in the list.
+
+    It is assumed that energy errors are absolute values, and tree errors are
+    MAE values (to reduce each structure to a single value regarless of the
+    number of atoms).
+    """
+
+    scaler = np.ones(2*numStructs)
+    scaler[::2]  *= settings['energyWeight']
+    scaler[1::2] *= settings['forcesWeight']
+        
+    @dask.delayed
+    def delayedMAE(err):
+        return np.average(np.multiply(err, scaler), axis=1)
+
+    # @profile
+    def mae(errors):
+
+        costs = []
+        for treeErr in errors:
+            costs.append(np.average(np.multiply(treeErr, scaler), axis=1))
+
+        return costs
+
+    def rmse(errors):
+        
+        costs = []
+        for err in errors:
+            tmp = np.array(dask.compute(err))
+            tmp[:, ::2]  *= settings['energyWeight']
+            tmp[:, 1::2] *= settings['forcesWeight']
+            costs.append(np.sqrt(np.average(tmp**2, axis=1)))
+
+        return np.array(costs)
+
+    if settings['costFxn'] == 'MAE':
+        return mae
+    elif settings['costFxn'] == 'RMSE':
+        return rmse
+    else:
+        raise RuntimeError("costFxn must be 'MAE' or 'RMSE'.")
+
+
+# @profile
+def computeErrors(refStruct, energies, forces, database):
     """
     Takes in dictionaries of energies and forces and returns the energy/force
     errors for each structure for each tree. Sorts structure names first.
@@ -582,16 +489,6 @@ def computeErrors(refStruct, energies, forces, trueValues, natoms):
             {structName: [(P, 3, N) for tree in trees]} where P is population
             size and N is number of atoms.
 
-        trueValues (dict):
-            {structName: {'energy': eng, 'forces':fcs}}. Note that it is
-            assumed that the true 'energies' are actually energy differences
-            where the energy of the reference structure has already been
-            subtracted off.
-
-        natoms (dict):
-            {structName: number of atoms in structure}. Used for converting
-            total energies into per-atom energies.
-
     Returns:
         costs (list):
             A list of the total costs for the populations of each tree. Eeach
@@ -599,129 +496,106 @@ def computeErrors(refStruct, energies, forces, trueValues, natoms):
             and S is the number of structures being evaluated.
     """
 
+    global start
+
+    trueValues = database.trueValues
+    natoms = database.attrs['natoms']
+    elements = database.attrs['elements']
+
     keys = list(energies.keys())
     numTrees   = len(energies[keys[0]])
-    numPots    = energies[keys[0]][0].shape[0]
-    numStructs = len(keys)
 
     keys = list(energies.keys())
-    errors = []
 
+    errors = []
     for treeNum in range(numTrees):
-        treeErrors = np.zeros((numPots, 2*numStructs))
-        for i, structName in enumerate(sorted(keys)):
-            eng = energies[structName][treeNum]/natoms[structName] \
-                - energies[refStruct][treeNum]/natoms[refStruct]
+        treeErrors = []
+        for structName in sorted(keys):
+
+            structEng  = np.sum(energies[structName][treeNum], axis=0)
+            structEng /= natoms[structName]
+
+            refEng  = np.sum(energies[refStruct][treeNum], axis=0)
+            refEng /= natoms[refStruct]
+
+            ediff = structEng - refEng
+
+            engErrors = abs(ediff - trueValues[structName]['energy'])
+
             fcs =   forces[structName][treeNum]
 
-            engErrors = eng - trueValues[structName]['energy']
-            fcsErrors = fcs - trueValues[structName]['forces']
+            fcsErrors = [
+                fcs[ii] - trueValues[structName]['forces_'+el]
+                for ii, el in enumerate(elements)
+            ]
 
-            treeErrors[:,   2*i] = abs(engErrors)
-            treeErrors[:, 2*i+1] = np.average(np.abs(fcsErrors), axis=(1, 2))
+            fcsErrors = [abs(err) for err in fcsErrors]
+            fcsErrors = [np.average(err, axis=(1, 2)) for err in fcsErrors]
 
-        # Could not sum here to preserve per-struct energy/force errors
-        # costs.append(treeCosts.sum(axis=1))
-        errors.append(treeErrors)
+            treeErrors.append(engErrors)
+            treeErrors.append(sum(fcsErrors))
 
+        errors.append(np.stack(treeErrors))
+
+    errors = [np.stack(err).T for err in errors]
 
     return errors
 
 
-def printTreeCosts(optStep, costs, penalties):
-    first10 = costs[:10]
-    first10Pen = penalties[:10]
-
-    string = '\t\t'
-
-    for c, p in zip(first10, first10Pen):
-        argmin = np.argmin(c)
-        string += '{:.2f} ({:.2f})\t'.format(c[argmin], p[argmin])
-        # string += '{:<10}'.format(
-        #     '{:.2f} ({:.2f})'.format(c[argmin], p[argmin])
-        # )
-
-    print(
-        optStep,
-        string,
-        # '\t\t', ''.join(
-        #     ['{:<10.2f} ({:<10.2f})'.format(np.min(c)) for c in first10]
-        # ),
-        flush=True
-    )
-
-
-def buildCostFunction(settings):
-    """
-    A function factory for building different types of cost functions. Assumes
-    that the cost function will take in a list of (P, S) arrays, where P is the
-    population size and S is the number of structures. The cost function will
-    return a single value for each entry in the list.
-
-    It is assumed that energy errors are absolute values, and tree errors are
-    MAE values (to reduce each structure to a single value regarless of the
-    number of atoms).
-    """
-
-    def mae(errors):
-        
-        costs = []
-        for err in errors:
-            tmp = err.copy()
-            tmp[:, ::2]  *= settings['energyWeight']
-            tmp[:, 1::2] *= settings['forcesWeight']
-            costs.append(np.average(tmp, axis=1))
-
-        return np.array(costs)
-
-    def rmse(errors):
-        
-        costs = []
-        for err in errors:
-            tmp = err.copy()
-            tmp[:, ::2]  *= settings['energyWeight']
-            tmp[:, 1::2] *= settings['forcesWeight']
-            costs.append(np.sqrt(np.average(tmp**2, axis=1)))
-
-        return np.array(costs)
-
-    if settings['costFxn'] == 'MAE':
-        return mae
-    elif settings['costFxn'] == 'RMSE':
-        return rmse
-    else:
-        raise RuntimeError("costFxn must be 'MAE' or 'RMSE'.")
-
+################################################################################
+# Script entry point
 
 if __name__ == '__main__':
-    # Prepare usual MPI stuff
-    worldComm = MPI.COMM_WORLD
-    isMaster = (worldComm.Get_rank() == 0)
+
+    size = MPI.COMM_WORLD.Get_size()
 
     # Load settings
     settings = Settings.from_file(args.settings)
-    settings['PROCS_PER_PHYS_NODE'] = args.procs_per_node
-    settings['PROCS_PER_MANAGER'] = args.procs_per_manager
+    # settings['PROCS_PER_PHYS_NODE'] = args.procs_per_node
+    # settings['PROCS_PER_MANAGER'] = args.procs_per_manager
 
     random.seed(settings['seed'])
     np.random.seed(settings['seed'])
 
-    if isMaster:
-        if os.path.isdir(settings['outputPath']):
-            if not settings['overwrite']:
-                raise RuntimeError(
-                    'Save folder "{}" already exists,'\
-                    ' but `overwrite` is set to False'.format(
-                        settings['outputPath']
-                        )
-                )
-            else:
-                shutil.rmtree(settings['outputPath'])
+    print("Current settings:\n")
+    settings.printSettings()
 
-        os.mkdir(settings['outputPath'])
+    # Prepare save directories
+    if os.path.isdir(settings['outputPath']):
+        if not settings['overwrite']:
+            raise RuntimeError(
+                'Save folder "{}" already exists,'\
+                ' but `overwrite` is set to False'.format(
+                    settings['outputPath']
+                    )
+            )
+        else:
+            shutil.rmtree(settings['outputPath'])
 
-    if settings['runType'] == 'GA':
-        main(settings, worldComm, isMaster)
-    else:
-        fixedExample(settings, worldComm, isMaster)
-        # directTreeEval()
+    os.mkdir(settings['outputPath'])
+
+    with Client() as client:
+
+        print()
+        print(
+            'Dask dashboard info: {}'.format(
+                client.scheduler_info()['address'],
+                client.scheduler_info()['services'],
+            ),
+            flush=True
+        )
+        print()
+
+        num = (size-2)//100*100
+        print(
+            "Waiting for at least {} workers to connect before starting...".format(num),
+            flush=True
+        )
+
+        client.wait_for_workers(n_workers=(size-2)//100*100)
+
+        # Begin run
+        if settings['runType'] == 'GA':
+            main(client, settings)
+        else:
+            polish(client, settings)

@@ -1,11 +1,8 @@
 import os
 import pickle
 import shutil
-import random
 import numpy as np
 from scipy.special import erf
-
-from tree import SVTree
 
 
 class Entry:
@@ -18,9 +15,9 @@ class Entry:
         self.tree       = tree
 
         self.cost       = np.inf
-        self.converged  = False
+        # self.converged  = False
         self.bestParams = None
-        self.bestErrors = None
+        # self.bestErrors = None
 
 
     # Use getters/setters to read/write objects from pickle files
@@ -74,8 +71,8 @@ class Entry:
 class Archive(dict):
     """
     A class for handling the archiving of tree objects and their optimizers to
-    help avoid sampling duplicate trees during symbolic regression, and to help
-    manage resuming tree optimization from the previous state.
+    log results and help avoid sampling duplicate trees during symbolic
+    regression.
     """
 
     def __init__(self, savePath):
@@ -88,33 +85,37 @@ class Archive(dict):
         os.mkdir(self.savePath)
 
 
-    def update(self, trees, costs, errors, params, optimizers):
-        for tree, c, e, p, o in zip(trees, costs, errors, params, optimizers):
-            # Check if tree in archive, otherwise create a new entry for it
-            key = str(tree)
-            # entry = self.get(key, Entry(tree, self.savePath))
-            if key in self:
-                entry = self[key]
-            else:
-                entry = Entry(tree, self.savePath)
+    def update(self, tree, cost, errors, params, optimizer):
+    # def update(self, tree, cost, params, optimizer):
+        # Check if tree in archive, otherwise create a new entry for it
+        key = str(tree)
+        # entry = self.get(key, Entry(tree, self.savePath))
+        if key in self:
+            raise RuntimeError("How did you re-run an existing tree? {}".format(key))
+            entry = self[key]
+        else:
+            entry = Entry(tree, self.savePath)
 
-            # Update optimizer
-            entry.optimizer = o
-            entry.converged = o.stop()
+        # Update optimizer
+        entry.optimizer = optimizer
+        # entry.converged = optimizer.stop()
 
-            # Update best cost and parameter set of entry
-            bestIdx = np.argmin(c)
-            if c[bestIdx] < entry.cost:
-                entry.cost = c[bestIdx]
-                entry.bestParams = p[bestIdx]
-                entry.bestErrors = e[bestIdx]
+        entry.cost = cost
+        entry.bestParams = params
+        entry.bestErrors = errors
 
-            self[key] = entry
+        # # Update best cost and parameter set of entry
+        # bestIdx = np.argmin(cost)
+        # if cost[bestIdx] < entry.cost:
+        #     entry.cost = cost[bestIdx]
+        #     entry.bestParams = params[bestIdx]
+            # entry.bestErrors = errors[bestIdx]
 
+        self[key] = entry
 
-    @property
-    def convergences(self):
-        return [entry.converged for entry in self]
+    # @property
+    # def convergences(self):
+    #     return [entry.converged for entry in self]
 
     
     @property
@@ -129,6 +130,11 @@ class Archive(dict):
         costs = np.array([self[k].cost for k in keys])
         costs = 1-erf(np.log(costs))
         costs[np.where(np.isnan(costs))] = 0
+
+        # Handle the case where all costs are really high
+        if sum(costs) == 0:
+            costs = np.random.random(size=costs.shape)
+
         costs /= np.sum(costs)
 
         sampleNames = np.random.choice(
@@ -149,3 +155,45 @@ class Archive(dict):
 
         with open(os.path.join(self.savePath, 'archive.pkl'), 'wb') as outfile:
             pickle.dump(self, outfile)
+
+    def printStatus(self, regressorNames):
+        print()
+        printNames = list(self.keys())
+        printCosts = [self[n].cost for n in printNames]
+
+        for idx in np.argsort(printCosts):
+            indicator = ''
+            if printNames[idx] in regressorNames:
+                indicator = '->'
+
+            print(
+                '\t{}{:.2f}'.format(indicator, printCosts[idx]),
+                printNames[idx],
+            )
+        print(flush=True)
+
+
+    def pruneAndLoad(self, sampledTrees, newTrees, opts, regressor):
+        currentTreeNames = [str(t) for t in sampledTrees]
+
+        uniqueTrees = sampledTrees
+        uniqueOptimizers = opts
+        for tree in newTrees:
+            treeName = str(tree)
+            if treeName not in currentTreeNames:
+                # Not a duplicate
+                uniqueTrees.append(tree)
+
+                if treeName in self:
+                    # Load archived optimizer
+                    uniqueOptimizers.append(self[treeName].optimizer)
+                else:
+                    # Create new optimizer
+                    uniqueOptimizers.append(
+                        regressor.optimizer(
+                            tree.populate(N=1)[0],
+                            *regressor.optimizerArgs
+                        )
+                    )
+
+        return uniqueTrees, uniqueOptimizers

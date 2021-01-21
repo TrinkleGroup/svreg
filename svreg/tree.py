@@ -1,10 +1,11 @@
 import random
+import itertools
 import numpy as np
 from copy import deepcopy
 from scipy.interpolate import CubicSpline
 
-from nodes import FunctionNode, SVNode, _node_types
-from summation import Summation, _implemented_sums
+from svreg.nodes import FunctionNode, SVNode, _node_types
+from svreg.summation import Summation, _implemented_sums
 
 
 class SVTree(list):
@@ -39,21 +40,31 @@ class SVTree(list):
 
 
     @classmethod
-    def random(cls, svNodePool, maxDepth=1):
+    def random(cls, svNodePool, maxDepth=1, method='full'):
         """
         Generates a random tree with a maximum depth of maxDepth by randomly
         adding nodes from a pool of function nodes and the given svNodes list.
 
         Args:
-            maxDepth (int):
-                The maximum allowed depth.
-
             svNodePool (list):
                 The collection of svNodes that can be used to generate the tree.
+
+            maxDepth (int):
+                The maximum allowed depth. The depth of a tree is defined by the
+                maximum number of nested functions that it has. A tree with only
+                one node has a depth of 0.
+
+            method (str):
+                'full' or 'grow'. Following the terminology used in the gplearn
+                package, 'grow' means that nodes are randomly selected, often
+                leading to asymmetrical trees. 'full' means that only functions
+                are chosen until the maximum depth is reached, then the
+                "terminal" (SV) nodes are chosen, often resulting in
+                symmetrical, "bushy" trees.
         """
 
-        if maxDepth < 1:
-            raise RuntimeError("maxDepth must be >= 1")
+        if maxDepth < 0:
+            raise RuntimeError("maxDepth must be >= 0")
        
         tree = cls()
 
@@ -61,12 +72,20 @@ class SVTree(list):
         numFuncs = FunctionNode._num_avail_functions
         numNodeChoices = numFuncs + numSVNodes
 
-        # Choose a random depth from [1, maxDepth]
-        if maxDepth == 1:
+        # Choose a random depth from [0, maxDepth]
+        if maxDepth == 0:
             # Choose random SVNode to use as the only term in the tree
             newSVNode = deepcopy(random.choice(svNodePool))
             tree.nodes.append(newSVNode)
             tree.svNodes.append(newSVNode)
+
+            tree.totalNumParams = sum([n.totalNumParams for n in tree.svNodes])
+
+            tree.totalNumFreeParams = sum([
+                n.totalNumFreeParams for n in tree.svNodes
+            ])
+
+
             return tree
         else:
             # Choose a random function as the head, then continue with building
@@ -81,7 +100,9 @@ class SVTree(list):
 
             choice = random.randint(0, numNodeChoices)
 
-            if (depth < maxDepth) and (choice <= numFuncs):
+            if (depth < maxDepth) and (
+                (choice <= numFuncs) or (method == 'full')):
+
                 # Chose to add a FunctionNode
                 tree.nodes.append(FunctionNode.random())
                 nodesToAdd.append(tree.nodes[-1].function.arity)
@@ -97,6 +118,15 @@ class SVTree(list):
                     # Pop counters from the stack if sub-trees are complete
                     nodesToAdd.pop()
                     if not nodesToAdd:
+
+                        tree.totalNumParams = sum([
+                            n.totalNumParams for n in tree.svNodes
+                        ])
+
+                        tree.totalNumFreeParams = sum([
+                            n.totalNumFreeParams for n in tree.svNodes
+                        ])
+
                         return tree
                     else:
                         nodesToAdd[-1] -= 1
@@ -154,6 +184,7 @@ class SVTree(list):
                         (intermediateEng, intermediateFcs)
                     )
                 else:  # Done evaluating all sub-trees
+
                     return intermediateEng, intermediateFcs
 
         raise RuntimeError("Something went wrong in tree evaluation")
@@ -184,25 +215,6 @@ class SVTree(list):
             population.append(svNode.populate(N))
 
         return np.hstack(population)
-
-
-    def getPopulation(self):
-        """Return a 2D array of all SVNode parameters"""
-
-        raise NotImplementedError
-    
-
-    def setPopulation(self, population):
-        """
-        Parse a 2D array of parameters (formatted the same as in
-        getPopulation()), then update the parameters corresponding nodes.
-
-        Args:
-            population (np.arr):
-                The population to be assigned to the SVNode objects
-        """
-
-        raise NotImplementedError
 
 
     def parseDict2Arr(self, population, N):
@@ -254,7 +266,7 @@ class SVTree(list):
         fullPop = np.empty(fullShape)
 
         splitPop = np.array_split(
-            population, np.cumsum([n.totalNumParams for n in self.svNodes]),
+            population, np.cumsum([n.totalNumFreeParams for n in self.svNodes]),
             axis=1
         )
 
@@ -263,7 +275,7 @@ class SVTree(list):
         for svNode, nodePopSplit in zip(self.svNodes, splitPop):
             compPopSplit = np.array_split(
                 nodePopSplit,
-                np.cumsum([svNode.numParams[k] for k in svNode.components]),
+                np.cumsum([svNode.numFreeParams[k] for k in svNode.components]),
                 axis=1
             )
             for compName, pop in zip(svNode.components, compPopSplit):
@@ -286,50 +298,76 @@ class SVTree(list):
                 The population to be parsed
 
             fillFixedKnots (bool):
-                If True, inserts fixed knots into rawPopulation.
+                If True, inserts fixed knots into rawPopulation. Note that
+                fillFixedKnots==True does not change the shape of the population,
+                it just updates the fixed knots with their specified values.
 
         Returns:
             parameters (dict):
-                {svName: {bondType: np.vstack-ed array of parameters}}
+                # {svName: {bondType: np.vstack-ed array of parameters}}
+                {svName: np.vstack-ed array of parameters}
         """
 
         if fillFixedKnots:
             splitIndices = np.cumsum([
-                n.totalNumParams for n in self.svNodes
-            ])[:-1]
+                n.totalNumFreeParams for n in self.svNodes
+            ])
         else:
             splitIndices = np.cumsum([
-                n.totalNumParams+sum([len(r) for r in n.restrictions.values()])
+                n.totalNumParams#+sum([len(r) for r in n.restrictions.values()])
                 for n in self.svNodes
-            ])[:-1]
+            ])
 
-        splitPop = np.split(rawPopulation, splitIndices, axis=1)
+        splitIndices = np.concatenate([[0], splitIndices])
+        # splitPop = np.split(rawPopulation, splitIndices, axis=1)
+
+        splitPop = []
+        for i in range(splitIndices.shape[0]-1):
+            start = splitIndices[i]
+            stop  = splitIndices[i+1]
+
+            splitPop.append(rawPopulation[:, start:stop])
 
         # Convert raw parameters into SV node parameters (using outer products)
         parameters = {}
         for svNode, rawParams in zip(self.svNodes, splitPop):
 
+            # Prepare dictionary if entry doesn't exist yet
             if svNode.description not in parameters:
-                parameters[svNode.description] = {
-                    bondType: [] for bondType in svNode.bonds
-                }
+                parameters[svNode.description] = []
 
             # Split the parameters for each component type
             if fillFixedKnots:
-                splitParams = np.array_split(
-                    rawParams, np.cumsum(
-                        [svNode.numParams[c] for c in svNode.components]
-                    )[:-1],
-                    axis=1
-                )
+                # splitParams = np.array_split(
+                #     rawParams, np.cumsum(
+                #         [svNode.numFreeParams[c] for c in svNode.components]
+                #     )[:-1],
+                #     axis=1
+                # )
+
+                splits = np.cumsum([
+                    svNode.numFreeParams[c] for c in svNode.components
+                ])
             else:
-                splitParams = np.array_split(
-                    rawParams, np.cumsum([
-                        len(svNode.restrictions[c]) + sum([svNode.numParams[c]])
-                        for c in svNode.components
-                    ])[:-1],
-                    axis=1
-                )
+                # splitParams = np.array_split(
+                #     rawParams, np.cumsum([
+                #         svNode.numParams[c] for c in svNode.components
+                #     ])[:-1],
+                #     axis=1
+                # )
+
+                splits = np.cumsum([
+                    svNode.numParams[c] for c in svNode.components
+                ])
+
+            splits = np.concatenate([[0], splits])
+
+            splitParams = []
+            for i in range(splits.shape[0]-1):
+                start = splits[i]
+                stop  = splits[i+1]
+
+                splitParams.append(rawParams[:, start:stop])
 
             # Organize parameters by component type for easy indexing
             # Fill any fixed values
@@ -342,29 +380,23 @@ class SVTree(list):
                 else:
                     componentParams[compName] = pop
 
-            for bondType, bondComponents in svNode.bonds.items():
-                # Take outer products to form SV params out of bond components
+            cart = None
+            for componentName in svNode.constructor:
+                tmp = componentParams[componentName]
 
-                cart = None
-                for componentName in bondComponents:
-                    tmp = componentParams[componentName]
+                if cart is None:
+                    cart = tmp
+                else:
+                    cart = np.einsum('ij,ik->ijk', cart, tmp)
+                    cart = cart.reshape(
+                        cart.shape[0], cart.shape[1]*cart.shape[2]
+                    )
 
-                    if cart is None:
-                        cart = tmp
-                    else:
-                        cart = np.einsum('ij,ik->ijk', cart, tmp)
-                        cart = cart.reshape(
-                            cart.shape[0], cart.shape[1]*cart.shape[2]
-                        )
-
-                parameters[svNode.description][bondType].append(cart)
+            parameters[svNode.description].append(cart)
 
         # Stack populations of same bond type; can be split by N later
         for svName in parameters:
-            for bondType in parameters[svName]:
-                parameters[svName][bondType] = np.vstack(
-                    parameters[svName][bondType]
-                )
+            parameters[svName] = np.concatenate(parameters[svName], axis=0)
 
         return parameters
 
@@ -580,8 +612,16 @@ class SVTree(list):
         """Updates self.svNodes. Useful after crossovers/mutations."""
         self.svNodes = [node for node in self.nodes if isinstance(node, SVNode)]
 
+        self.totalNumFreeParams = sum([
+            n.totalNumFreeParams for n in self.svNodes
+        ])
+        
+        self.totalNumParams = sum([
+            n.totalNumParams for n in self.svNodes
+        ])
 
-    def directEvaluation(self, y, atoms, evalType, bc_type):
+
+    def directEvaluation(self, y, atoms, evalType, bc_type, elements, hostType=None):
         """
         Evaluates a tree by performing SV summations directly, rather than
         using the SV representation.
@@ -601,6 +641,15 @@ class SVTree(list):
                 conditions for LHS boundaries of radial functions and for both
                 boundaries of non-radial functions.
 
+            elements (list):
+                A list of strings of all elements in the system.
+
+            hostType (str):
+                Used to work with multi-component trees, where a Summation
+                object might be intended for use with only a given host atom
+                type. If hostType is not None, then loop() only iterates over
+                atoms with the given hostType.
+
         Returns:
             If `evalType` == 'energy', returns the total energy of the system.
             If `evalType` == 'forces', returns the atomic forces.
@@ -609,28 +658,49 @@ class SVTree(list):
         if evalType not in ['energy', 'forces']:
             raise RuntimeError("evalType must be one of 'energy' or 'forces'.")
 
-        splits = np.cumsum([
-            # n.totalNumParams + len(n.restrictions) for n in self.svNodes
-            n.totalNumParams+sum([len(r) for r in n.restrictions.values()])
-            for n in self.svNodes
-        ])[:-1]
+        splits = np.cumsum([n.totalNumParams for n in self.svNodes])[:-1]
         splitParams = np.array_split(y, splits)
 
         # Clone the tree, but replace SVNode objects with Summation objects
         nodes = []
         for node in self.nodes[::-1]:
-            if node.description in _implemented_sums:
+
+            # TODO: node.description could be something like ffg_AB
+
+            nodeType = node.description.split('_')[0]
+
+            # if node.description in _implemented_sums:
+            if nodeType in _implemented_sums:
+                nelem = None
+                if nodeType == 'rho':
+                    nelem = 1
+                if nodeType == 'ffg':
+                    if len(node.components) == 2:
+                        nelem = 1
+                    elif len(node.components) == 3:
+                        nelem = 2
+                    else:
+                        raise NotImplementedError(
+                            "Only numElements <=2 supported currently"
+                        )
+
                 nodes.append(
-                    _implemented_sums[node.description](
+                    # _implemented_sums[node.description](
+                    #     name=node.description,
+                    _implemented_sums[nodeType](
                         name=node.description,
+                        elements=elements,
                         components=node.components,
-                        numParams=node.numParams,
+                        inputTypes=node.inputTypes,
+                        numParams=node.numFreeParams,
                         restrictions=node.restrictions,
                         paramRanges=node.paramRanges,
-                        bonds=node.bonds,
+                        # bonds=node.bonds,
+                        bonds=None,
+                        bondMapping='lambda x: x',
+                        numElements=nelem,
                         cutoffs=(2.4, 5.2),
-                        numElements=1,
-                        bc_type=bc_type
+                        bc_type=bc_type,
                     )
                 )
 
@@ -640,9 +710,11 @@ class SVTree(list):
 
         nodes = nodes[::-1]
 
+        # Resume: figure out, for each node, how to specify neighTypes
+
         # Check for single-node tree
         if isinstance(nodes[0], Summation):
-            return nodes[0].loop(atoms, evalType)
+            return nodes[0].loop(atoms, evalType, hostType)
 
         # Constructs a list-of-lists where each sub-list is a sub-tree for a
         # function at a given recursion depth. The first node of a sub-tree
@@ -660,13 +732,14 @@ class SVTree(list):
 
             # If the sub-tree is complete, evaluate its function
             while len(subTrees[-1]) == subTrees[-1][0].function.arity + 1:
+
                 args = []
                 for n in subTrees[-1][1:]:
                     if isinstance(n, Summation):
-                        eng = np.array([n.loop(atoms, 'energy')])
+                        eng = np.array([n.loop(atoms, 'energy', hostType)])
 
                         if evalType == 'forces':
-                            fcs = np.array([n.loop(atoms, evalType)])
+                            fcs = np.array([n.loop(atoms, evalType, hostType)])
                         else:
                             fcs = None
 
@@ -695,3 +768,206 @@ class SVTree(list):
                         return intermediateFcs
 
         raise RuntimeError("Something went wrong in tree evaluation")
+
+
+class MultiComponentTree(SVTree):
+    """
+    An extension of SVTree that accounts for additional complexities associated
+    with dealing with multi-component systems.
+
+    "MultiComponentTree" will be shorthanded as "MCT"
+
+    The main differences between MCT and SVTree:
+        1)  The MCT has different trees for each chemistry.
+        2)  When generating a random tree using a pool of SVNode objects, the
+            pool for MCT is extended to include each of the bond types
+            separately (e.g. FFG -> FFG_AA, FFG_AB, and FFG_BB).
+        3)  MCT will track the active "components" of each SVNode, that way it
+            can generate correct populations that don't include inactive
+            components (e.g. an MCT that only uses FFG_AA won't generate
+            parameters for the f_B component).
+        4)  The MCT needs some additional logic for parsing results and passing
+            them to the correct chemistry tree.
+        5)  Mate/mutate operations in an MCT can operate between chemistry
+            trees.
+
+    Note: when doing any looping over nodes or chemistry trees, it's assumed
+    that the looop will go over the trees in alphabetical order of chemical
+    name.
+
+    Attributes:
+        elements (list):
+            A sorted list of element names (e.g. ['Mo', 'Ti']). Since this list
+            is sorted, it will be used when looping over any dictionaries in the
+            MCT.
+    """
+
+    def __init__(self, elements):#, nodes=None):
+        self.elements = sorted(elements)
+        self.chemistryTrees = {el: None for el in self.elements}
+        self.treeNumParams = {el: None for el in self.elements}
+        self.cost = np.inf
+
+
+    @classmethod
+    def random(cls, svNodePool, elements, maxDepth=1):
+        """
+        Overloads SVTree.random() to generate random trees for each chemistry,
+        then to update the corresponding class attributes.
+        """
+
+        tree = cls(elements)
+
+        tree.chemistryTrees = {
+            el: SVTree.random(svNodePool, maxDepth=maxDepth)
+            for el in tree.elements
+        }
+
+        tree.updateSVNodes()
+
+        return tree
+
+    
+    def eval(self):
+        vals = [self.chemistryTrees[el].eval() for el in self.elements]
+
+        eng, fcs = zip(*vals)
+
+        # eng/fcs = [val for val in element_vals]
+        return eng, fcs
+        # return sum(eng), np.concatenate(fcs, axis=1)
+
+
+    def populate(self, N):
+        return np.hstack(
+            [self.chemistryTrees[el].populate(N) for el in self.elements]
+        )
+
+
+    def fillFixedKnots(self, population):
+        splits = np.cumsum([
+            self.chemistryTrees[el].totalNumFreeParams
+            for el in self.elements
+        ])
+        splitPop = np.array_split(population, splits, axis=1)
+
+        return np.hstack([
+            self.chemistryTrees[el].fillFixedKnots(splitPop[i])
+            for i,el in enumerate(self.elements)
+        ])
+
+    
+    def parseArr2Dict(self, rawPopulation, fillFixedKnots=True):
+        splitIndices = np.cumsum([
+            self.chemistryTrees[el].totalNumFreeParams if fillFixedKnots
+            else self.chemistryTrees[el].totalNumParams
+            for el in self.elements
+        ])
+
+        splitIndices = np.concatenate([[0], splitIndices])
+
+        # splitPop = np.split(rawPopulation, splitIndices, axis=1)
+        splitPop = []
+        for i in range(splitIndices.shape[0]-1):
+            start = splitIndices[i]
+            stop  = splitIndices[i+1]
+
+            splitPop.append(rawPopulation[:, start:stop])
+
+        subDicts = {
+            el: self.chemistryTrees[el].parseArr2Dict(splitPop[i])
+            for i,el in enumerate(self.elements)
+        }
+
+        return subDicts
+
+
+    def crossover(self, donor):
+        """
+        For MCTree, crossover does not necessarily need to be within trees of
+        the same host element type. Crossover is performed by choosing a random
+        from both parents.
+        """
+
+        parentTree1 = random.choice(list(self.chemistryTrees.values()))
+        parentTree2 = random.choice(list(donor.chemistryTrees.values()))
+
+        parentTree1.crossover(parentTree2)
+
+
+    def pointMutate(self, svNodePool, mutProb):
+        for tree in self.chemistryTrees.values():
+            tree.pointMutate(svNodePool, mutProb)
+
+
+    def updateSVNodes(self):
+
+        self.nodes = {
+            el: self.chemistryTrees[el].nodes
+            for el in self.elements
+        }
+
+        for tree in self.chemistryTrees.values():
+            tree.updateSVNodes()
+
+        self.svNodes = list(itertools.chain.from_iterable(
+            [self.chemistryTrees[el].svNodes for el in self.elements]
+        ))
+
+        self.numFreeParams = {
+            el: sum([
+                n.totalNumFreeParams
+                for n in self.chemistryTrees[el].svNodes
+            ])
+            for el in self.elements
+        }
+
+        self.numParams = {
+            el: sum([
+                n.totalNumParams
+                for n in self.chemistryTrees[el].svNodes
+            ])
+            for el in self.elements
+        }
+
+        self.totalNumFreeParams = sum(self.numFreeParams.values())
+        self.totalNumParams = sum(self.numParams.values())
+
+
+    def directEvaluation(self, y, atoms, evalType, bc_type):
+        splits = np.cumsum([
+            self.chemistryTrees[el].totalNumParams for el in self.elements
+        ])
+
+        splitPop = np.array_split(y, splits)
+
+        return sum([
+            self.chemistryTrees[el].directEvaluation(
+                splitPop[ii], atoms, evalType, bc_type, self.elements,
+                hostType=el
+            )
+            for ii, el in enumerate(self.elements)
+        ])
+
+
+    def __str__(self):
+        return ' + '.join([
+            '<{}> {}'.format(
+                el, str(self.chemistryTrees[el])
+            )
+            for el in self.elements
+        ])
+
+    
+    def __repr__(self):
+        return str(self)
+
+
+    def latex(self):
+        return {el: self.chemistryTrees[el].latex() for el in self.elements}
+        # return ' + '.join([
+        #     '{}: {}'.format(
+        #         el, self.chemistryTrees[el].latex()
+        #     )
+        #     for el in self.elements
+        # ])

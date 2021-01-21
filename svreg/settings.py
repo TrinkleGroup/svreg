@@ -26,7 +26,7 @@ _valid_options = {
     'PROCS_PER_PHYS_NODE': Option(
         'PROCS_PER_PHYS_NODE', int, (1,), 32,
         'The number of cores on a physical compute node. The number of'\
-            ' compute nodes assigned to each Manager is euqal to'\
+            ' compute nodes assigned to each Manager is equal to'\
                 ' (PROCS_PER_MANAGER / PROCS_PER_PHYS_NODE.'
     ),
     'seed' : Option(
@@ -94,7 +94,7 @@ _valid_options = {
                 ' well; too many, and the regressor may be slow.'
     ),
     'maxTreeDepth': Option(
-        'maxTreeDepth', int, (1,), [1, 3],
+        'maxTreeDepth', int, (0,), [0, 3],
         'The maximum allowed tree depth. Trees should be kept relatively '\
             'shallow to encourage speed and interpretability of the final '\
                 'potential form.'
@@ -107,12 +107,12 @@ _valid_options = {
                     'available computational resources, then stop early '\
                         'if regressor begins to converge.'
     ),
-    'numOptimizerSteps': Option(
-        'numOptimizerSteps', int, None, [10, 100],
-        'The number of steps to take when optimizing tree parameters.'\
-            'Should be kept relatively small. The final tree should be '\
-                're-parameterized anyways, so "sloppy" trees are okay '\
-                    'during regression.'
+    'maxNumOptimizerSteps': Option(
+        'maxNumOptimizerSteps', int, None, [100, 1000],
+        'The maximum number of steps to take when optimizing tree parameters.'\
+            'Should be kept relatively small, but large enough that the tree'\
+                'is mostly converged. The final tree should be polished later'\
+                    'anyways, so "sloppy" trees are okay during regression.'
     ),
     'energyWeight': Option(
         'energyWeight', float, (0,), 1,
@@ -266,14 +266,16 @@ class Settings(dict):
             option.printInfo()
         print('-'*20)
 
-    @staticmethod
+    # @staticmethod
     def printSettings(self):
         for key, val in self.items():
             option = _valid_options[key]
 
             print(
-                '{} (type: {}, value: {}):\n\n{}\n'.format(
-                    key, option.allowedType, val, option.info()
+                '{}: {}'.format(
+                    key, val
+                # '{} (type: {}, value: {}):\n{}\n'.format(
+                #     key, option.allowedType, val, option.message
                 )
             )
 
