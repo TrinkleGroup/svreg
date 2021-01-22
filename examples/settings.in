@@ -16,12 +16,10 @@ runType     GA
 # refStruct           Ground_state_crystal
 # databasePath        ../svreg_data/mlearn/Mo/Mo.hdf5-fixed-newformat0
 
-refStruct           Ti48Mo80_type1_c10
-databasePath        ../svreg_data/hyojung/hj.hdf5-fixed-f32
-# refStruct           Ti56Mo72_type2_c10
-# databasePath        ../svreg_data/hyojung/hj.hdf5-fixed-f32-mini0
-# databasePath        ../svreg_data/hyojung/hj.hdf5-fixed-f32-superarray
-# databasePath        ../svreg_data/hyojung/hj.hdf5-fixed-f32-new-redo0-superarray-mini
+# refStruct           Ti48Mo80_type1_c10
+# databasePath        ../svreg_data/hyojung/hj.hdf5-fixed-f32
+refStruct           B2
+databasePath        ../svreg_data/hyojung/hj.hdf5-fixed-f32-mini-full
 
 outputPath          ./results/debug
 overwrite           True

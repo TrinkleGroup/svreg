@@ -38,9 +38,10 @@ class Summation:
         components (list):
             A list of the names of the different components of the SV.
 
-        inputTypes (set):
+        inputTypes (dict):
             The set of allowed neighbor element types. Used for looping over
-            only the specified neighbor types.
+            only the specified neighbor types. key=component name, value=list of
+            inputs for that component.
 
         numParams (dict):
             A dictionary where the key is the name of a component, and the value
@@ -76,10 +77,23 @@ class Summation:
 
         self.name           = name
 
-        self.inputTypes     = list(set([
-            t.decode('utf-8') if isinstance(t, bytes) else t
-            for t in inputTypes
-        ]))
+        if isinstance(inputTypes, dict):
+            self.inputTypes = inputTypes
+        elif isinstance(inputTypes, list):
+            self.inputTypes = {
+                c: t for c,t in zip(components, inputTypes)
+            }
+        else:
+            raise RuntimeError(
+                "inputTypes should be dict or list; was {}".format(
+                    type(inputTypes)
+                )
+            )
+
+        # Used for looping only over selected neighbor types
+        self._inputTypesSet = set(itertools.chain.from_iterable(
+            self.inputTypes.values()
+        ))
 
         # By sorting these two lists, it ensures that the components can be
         # indexed in order to identify which elements single-input components
@@ -247,8 +261,9 @@ class FFG(Summation):
                 jtype = atomTypes[j]
                 jtypeStr = atomTypesStrings[j]
 
-                if atomTypesStrings[j] not in self.inputTypes:
-                    continue
+                if hostType is not None:
+                    if atomTypesStrings[j] not in self._inputTypesSet:
+                        continue
 
                 self.fjSpline = self.fSplines[jtypeStr]
 
@@ -277,9 +292,13 @@ class FFG(Summation):
                     ktype = atomTypes[k]
                     ktypeStr = atomTypesStrings[k]
 
-                    neighTypes = list(set([atomTypesStrings[j], atomTypesStrings[k]]))
-                    if neighTypes != self.inputTypes:
-                        continue
+                    if hostType is not None:
+                        neighTypes = set([
+                            atomTypesStrings[j], atomTypesStrings[k]
+                        ])
+
+                        if neighTypes != self._inputTypesSet:
+                            continue
 
                     # TODO: need to make sure that AB and BA both point to the
                     # same gSPline
@@ -577,9 +596,10 @@ class Rho(Summation):
                 jtype = atomTypes[j]
                 jtypeStr = atomTypesStrings[j]
 
-                if atomTypesStrings[j] not in self.inputTypes:
-                    print('uh...', atomTypesStrings[j], self.inputTypes)
-                    continue
+                if hostType is not None:
+                    if atomTypesStrings[j] not in self._inputTypesSet:
+                        print('uh...', atomTypesStrings[j], self._inputTypesSet)
+                        continue
 
                 self.rho = self.splines[jtypeStr]
 
