@@ -1,3 +1,4 @@
+import json
 import random
 import numpy as np
 from copy import deepcopy
@@ -488,7 +489,10 @@ def buildSVNodePool(database):
                 numParams=numParams,
                 restrictions=restr,
                 paramRanges=pRanges,
-                inputTypes=database.attrs[svName]['inputTypes']
+                # inputTypes=database.attrs[svName]['inputTypes']
+                inputTypes=json.loads(
+                    database.attrs[svName]['inputTypes'].decode('utf-8').replace("'", '"')
+                )
             )
         )
 
