@@ -217,40 +217,48 @@ class SVTree(list):
         return np.hstack(population)
 
 
-    def parseDict2Arr(self, population, N):
-        """
-        Converts a dictionary of {svName: np.vstack-ed array of parameters} to
-        a 2D array form. Useful for passing to Optimizer objects.
+    # def parseDict2Arr(self, population, N):
+    #     """
 
-        Args:
-            population (dict):
-                {svName: np.vstack-ed array of parameters}
+    #     TODO: I think this function isn't actually needed; I instead have just
+    #     been keeping track of the "rawPopulation" that was originally parsed
+    #     into a dictionary
 
-            N (int):
-                The number of parameter sets generated for each node.
-        """
 
-        # Split the populations for each SV type
-        for svName in population:
-            population[svName] = np.split(population[svName], N)
+    #     Converts a dictionary of {svName: np.vstack-ed array of parameters} to
+    #     a 2D array form. Useful for passing to Optimizer objects.
 
-        # Now build an ordered horizontal array of shape (N, ?)
-        # where the second dimension depends on the structure of the tree.
-        array = []
-        for svNode in self.svNodes:
-            array.append(population[svNode.description].pop())
+    #     Args:
+    #         population (dict):
+    #             {svName: np.vstack-ed array of parameters}
 
-        # Error checking to see if something went wrong
-        for svName in population:
-            leftovers = len(population[svName])
-            if leftovers > 0:
-                raise RuntimeError(
-                    'SV {} had {} extra parameter set(s)'.format(
-                        svName, leftovers
-                    )
-                )
+    #         N (int):
+    #             The number of parameter sets generated for each node.
+    #     """
 
-        return np.hstack(array)
+    #     # Split the populations for each SV type
+    #     for svName in population:
+    #         population[svName] = np.split(
+    #             population[svName], population[svName].shape[0]//N
+    #         )
+
+    #     # Now build an ordered horizontal array of shape (N, ?)
+    #     # where the second dimension depends on the structure of the tree.
+    #     array = []
+    #     for svNode in self.svNodes:
+    #         array.append(population[svNode.description].pop())
+
+    #     # Error checking to see if something went wrong
+    #     for svName in population:
+    #         leftovers = len(population[svName])
+    #         if leftovers > 0:
+    #             raise RuntimeError(
+    #                 'SV {} had {} extra parameter set(s)'.format(
+    #                     svName, leftovers
+    #                 )
+    #             )
+
+    #     return np.hstack(array)
 
     
     def fillFixedKnots(self, population):
@@ -621,7 +629,7 @@ class SVTree(list):
         ])
 
 
-    def directEvaluation(self, y, atoms, evalType, bc_type, elements, hostType=None):
+    def directEvaluation(self, y, atoms, evalType, bc_type, cutoffs, hostType=None):
         """
         Evaluates a tree by performing SV summations directly, rather than
         using the SV representation.
@@ -641,8 +649,9 @@ class SVTree(list):
                 conditions for LHS boundaries of radial functions and for both
                 boundaries of non-radial functions.
 
-            elements (list):
-                A list of strings of all elements in the system.
+            cutoffs (list):
+                The low/high cutoff ranges for the splines. Note that splines
+                perform linear extrapolation outside of this range.
 
             hostType (str):
                 Used to work with multi-component trees, where a Summation
@@ -689,7 +698,9 @@ class SVTree(list):
                     #     name=node.description,
                     _implemented_sums[nodeType](
                         name=node.description,
-                        elements=elements,
+                        # elements=elements,
+                        elements=list(set(itertools.chain.from_iterable(
+                            node.inputTypes.values()))),
                         components=node.components,
                         inputTypes=node.inputTypes,
                         numParams=node.numFreeParams,
@@ -699,7 +710,7 @@ class SVTree(list):
                         bonds=None,
                         bondMapping='lambda x: x',
                         numElements=nelem,
-                        cutoffs=(2.4, 5.2),
+                        cutoffs=cutoffs,
                         bc_type=bc_type,
                     )
                 )
@@ -775,7 +786,7 @@ class MultiComponentTree(SVTree):
     An extension of SVTree that accounts for additional complexities associated
     with dealing with multi-component systems.
 
-    "MultiComponentTree" will be shorthanded as "MCT"
+    "MultiComponentTree" will be shorthanded as "MCTree"
 
     The main differences between MCT and SVTree:
         1)  The MCT has different trees for each chemistry.
@@ -803,6 +814,7 @@ class MultiComponentTree(SVTree):
     """
 
     def __init__(self, elements):#, nodes=None):
+
         self.elements = sorted(elements)
         self.chemistryTrees = {el: None for el in self.elements}
         self.treeNumParams = {el: None for el in self.elements}
@@ -934,7 +946,7 @@ class MultiComponentTree(SVTree):
         self.totalNumParams = sum(self.numParams.values())
 
 
-    def directEvaluation(self, y, atoms, evalType, bc_type):
+    def directEvaluation(self, y, atoms, evalType, bc_type, cutoffs):
         splits = np.cumsum([
             self.chemistryTrees[el].totalNumParams for el in self.elements
         ])
@@ -943,7 +955,7 @@ class MultiComponentTree(SVTree):
 
         return sum([
             self.chemistryTrees[el].directEvaluation(
-                splitPop[ii], atoms, evalType, bc_type, self.elements,
+                splitPop[ii], atoms, evalType, bc_type, cutoffs,
                 hostType=el
             )
             for ii, el in enumerate(self.elements)

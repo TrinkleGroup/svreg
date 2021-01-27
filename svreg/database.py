@@ -42,7 +42,7 @@ class SVDatabase(dict):
 
         structNames = list(h5pyFile.keys())
         svNames =  list(h5pyFile[structNames[0]].keys())
-        elements = list(h5pyFile[structNames[0]][svNames[0]].keys())
+        elements = sorted(list(h5pyFile[structNames[0]][svNames[0]].keys()))
 
         self.trueValues = {}
         for struct in structNames:
@@ -69,8 +69,7 @@ class SVDatabase(dict):
 
         structNames = self.attrs['structNames']
         svNames = self.attrs['svNames']
-
-        elements = list(h5pyFile[structNames[0]][svNames[0]].keys())
+        elements = self.attrs['elements']
 
         futures = []
         for struct in structNames:

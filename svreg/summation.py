@@ -83,9 +83,14 @@ class Summation:
             self.inputTypes = {
                 c: t for c,t in zip(components, inputTypes)
             }
+        elif isinstance(inputTypes, np.ndarray):
+            cleanedTypes = inputTypes.tolist()
+            self.inputTypes = {
+                c: t.decode('utf-8') for c,t in zip(components, cleanedTypes)
+            }
         else:
             raise RuntimeError(
-                "inputTypes should be dict or list; was {}".format(
+                "inputTypes should be dict, list, or numpy.ndarray; was {}".format(
                     type(inputTypes)
                 )
             )
@@ -99,6 +104,15 @@ class Summation:
         # indexed in order to identify which elements single-input components
         # correspond to without having to use another data structure. Note that
         # currently 
+
+        # TODO: shouldn't use sorting; might need to assume they're already
+        # sorted here. A problem came up where the database constructor didn't
+        # sort the elements alphabetically, which caused the input types to
+        # with the ones here since they're sorted here
+
+        # TODO: GA assumes sorted elements for computing errors
+
+        # self.elements       = elements
         self.elements       = sorted(elements)
         self.components     = sorted(components)
 
@@ -157,6 +171,10 @@ class FFG(Summation):
 
             # TODO: currently assumes components is only [f_A, g_AA]; won't be
             # true for multi-component
+
+            # TODO: I think this code is only working right now because all of
+            # the splines of a given type (F or G) have the same number of
+            # parameters and the same restrictions
 
             self.fSplines[el1] = Spline(
                 knots=np.linspace(
@@ -257,6 +275,8 @@ class FFG(Summation):
 
             jIdx = 0
             for j, offsetj in zip(neighbors, offsets):
+                jIdx += 1
+
                 # j = atomic ID, so it can be used for indexing
                 jtype = atomTypes[j]
                 jtypeStr = atomTypesStrings[j]
@@ -274,12 +294,6 @@ class FFG(Summation):
                 rij = np.sqrt(jvec[0]**2 + jvec[1]**2 + jvec[2]**2)
                 jvec /= rij
 
-                # Construct a list of vectors for each component, then combine
-                # for each bond
-
-                # Since it assumed that each spline has the same number of knots
-                # and that each radial spline has the same cutoffs, we don't
-                # need to worry about indexing the components properly
                 if (evalType == 'energy') or (evalType == 'forces'):
                     fjVal = self.fjSpline(rij)
                     partialsum = 0.0
@@ -287,7 +301,6 @@ class FFG(Summation):
                     fjPrime = self.fjSpline(rij, 1)
                     jForces = np.zeros((3,))
                
-                jIdx += 1
                 for k, offsetk in zip(neighbors[jIdx:], offsets[jIdx:]):
                     ktype = atomTypes[k]
                     ktypeStr = atomTypesStrings[k]
@@ -299,12 +312,6 @@ class FFG(Summation):
 
                         if neighTypes != self._inputTypesSet:
                             continue
-
-                    # TODO: need to make sure that AB and BA both point to the
-                    # same gSPline
-
-                    # TODO: the problem is that ktype indexes into 1, but there
-                    # aren't that many inputTypes
 
                     self.fkSpline = self.fSplines[ktypeStr]
 
@@ -513,10 +520,28 @@ class FFG(Summation):
 
 
 class Rho(Summation):
+    """
+    A two-body summation that loops over all neighbors for all atoms. Note that
+    this summation allows double counting of bonds, meaning i->j and i<-j are
+    both counted.
+    """
+
     def  __init__(self, *args, **kwargs):
         Summation.__init__(self, *args, **kwargs)
 
         self.splines = {}
+
+        # Note: a Rho Summation will only ever have one spline since it's based
+        # on the neighbor type
+
+        """
+        TODO: the problem is that Summation is being used to construct the
+        database AND to evaluate a tree. In the first case, 'elements' will be
+        the elements in the system so that it builds the Rho SV for all
+        elements, but in the second case 'elements' is only the elements being
+        used for the given neighbor types.
+        """
+
         for el in kwargs['elements']:
             self.splines[el] = Spline(
                 knots=np.linspace(
@@ -570,10 +595,12 @@ class Rho(Summation):
         elif evalType == 'forces':
             forces = np.zeros((N, 3))
 
-        # No double counting allowed
+        # Note that double counting is always allowed, but it must be done
+        # manually (rather than directly multiplying each bond by 2)
+
         nl = NeighborList(
             np.ones(N)*(self.cutoffs[-1]/2.),
-            self_interaction=False, bothways=False, skin=0.0
+            self_interaction=False, bothways=True, skin=0.0
         )
 
         nl.update(atoms)
@@ -598,7 +625,6 @@ class Rho(Summation):
 
                 if hostType is not None:
                     if atomTypesStrings[j] not in self._inputTypesSet:
-                        print('uh...', atomTypesStrings[j], self._inputTypesSet)
                         continue
 
                 self.rho = self.splines[jtypeStr]
@@ -624,8 +650,12 @@ class Rho(Summation):
                     self.add_to_forces_sv(forcesSV[bondType], rij, -jvec, j, i)
                     self.add_to_forces_sv(forcesSV[bondType], rij, -jvec, j, j)
                 elif evalType == 'energy':
-                    # Double count; i w.r.t j + j w.r.t. i
-                    totalEnergy += self.rho(rij)*2
+                    # Note: i->j == i<-j iff i and j are the same element
+                    # type. If they are different types, then they need to be
+                    # evaluated with different Rho splines, which is why you
+                    # can't simply multiply by 2 here
+
+                    totalEnergy += self.rho(rij)
                 elif evalType == 'forces':
                     rhoPrimeI = self.splines[itype](rij, 1)
                     rhoPrimeJ = self.splines[jtype](rij, 1)
@@ -663,18 +693,9 @@ class Rho(Summation):
         ])[:-1]
         splitParams = np.array_split(params, splits)
 
-        # rhoCopy = list(self.splines[::-1])
-
-        rhoIndexer = 0
+        # A Rho Summation will only ever have one spline
         for y, cname in zip(splitParams, self.components):
-            self.splines[self.elements[rhoIndexer]].buildDirectEvaluator(y)
-            rhoIndexer += 1
-
-            # if isinstance(cname, bytes):
-            #     cname = cname.decode('utf-8')
-            
-            # rhoCopy[-1].buildDirectEvaluator(y)
-            # rhoCopy.pop()
+            self.splines[self.inputTypes[cname][0]].buildDirectEvaluator(y)
 
 
 class Spline:

@@ -154,7 +154,7 @@ sig   = _Function(function=sigmoid, name='sig', arity=1)
 softplus = _Function(function=splus, name='softplus', arity=1)
 
 _function_map = {'add': add2,
-                #  'mul': mul2,
+                 'mul': mul2,
                 #  'sqrt': sqrt1,
                  # 'log': log1,
                  # 'inv': inv1,
@@ -164,7 +164,7 @@ _function_map = {'add': add2,
                 # 'arctan': arctan1,
                 # 'exp': exp,
                 # 'sig': sig,
-                'softplus': softplus
+                # 'softplus': softplus
                  }
 
 _arities = {
@@ -178,11 +178,11 @@ _arities = {
         # 'arctan',
         # 'exp',
         # 'sig',
-        'softplus',
+        # 'softplus',
     ],
     2: [
         'add',
-        # 'mul'
+        'mul'
     ],
 }
 

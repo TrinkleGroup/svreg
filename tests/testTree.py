@@ -3,10 +3,15 @@ import numpy as np
 from copy import deepcopy
 
 from ase import Atoms
+from ase.build import bulk
+from ase.neighborlist import NeighborList
 
 from svreg.tree import SVTree
+from svreg.tree import MultiComponentTree as MCTree
 from svreg.nodes import FunctionNode, SVNode
 from svreg.exceptions import StaleValueException
+
+from tests._testStructs import _all_test_structs
 
 
 class Test_SVTree(unittest.TestCase):
@@ -159,12 +164,12 @@ class Test_SVTree(unittest.TestCase):
 
 
     def test_parseDict2Arr(self):
-        population  = self.tree.populate(100)
+        population  = self.tree.populate(3)
         popDict     = self.tree.parseArr2Dict(population, fillFixedKnots=True)
 
-        population2 = self.tree.parseDict2Arr(popDict, 100)
-
-        np.testing.assert_equal(population, population2)
+        # TODO: dummy test for now to assure no errors thrown; it's hard to
+        # verify that popDict is correct without manually re-creating it, which
+        # seems dumb to do
 
 
 class Test_SVTree_Real(unittest.TestCase):
@@ -177,25 +182,20 @@ class Test_SVTree_Real(unittest.TestCase):
             numParams=[9],
             restrictions=[(6, 0), (8, 0)],
             paramRanges=[None],
-            inputTypes=['Mo'],
+            inputTypes={'rho_A': ['H']},
         )
 
         self.ffgNode = SVNode(
             description='ffg',
             components=['f_A', 'g_AA'],
             constructor=['f_A', 'f_A', 'g_AA'],
-            numParams=[9, 9, 9],
+            numParams=[9, 9],
             restrictions=[[(6, 0), (8, 0)], []],
             paramRanges=[None, None],
-            inputTypes=['Mo'],
+            inputTypes={'f_A': ['H'], 'g_AA': ['H', 'H']},
         )
 
-        r0 = 3.0
-        dimer_aa = Atoms([1, 1], positions=[[0, 0, 0], [r0, 0, 0]]) 
-        dimer_aa.set_chemical_symbols(['Mo', 'Mo'])
-
-        self.dimer = dimer_aa
-
+        self.cutoffs = [1.0, 3.0]
     
     def test_directEval_onerho_dimer(self):
 
@@ -208,13 +208,178 @@ class Test_SVTree_Real(unittest.TestCase):
 
         eng = tree.directEvaluation(
             np.array([1, 1, 1, 1, 1, 1, 1, 0, 0]),
-            self.dimer,
+            _all_test_structs['aa'],
             evalType='energy',
             bc_type='fixed',
-            elements=['Mo'],
+            cutoffs=self.cutoffs,
         )
 
         self.assertEqual(eng, 2.0)
+
+    
+    def test_directEval_oneffg_dimer(self):
+        tree = SVTree(nodes=[deepcopy(self.ffgNode)])
+ 
+        eng = tree.directEvaluation(
+            np.concatenate([
+                np.array([1, 1, 1, 1, 1, 1, 1, 0, 0]),
+                np.array([2, 2, 2, 2, 2, 2, 2, 0, 0]),
+            ]),
+            _all_test_structs['aa'],
+            evalType='energy',
+            bc_type='fixed',
+            cutoffs=self.cutoffs,
+        )
+
+        self.assertEqual(eng, 0.0)
+
+    
+    def test_directEval_oneffg_trimer(self):
+        tree = SVTree(nodes=[deepcopy(self.ffgNode)])
+ 
+        eng = tree.directEvaluation(
+            np.concatenate([
+                np.array([1, 1, 1, 1, 1, 1, 1, 0, 0]),
+                np.array([2, 2, 2, 2, 2, 2, 2, 0, 0]),
+            ]),
+            _all_test_structs['aaa'],
+            evalType='energy',
+            bc_type='fixed',
+            cutoffs=self.cutoffs,
+        )
+
+        self.assertEqual(eng, 6.0)
+    
+    
+    def test_directEval_twoffg_trimer(self):
+        tree = SVTree(nodes=[
+            FunctionNode('add'),
+            deepcopy(self.ffgNode),
+            deepcopy(self.ffgNode),
+        ])
+ 
+        eng = tree.directEvaluation(
+            np.concatenate([
+                np.array([1, 1, 1, 1, 1, 1, 1, 0, 0]),
+                np.array([2, 2, 2, 2, 2, 2, 2, 0, 0]),
+                np.array([3, 3, 3, 3, 3, 3, 3, 0, 0]),
+                np.array([4, 4, 4, 4, 4, 4, 4, 0, 0]),
+            ]),
+            _all_test_structs['aaa'],
+            evalType='energy',
+            bc_type='fixed',
+            cutoffs=self.cutoffs,
+        )
+
+        self.assertEqual(eng, 114.0)
+    
+
+    def test_directEval_onerho_bvo1(self):
+        tree = SVTree(
+            nodes=[
+                deepcopy(self.rhoNode),
+            ],
+        )
+
+
+        eng = tree.directEvaluation(
+            np.array([1, 1, 1, 1, 1, 1, 1, 0, 0]),
+            _all_test_structs['bulk_vac_ortho_type1'],
+            evalType='energy',
+            bc_type='fixed',
+            cutoffs=self.cutoffs,
+        )
+
+        # Expected energy = 2*number_of_bonds
+        # number_of_bonds = N*(N-1)
+        n = len(_all_test_structs['bulk_vac_ortho_type1'])
+
+        nl = NeighborList(
+            np.ones(n)*(self.cutoffs[-1]/2.),
+            self_interaction=False, bothways=True, skin=0.0
+        )
+
+        nl.update(_all_test_structs['bulk_vac_ortho_type1'])
+
+        self.assertEqual(eng, np.sum(nl.get_connectivity_matrix()))
+
+
+    def test_directEval_tworho_bvo1(self):
+        tree = SVTree(
+            nodes=[
+                FunctionNode('add'),
+                deepcopy(self.rhoNode),
+                deepcopy(self.rhoNode),
+            ],
+        )
+
+
+        eng = tree.directEvaluation(
+            np.concatenate([
+                np.array([1, 1, 1, 1, 1, 1, 1, 0, 0]),
+                np.array([1, 1, 1, 1, 1, 1, 1, 0, 0]),
+            ]),
+            _all_test_structs['bulk_vac_ortho_type1'],
+            evalType='energy',
+            bc_type='fixed',
+            cutoffs=self.cutoffs,
+        )
+
+        n = len(_all_test_structs['bulk_vac_ortho_type1'])
+
+        nl = NeighborList(
+            np.ones(n)*(self.cutoffs[-1]/2.),
+            self_interaction=False, bothways=True, skin=0.0
+        )
+
+        nl.update(_all_test_structs['bulk_vac_ortho_type1'])
+
+        self.assertEqual(eng, 2*np.sum(nl.get_connectivity_matrix()))
+
+
+     
+    def test_directEval_onerho_trimer(self):
+
+        tree = SVTree(
+            nodes=[
+                deepcopy(self.rhoNode),
+            ],
+        )
+
+        eng = tree.directEvaluation(
+            np.array([1, 1, 1, 1, 1, 1, 1, 0, 0]),
+            _all_test_structs['aaa'],
+            evalType='energy',
+            bc_type='fixed',
+            cutoffs=self.cutoffs,
+        )
+
+        self.assertEqual(eng, 6.0)
+
+       
+    def test_directEval_tworho_trimer(self):
+
+        tree = SVTree(
+            nodes=[
+                FunctionNode('add'),
+                deepcopy(self.rhoNode),
+                deepcopy(self.rhoNode),
+            ],
+        )
+
+
+        eng = tree.directEvaluation(
+            np.concatenate([
+                np.array([1, 1, 1, 1, 1, 1, 1, 0, 0]),
+                np.array([1, 1, 1, 1, 1, 1, 1, 0, 0]),
+            ]),
+            _all_test_structs['aaa'],
+            evalType='energy',
+            bc_type='fixed',
+            cutoffs=self.cutoffs,
+        )
+
+        self.assertEqual(eng, 12.0)
 
     
     def test_directEval_tworho_dimer(self):
@@ -233,13 +398,424 @@ class Test_SVTree_Real(unittest.TestCase):
                 np.array([1, 1, 1, 1, 1, 1, 1, 0, 0]),
                 np.array([1, 1, 1, 1, 1, 1, 1, 0, 0]),
             ]),
-            self.dimer,
+            _all_test_structs['aa'],
             evalType='energy',
             bc_type='fixed',
-            elements=['Mo'],
+            cutoffs=self.cutoffs,
         )
 
         self.assertEqual(eng, 4.0)
+
+
+class Test_MCTree_Real(unittest.TestCase):
+
+    def setUp(self):
+        self.rho_A = SVNode(
+            description='rho_A',
+            components=['rho_A'],
+            constructor=['rho_A'],
+            numParams=[9],
+            restrictions=[(6, 0), (8, 0)],
+            paramRanges=[None],
+            inputTypes={'rho_A': ['H']},
+        )
+
+        self.rho_B = SVNode(
+            description='rho_B',
+            components=['rho_B'],
+            constructor=['rho_B'],
+            numParams=[9],
+            restrictions=[(6, 0), (8, 0)],
+            paramRanges=[None],
+            inputTypes={'rho_B': ['He']},
+        )
+
+        self.ffg_AA = SVNode(
+            description='ffg_AA',
+            components=['f_A', 'g_AA'],
+            constructor=['f_A', 'f_A', 'g_AA'],
+            numParams=[9, 9],
+            restrictions=[[(6, 0), (8, 0)], []],
+            paramRanges=[None, None],
+            inputTypes={'f_A': ['H'], 'g_AA': ['H', 'H']},
+        )
+
+
+        self.ffg_AB = SVNode(
+            description='ffg_AB',
+            components=['f_A', 'f_B', 'g_AB'],
+            constructor=['f_A', 'f_B', 'g_AB'],
+            numParams=[9, 9, 9],
+            restrictions=[[(6, 0), (8, 0)], [(6, 0), (8, 0)], []],
+            paramRanges=[None, None, None],
+            inputTypes={'f_A': ['H'], 'f_B': ['He'], 'g_AB': ['H', 'He']},
+        )
+
+
+        self.ffg_BB = SVNode(
+            description='ffg_BB',
+            components=['f_B', 'g_BB'],
+            constructor=['f_B', 'f_B', 'g_BB'],
+            numParams=[9, 9],
+            restrictions=[[(6, 0), (8, 0)], []],
+            paramRanges=[None, None],
+            inputTypes={'f_B': ['He'], 'g_BB': ['He', 'He']},
+        )
+
+        self.cutoffs = [1.0, 3.0]
+
+
+    def test_directEval_rho_a_rho_a_dimer_aa(self):
+
+        tree = MCTree(['H', 'He'])
+        
+        subtree1 = SVTree(nodes=[deepcopy(self.rho_A)])
+        subtree2 = SVTree(nodes=[deepcopy(self.rho_A)])
+
+        tree.chemistryTrees['H']    = subtree1
+        tree.chemistryTrees['He']   = subtree2
+
+        tree.updateSVNodes()
+
+        eng = tree.directEvaluation(
+            np.concatenate([
+                np.array([1, 1, 1, 1, 1, 1, 1, 0, 0]),  # H
+                np.array([2, 2, 2, 2, 2, 2, 2, 0, 0]),  # He
+            ]),
+            _all_test_structs['aa'],
+            evalType='energy',
+            bc_type='fixed',
+            cutoffs=self.cutoffs,
+        )
+
+        self.assertEqual(eng, 2.0)
+          
+    def test_directEval_rho_a_rho_a_dimer_ab(self):
+
+        tree = MCTree(['H', 'He'])
+        
+        subtree1 = SVTree(nodes=[deepcopy(self.rho_A)])
+        subtree2 = SVTree(nodes=[deepcopy(self.rho_A)])
+
+        tree.chemistryTrees['H']    = subtree1
+        tree.chemistryTrees['He']   = subtree2
+
+        tree.updateSVNodes()
+
+        eng = tree.directEvaluation(
+            np.concatenate([
+                np.array([1, 1, 1, 1, 1, 1, 1, 0, 0]),  # H
+                np.array([2, 2, 2, 2, 2, 2, 2, 0, 0]),  # He
+            ]),
+            _all_test_structs['ab'],
+            evalType='energy',
+            bc_type='fixed',
+            cutoffs=self.cutoffs,
+        )
+
+        self.assertEqual(eng, 2.0)
+
+             
+    def test_directEval_rho_a_rho_a_dimer_bb(self):
+
+        tree = MCTree(['H', 'He'])
+        
+        subtree1 = SVTree(nodes=[deepcopy(self.rho_A)])
+        subtree2 = SVTree(nodes=[deepcopy(self.rho_A)])
+
+        tree.chemistryTrees['H']    = subtree1
+        tree.chemistryTrees['He']   = subtree2
+
+        tree.updateSVNodes()
+
+        eng = tree.directEvaluation(
+            np.concatenate([
+                np.array([1, 1, 1, 1, 1, 1, 1, 0, 0]),  # H
+                np.array([2, 2, 2, 2, 2, 2, 2, 0, 0]),  # He
+            ]),
+            _all_test_structs['bb'],
+            evalType='energy',
+            bc_type='fixed',
+            cutoffs=self.cutoffs,
+        )
+
+        self.assertEqual(eng, 0.0)
+     
+              
+    def test_directEval_rho_a_rho_b_dimer_aa(self):
+
+        tree = MCTree(['H', 'He'])
+        
+        subtree1 = SVTree(nodes=[deepcopy(self.rho_A)])
+        subtree2 = SVTree(nodes=[deepcopy(self.rho_B)])
+
+        tree.chemistryTrees['H']    = subtree1
+        tree.chemistryTrees['He']   = subtree2
+
+        tree.updateSVNodes()
+
+        eng = tree.directEvaluation(
+            np.concatenate([
+                np.array([1, 1, 1, 1, 1, 1, 1, 0, 0]),  # H
+                np.array([2, 2, 2, 2, 2, 2, 2, 0, 0]),  # He
+            ]),
+            _all_test_structs['aa'],
+            evalType='energy',
+            bc_type='fixed',
+            cutoffs=self.cutoffs,
+        )
+
+        self.assertEqual(eng, 2.0)
+
+             
+    def test_directEval_rho_a_rho_b_dimer_ab(self):
+
+        tree = MCTree(['H', 'He'])
+        
+        subtree1 = SVTree(nodes=[deepcopy(self.rho_A)])
+        subtree2 = SVTree(nodes=[deepcopy(self.rho_B)])
+
+        tree.chemistryTrees['H']    = subtree1
+        tree.chemistryTrees['He']   = subtree2
+
+        tree.updateSVNodes()
+
+        eng = tree.directEvaluation(
+            np.concatenate([
+                np.array([1, 1, 1, 1, 1, 1, 1, 0, 0]),  # H
+                np.array([2, 2, 2, 2, 2, 2, 2, 0, 0]),  # He
+            ]),
+            _all_test_structs['ab'],
+            evalType='energy',
+            bc_type='fixed',
+            cutoffs=self.cutoffs,
+        )
+
+        self.assertEqual(eng, 0.0)
+
+              
+    def test_directEval_rho_a_rho_b_dimer_bb(self):
+
+        tree = MCTree(['H', 'He'])
+        
+        subtree1 = SVTree(nodes=[deepcopy(self.rho_A)])
+        subtree2 = SVTree(nodes=[deepcopy(self.rho_B)])
+
+        tree.chemistryTrees['H']    = subtree1
+        tree.chemistryTrees['He']   = subtree2
+
+        tree.updateSVNodes()
+
+        eng = tree.directEvaluation(
+            np.concatenate([
+                np.array([1, 1, 1, 1, 1, 1, 1, 0, 0]),  # H
+                np.array([2, 2, 2, 2, 2, 2, 2, 0, 0]),  # He
+            ]),
+            _all_test_structs['bb'],
+            evalType='energy',
+            bc_type='fixed',
+            cutoffs=self.cutoffs,
+        )
+
+        self.assertEqual(eng, 4.0)
+   
+              
+    def test_directEval_rho_rho_trimers(self):
+
+
+        rhoPairs = [
+            (deepcopy(self.rho_A), deepcopy(self.rho_A)),
+            (deepcopy(self.rho_A), deepcopy(self.rho_B)),
+            (deepcopy(self.rho_B), deepcopy(self.rho_B)),
+        ]
+
+        # A looking for *, B looking for *
+
+        expectedResults = [
+            [6.0,  0.0, 4.0, 4.0, 6.0, 6.0],
+            [6.0, 12.0, 4.0, 4.0, 2.0, 2.0],
+            [0.0, 12.0, 6.0, 6.0, 2.0, 2.0],
+        ]
+
+        for pair, expected in zip(rhoPairs, expectedResults):
+            tree = MCTree(['H', 'He'])
+
+            subtree0 = SVTree(nodes=[pair[0]])
+            subtree1 = SVTree(nodes=[pair[1]])
+        
+            tree.chemistryTrees['H']    = subtree0
+            tree.chemistryTrees['He']   = subtree1
+
+            tree.updateSVNodes()
+
+            for tri, true in zip(
+                ['aaa', 'bbb', 'abb', 'bab', 'baa', 'aba'],
+                expected
+            ):
+
+                eng = tree.directEvaluation(
+                    np.concatenate([
+                        np.array([1, 1, 1, 1, 1, 1, 1, 0, 0]),  # H
+                        np.array([2, 2, 2, 2, 2, 2, 2, 0, 0]),  # He
+                    ]),
+                    _all_test_structs[tri],
+                    evalType='energy',
+                    bc_type='fixed',
+                    cutoffs=self.cutoffs,
+                )
+
+                self.assertEqual(eng, true)
+    
+
+    def test_directEval_ffg_AA_ffg_AA_trimers(self):
+
+        tree = MCTree(['H', 'He'])
+        
+        subtree0 = SVTree(nodes=[deepcopy(self.ffg_AA)])
+        subtree1 = SVTree(nodes=[deepcopy(self.ffg_AA)])
+        
+        tree.chemistryTrees['H']    = subtree0
+        tree.chemistryTrees['He']   = subtree1
+
+        tree.updateSVNodes()
+ 
+        for tri, true in zip(
+            ['aaa', 'bbb', 'abb', 'bab', 'baa', 'aba'],
+            [6.0,    0.0,    0.0,  0.0,  36.0, 36.0],
+        ):
+
+            eng = tree.directEvaluation(
+                np.concatenate([
+                    np.array([1, 1, 1, 1, 1, 1, 1, 0, 0]),
+                    np.array([2, 2, 2, 2, 2, 2, 2, 0, 0]),  #  2 per triplet
+                    np.array([3, 3, 3, 3, 3, 3, 3, 0, 0]),
+                    np.array([4, 4, 4, 4, 4, 4, 4, 0, 0]),  # 36 per triplet
+                ]),
+                _all_test_structs[tri],
+                evalType='energy',
+                bc_type='fixed',
+                cutoffs=self.cutoffs,
+            )
+
+            self.assertEqual(eng, true)
+
+
+    def test_directEval_ffg_AB_ffg_AB_trimers(self):
+
+        tree = MCTree(['H', 'He'])
+        
+        subtree0 = SVTree(nodes=[deepcopy(self.ffg_AB)])
+        subtree1 = SVTree(nodes=[deepcopy(self.ffg_AB)])
+        
+        tree.chemistryTrees['H']    = subtree0
+        tree.chemistryTrees['He']   = subtree1
+
+        tree.updateSVNodes()
+ 
+        for tri, true in zip(
+            ['aaa', 'bbb', 'abb', 'bab', 'baa', 'aba'],
+            [0.0,    0.0,  72.0,  72.0,   4.0,   4.0],
+        ):
+
+            eng = tree.directEvaluation(
+                np.concatenate([
+                    np.array([1, 1, 1, 1, 1, 1, 1, 0, 0]),
+                    np.array([1, 1, 1, 1, 1, 1, 1, 0, 0]),
+                    np.array([2, 2, 2, 2, 2, 2, 2, 0, 0]),  #  2 per triplet
+                    np.array([3, 3, 3, 3, 3, 3, 3, 0, 0]),
+                    np.array([3, 3, 3, 3, 3, 3, 3, 0, 0]),
+                    np.array([4, 4, 4, 4, 4, 4, 4, 0, 0]),  # 36 per triplet
+                ]),
+                _all_test_structs[tri],
+                evalType='energy',
+                bc_type='fixed',
+                cutoffs=self.cutoffs,
+            )
+
+            self.assertEqual(eng, true)
+
+
+    def test_directEval_ffg_AA_ffg_AB_trimers(self):
+
+        tree = MCTree(['H', 'He'])
+        
+        subtree0 = SVTree(nodes=[deepcopy(self.ffg_AA)])
+        subtree1 = SVTree(nodes=[deepcopy(self.ffg_AB)])
+        
+        tree.chemistryTrees['H']    = subtree0
+        tree.chemistryTrees['He']   = subtree1
+
+        tree.updateSVNodes()
+ 
+        for tri, true in zip(
+            ['aaa', 'bbb', 'abb', 'bab', 'baa', 'aba'],
+            [6.0,    0.0,  72.0,  72.0,   0.0,   0.0],
+        ):
+
+            eng = tree.directEvaluation(
+                np.concatenate([
+                    np.array([1, 1, 1, 1, 1, 1, 1, 0, 0]),
+                    np.array([2, 2, 2, 2, 2, 2, 2, 0, 0]),  #  2 per triplet
+                    np.array([3, 3, 3, 3, 3, 3, 3, 0, 0]),
+                    np.array([3, 3, 3, 3, 3, 3, 3, 0, 0]),
+                    np.array([4, 4, 4, 4, 4, 4, 4, 0, 0]),  # 36 per triplet
+                ]),
+                _all_test_structs[tri],
+                evalType='energy',
+                bc_type='fixed',
+                cutoffs=self.cutoffs,
+            )
+
+            self.assertEqual(eng, true)
+
+
+    def test_directEval_mixed_ffg_trimers(self):
+
+        tree = MCTree(['H', 'He'])
+        
+        subtree0 = SVTree(nodes=[
+                FunctionNode('add'),
+                deepcopy(self.ffg_AA),
+                deepcopy(self.ffg_AB)
+        ])
+
+        subtree1 = SVTree(nodes=[
+            FunctionNode('add'),
+            deepcopy(self.ffg_AB),
+            deepcopy(self.ffg_BB)
+        ])
+        
+        tree.chemistryTrees['H']    = subtree0
+        tree.chemistryTrees['He']   = subtree1
+
+        tree.updateSVNodes()
+ 
+        for tri, true in zip(
+            ['aaa', 'bbb', 'abb', 'bab', 'baa', 'aba'],
+            [6.0,  108.0,  72.0,  72.0,   4.0,   4.0],
+        ):
+
+            eng = tree.directEvaluation(
+                np.concatenate([
+                    np.array([1, 1, 1, 1, 1, 1, 1, 0, 0]),
+                    np.array([2, 2, 2, 2, 2, 2, 2, 0, 0]),  #  2 per triplet
+                    np.array([1, 1, 1, 1, 1, 1, 1, 0, 0]),
+                    np.array([1, 1, 1, 1, 1, 1, 1, 0, 0]),
+                    np.array([2, 2, 2, 2, 2, 2, 2, 0, 0]),  #  2 per triplet
+                    np.array([3, 3, 3, 3, 3, 3, 3, 0, 0]),
+                    np.array([3, 3, 3, 3, 3, 3, 3, 0, 0]),
+                    np.array([4, 4, 4, 4, 4, 4, 4, 0, 0]),  # 36 per triplet
+                    np.array([3, 3, 3, 3, 3, 3, 3, 0, 0]),
+                    np.array([4, 4, 4, 4, 4, 4, 4, 0, 0]),  # 36 per triplet
+                ]),
+                _all_test_structs[tri],
+                evalType='energy',
+                bc_type='fixed',
+                cutoffs=self.cutoffs,
+            )
+
+            self.assertEqual(eng, true)
+
 
 
 if __name__ == '__main__':
