@@ -629,7 +629,7 @@ class SVTree(list):
         ])
 
 
-    def directEvaluation(self, y, atoms, evalType, bc_type, cutoffs, hostType=None):
+    def directEvaluation(self, y, atoms, allElements, evalType, bc_type, cutoffs, hostType=None):
         """
         Evaluates a tree by performing SV summations directly, rather than
         using the SV representation.
@@ -698,8 +698,8 @@ class SVTree(list):
                     #     name=node.description,
                     _implemented_sums[nodeType](
                         name=node.description,
-                        # elements=elements,
-                        elements=list(set(itertools.chain.from_iterable(
+                        allElements=allElements,
+                        neighborElements=list(set(itertools.chain.from_iterable(
                             node.inputTypes.values()))),
                         components=node.components,
                         inputTypes=node.inputTypes,
@@ -955,7 +955,7 @@ class MultiComponentTree(SVTree):
 
         return sum([
             self.chemistryTrees[el].directEvaluation(
-                splitPop[ii], atoms, evalType, bc_type, cutoffs,
+                splitPop[ii], atoms, self.elements, evalType, bc_type, cutoffs,
                 hostType=el
             )
             for ii, el in enumerate(self.elements)

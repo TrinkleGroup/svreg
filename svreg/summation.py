@@ -71,7 +71,7 @@ class Summation:
     """
 
     def __init__(
-        self, name, elements, components, inputTypes, numParams, restrictions,
+        self, name, allElements, neighborElements, components, inputTypes, numParams, restrictions,
         paramRanges, bonds, bondMapping, cutoffs, numElements, bc_type,
         ):
 
@@ -113,8 +113,10 @@ class Summation:
         # TODO: GA assumes sorted elements for computing errors
 
         # self.elements       = elements
-        self.elements       = sorted(elements)
         self.components     = sorted(components)
+
+        self.allElements        = sorted(allElements)
+        self.neighborElements   = sorted(neighborElements)
 
         self.numParams      = numParams
         self.restrictions   = restrictions
@@ -165,7 +167,7 @@ class FFG(Summation):
         self.fSplines = {}
         self.gSplines = {}
 
-        for el1 in kwargs['elements']:
+        for el1 in kwargs['neighborElements']:
             # TODO: if numParams or knot positions are ever not the same for all
             # splines, then this section is going to need to change
 
@@ -188,7 +190,7 @@ class FFG(Summation):
                 # bc_type=('fixed', 'fixed')
             )
 
-            for el2 in kwargs['elements']:
+            for el2 in kwargs['neighborElements']:
                 key = '_'.join(sorted(list(set([el1, el2]))))
 
                 self.gSplines[key] = Spline(
@@ -227,7 +229,8 @@ class FFG(Summation):
 
         atomTypesStrings = atoms.get_chemical_symbols()
         atomTypes = np.array(
-            list(map(lambda s: types.index(s), atomTypesStrings))
+            list(map(lambda s: self.allElements.index(s), atomTypesStrings))
+            # list(map(lambda s: types.index(s), atomTypesStrings))
         )
 
         N = len(atoms)
@@ -495,7 +498,7 @@ class FFG(Summation):
             if isinstance(cname, bytes):
                 cname = cname.decode('utf-8')
             if 'f' in cname:
-                el1 = self.elements[fIndexer]
+                el1 = self.neighborElements[fIndexer]
                 self.fSplines[el1].buildDirectEvaluator(y)
 
                 gIndexers[fIndexer] = el1
@@ -542,7 +545,7 @@ class Rho(Summation):
         used for the given neighbor types.
         """
 
-        for el in kwargs['elements']:
+        for el in kwargs['neighborElements']:
             self.splines[el] = Spline(
                 knots=np.linspace(
                     self.cutoffs[0], self.cutoffs[1],
@@ -566,10 +569,10 @@ class Rho(Summation):
         forces = None
 
         types = sorted(list(set(atoms.get_chemical_symbols())))
-
         atomTypesStrings = atoms.get_chemical_symbols()
         atomTypes = np.array(
-            list(map(lambda s: types.index(s), atomTypesStrings))
+            list(map(lambda s: self.allElements.index(s), atomTypesStrings))
+            # list(map(lambda s: types.index(s), atomTypesStrings))
         )
 
         N = len(atoms)
@@ -640,15 +643,15 @@ class Rho(Summation):
                     bondType = self.bondMapping(jtype)
 
                     self.add_to_energy_sv(energySV[bondType], rij, i)
-                    self.add_to_energy_sv(energySV[bondType], rij, j)
+                    # self.add_to_energy_sv(energySV[bondType], rij, j)
 
                     # Forces acting on i
                     self.add_to_forces_sv(forcesSV[bondType], rij,  jvec, i, i)
                     self.add_to_forces_sv(forcesSV[bondType], rij,  jvec, i, j)
 
-                    # Forces acting on j
-                    self.add_to_forces_sv(forcesSV[bondType], rij, -jvec, j, i)
-                    self.add_to_forces_sv(forcesSV[bondType], rij, -jvec, j, j)
+                    # # Forces acting on j
+                    # self.add_to_forces_sv(forcesSV[bondType], rij, -jvec, j, i)
+                    # self.add_to_forces_sv(forcesSV[bondType], rij, -jvec, j, j)
                 elif evalType == 'energy':
                     # Note: i->j == i<-j iff i and j are the same element
                     # type. If they are different types, then they need to be
