@@ -1,7 +1,6 @@
 import itertools
 import numpy as np
 from numba import jit
-from copy import deepcopy
 from scipy.sparse import diags
 from scipy.interpolate import CubicSpline
 from ase.neighborlist import NeighborList

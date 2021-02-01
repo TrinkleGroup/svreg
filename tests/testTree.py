@@ -945,10 +945,8 @@ class Test_MCTree_Real(unittest.TestCase):
         tree.updateSVNodes()
  
         for tri, true in zip(
-            # ['aaa', 'bbb', 'abb', 'bab', 'baa', 'aba'],
-            # [15.0,  72.0,  53.0,  43.0,  34.0,  34.0]
-            ['abb'],
-            [53.0],
+            ['aaa', 'bbb', 'abb', 'bab', 'baa', 'aba'],
+            [15.0,  72.0,  53.0,  53.0,  34.0,  34.0]
         ):
 
             eng = tree.directEvaluation(

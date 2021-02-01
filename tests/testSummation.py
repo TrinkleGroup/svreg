@@ -236,3 +236,14 @@ class Test_Summation(unittest.TestCase):
                     sum(res), expected[struct][bondType]
                 )
 
+    """
+    TODO:
+    Even after these bug fixes, it seems like the GA stuff isn't working
+    properly. I need to brainstorm what to do next.
+
+    - Confirm that the GA-reported errors match the directEvaluation errors
+    - Figure out what's going wrong with the E vs. a curves for Mo, since that
+      might be relevant.
+    - Add unittests directly comparing SV results with directEvaluation results.
+    """
+
