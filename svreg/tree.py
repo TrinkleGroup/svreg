@@ -887,8 +887,9 @@ class MultiComponentTree(SVTree):
             splitPop.append(rawPopulation[:, start:stop])
 
         subDicts = {
-            el: self.chemistryTrees[el].parseArr2Dict(splitPop[i])
-            for i,el in enumerate(self.elements)
+            el: self.chemistryTrees[el].parseArr2Dict(
+                splitPop[i], fillFixedKnots
+            ) for i,el in enumerate(self.elements)
         }
 
         return subDicts

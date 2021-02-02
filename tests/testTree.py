@@ -981,6 +981,482 @@ class Test_MCTree_Real(unittest.TestCase):
             self.assertEqual(eng, true)
 
 
+class Test_Direct_vs_SV_Ti48Mo80_type1_c10(unittest.TestCase):
+
+    @classmethod
+    def setUpClass(cls):
+
+        import os
+        from ase.io import read
+        from svreg.summation import Rho, FFG
+
+        ffg = FFG(
+            name='ffg',
+            allElements=['Mo', 'Ti'],
+            neighborElements=['Mo', 'Ti'],
+            components=['f_A', 'f_B', 'g_AA', 'g_BB', 'g_AB'],
+            inputTypes={'f_A': ['Mo'], 'f_B': ['Ti'], 'g_AA': ['Mo', 'Mo'], 'g_AB': ['Mo', 'Ti'], 'g_BB': ['Ti', 'Ti']},
+            numParams={'f_A': 7, 'f_B': 7, 'g_AA': 9, 'g_BB': 9, 'g_AB': 9},
+            restrictions={
+                'f_A': [(6, 0), (8, 0)],
+                'f_B': [(6, 0), (8, 0)],
+                'g_AA':[],
+                'g_AB':[],
+                'g_BB':[],
+            },
+            paramRanges={'f_A': None, 'f_B': None, 'g_AA': None, 'g_AB': None, 'g_BB': None},
+            bonds={
+                'ffg_AA': ['f_A', 'f_A', 'g_AA'],
+                'ffg_AB': ['f_A', 'f_B', 'g_AB'],
+                'ffg_BB': ['f_B', 'f_B', 'g_BB'],
+            },
+            bondMapping="lambda i,j: 'ffg_AA' if i+j==0 else ('ffg_AB' if i+j==1 else 'ffg_BB')",
+            cutoffs=[2.4, 5.2],
+            numElements=2,
+            bc_type='fixed',
+        )
+
+        rho = Rho(
+            name='rho',
+            allElements=['Mo', 'Ti'],
+            neighborElements=['Mo', 'Ti'],
+            components=['rho_A', 'rho_B'],
+            inputTypes={'rho_A': ['Mo'], 'rho_B': ['Ti']},
+            numParams={'rho_A': 7, 'rho_B': 7},
+            restrictions={'rho_A': [(6, 0), (8, 0)], 'rho_B': [(6, 0), (8, 0)]},
+            paramRanges={'rho_A': None, 'rho_B': None},
+            bonds={
+                'rho_A': ['rho_A'],
+                'rho_B': ['rho_B'],
+            },
+            bondMapping="lambda i: 'rho_A' if i == 0 else 'rho_B'",
+            cutoffs=[2.4, 5.2],
+            numElements=2,
+            bc_type='fixed',
+        )
+
+        engSV = {'rho': None, 'ffg': None}
+        fcsSV = {'rho': None, 'ffg': None}
+
+        struct = 'Ti48Mo80_type1_c10'
+
+        atoms = read(
+            os.path.join('examples/{}.data'.format(struct)),
+            format='lammps-data',
+            style='atomic'
+        )
+
+        types = np.array([
+            'Ti' if t == 'H' else 'Mo' for t in atoms.get_chemical_symbols()
+        ])
+
+        atoms.set_chemical_symbols(types)
+
+        engSV['rho'], fcsSV['rho'] = rho.loop(atoms, evalType='vector')
+        engSV['ffg'], fcsSV['ffg'] = ffg.loop(atoms, evalType='vector')
+
+        elements = ['Mo', 'Ti']
+
+        miniDatabase = {
+            el: {
+                evalType: {
+                    'rho': {'rho_A': None, 'rho_B': None},
+                    'ffg': {'ffg_AA': None, 'ffg_AB': None, 'ffg_BB': None}
+                } for evalType in ['energy', 'forces']
+            }
+            for el in elements
+        }
+
+        whereMo = np.where(types=='Mo')[0]
+        whereTi = np.where(types=='Ti')[0]
+
+        n = len(atoms)
+
+        for svName in ['rho', 'ffg']:
+            k = 729 if svName == 'ffg' else 9
+
+            for bondType in engSV[svName].keys():
+                
+                miniDatabase['Mo']['energy'][svName][bondType] = engSV[svName][bondType][whereMo, :]
+                miniDatabase['Ti']['energy'][svName][bondType] = engSV[svName][bondType][whereTi, :]
+                
+                fcsSplit = fcsSV[svName][bondType]
+                fcsSplit = fcsSplit.reshape((3, n, n, k))[:, whereMo, :, :]
+                miniDatabase['Mo']['forces'][svName][bondType] = fcsSplit.reshape(3*len(whereMo)*n, k)
+                
+                fcsSplit = fcsSV[svName][bondType]
+                fcsSplit = fcsSplit.reshape((3, n, n, k))[:, whereTi, :, :]
+                miniDatabase['Ti']['forces'][svName][bondType] = fcsSplit.reshape(3*len(whereTi)*n, k)
+                
+        from svreg.tree import SVTree
+        from svreg.nodes import FunctionNode
+        from svreg.tree import MultiComponentTree as MCTree
+
+        rho_A = SVNode(
+            description='rho_A',
+            components=['rho_A'],
+            constructor=['rho_A'],
+            numParams=[9],
+            restrictions=[(6, 0), (8, 0)],
+            paramRanges=[None],
+            inputTypes={'rho_A': ['Mo']},
+        )
+
+        rho_B = SVNode(
+            description='rho_B',
+            components=['rho_B'],
+            constructor=['rho_B'],
+            numParams=[9],
+            restrictions=[(6, 0), (8, 0)],
+            paramRanges=[None],
+            inputTypes={'rho_B': ['Ti']},
+        )
+
+        ffg_AA = SVNode(
+            description='ffg_AA',
+            components=['f_A', 'g_AA'],
+            constructor=['f_A', 'f_A', 'g_AA'],
+            numParams=[9, 9],
+            restrictions=[[(6, 0), (8, 0)], []],
+            paramRanges=[None, None],
+            inputTypes={'f_A': ['Mo'], 'g_AA': ['Mo', 'Mo']},
+        )
+
+
+        ffg_AB = SVNode(
+            description='ffg_AB',
+            components=['f_A', 'f_B', 'g_AB'],
+            constructor=['f_A', 'f_B', 'g_AB'],
+            numParams=[9, 9, 9],
+            restrictions=[[(6, 0), (8, 0)], [(6, 0), (8, 0)], []],
+            paramRanges=[None, None, None],
+            inputTypes={'f_A': ['Mo'], 'f_B': ['Ti'], 'g_AB': ['Mo', 'Ti']},
+        )
+
+
+        ffg_BB = SVNode(
+            description='ffg_BB',
+            components=['f_B', 'g_BB'],
+            constructor=['f_B', 'f_B', 'g_BB'],
+            numParams=[9, 9],
+            restrictions=[[(6, 0), (8, 0)], []],
+            paramRanges=[None, None],
+            inputTypes={'f_B': ['Ti'], 'g_BB': ['Ti', 'Ti']},
+        )
+
+        dummyTree = MCTree(['Mo', 'Ti'])
+
+        from copy import deepcopy
+
+        treeMo = SVTree()
+        treeMo.nodes = [
+            FunctionNode('add'),
+            deepcopy(rho_A),
+            FunctionNode('add'),
+            deepcopy(rho_B),
+            FunctionNode('add'),
+            deepcopy(ffg_AA),
+            FunctionNode('add'),
+            deepcopy(ffg_AB),
+            deepcopy(ffg_BB),
+        ]
+
+        treeTi = SVTree()
+        treeTi.nodes = [
+            FunctionNode('add'),
+            deepcopy(rho_A),
+            FunctionNode('add'),
+            deepcopy(rho_B),
+            FunctionNode('add'),
+            deepcopy(ffg_AA),
+            FunctionNode('add'),
+            deepcopy(ffg_AB),
+            deepcopy(ffg_BB),
+        ]
+
+        dummyTree.chemistryTrees['Mo'] = treeMo
+        dummyTree.chemistryTrees['Ti'] = treeTi
+
+        dummyTree.updateSVNodes()
+
+        cls.dummyTree = dummyTree
+        cls.miniDatabase = miniDatabase
+        cls.atoms = atoms
+
+
+    def test_flat_splines(self):
+        
+        def f():
+            rand = np.ones(9)*np.random.random()
+            rand[-3] = rand[-1] = 0
+            return rand
+
+        dummyParams = np.concatenate([f() for _ in range(18)])
+
+        popDict = self.dummyTree.parseArr2Dict(
+            np.atleast_2d(dummyParams), fillFixedKnots=False
+        )
+
+        totalMo = 0
+
+        totalMo += self.miniDatabase['Mo']['energy']['ffg']['ffg_AA'] @ popDict['Mo']['ffg_AA'].T
+        totalMo += self.miniDatabase['Mo']['energy']['ffg']['ffg_AB'] @ popDict['Mo']['ffg_AB'].T
+        totalMo += self.miniDatabase['Mo']['energy']['ffg']['ffg_BB'] @ popDict['Mo']['ffg_BB'].T
+
+        totalMo += self.miniDatabase['Mo']['energy']['rho']['rho_A'] @ popDict['Mo']['rho_A'].T
+        totalMo += self.miniDatabase['Mo']['energy']['rho']['rho_B'] @ popDict['Mo']['rho_B'].T
+
+        totalMo = sum(totalMo)
+
+        totalTi = 0
+
+        totalTi += self.miniDatabase['Ti']['energy']['ffg']['ffg_AA'] @ popDict['Ti']['ffg_AA'].T
+        totalTi += self.miniDatabase['Ti']['energy']['ffg']['ffg_AB'] @ popDict['Ti']['ffg_AB'].T
+        totalTi += self.miniDatabase['Ti']['energy']['ffg']['ffg_BB'] @ popDict['Ti']['ffg_BB'].T
+
+        totalTi += self.miniDatabase['Ti']['energy']['rho']['rho_A'] @ popDict['Ti']['rho_A'].T
+        totalTi += self.miniDatabase['Ti']['energy']['rho']['rho_B'] @ popDict['Ti']['rho_B'].T
+
+        totalTi = sum(totalTi)
+
+        engSVmethod = totalMo + totalTi
+
+        engDirectMethod = self.dummyTree.directEvaluation(
+            dummyParams,
+            self.atoms,
+            'energy',
+            'fixed',
+            cutoffs=[2.4, 5.2]
+        )
+
+        np.testing.assert_allclose(engSVmethod, engDirectMethod)
+
+
+    def test_angled_splines(self):
+        
+        def f():
+            rand = np.linspace(0, 1, 9)
+            rand *= np.random.random()
+            rand += np.random.random()
+            rand[-3] = rand[-1] = 0
+            return rand
+
+        dummyParams = np.concatenate([f() for _ in range(18)])
+
+        popDict = self.dummyTree.parseArr2Dict(
+            np.atleast_2d(dummyParams), fillFixedKnots=False
+        )
+
+        totalMo = 0
+
+        totalMo += self.miniDatabase['Mo']['energy']['ffg']['ffg_AA'] @ popDict['Mo']['ffg_AA'].T
+        totalMo += self.miniDatabase['Mo']['energy']['ffg']['ffg_AB'] @ popDict['Mo']['ffg_AB'].T
+        totalMo += self.miniDatabase['Mo']['energy']['ffg']['ffg_BB'] @ popDict['Mo']['ffg_BB'].T
+
+        totalMo += self.miniDatabase['Mo']['energy']['rho']['rho_A'] @ popDict['Mo']['rho_A'].T
+        totalMo += self.miniDatabase['Mo']['energy']['rho']['rho_B'] @ popDict['Mo']['rho_B'].T
+
+        totalMo = sum(totalMo)
+
+        totalTi = 0
+
+        totalTi += self.miniDatabase['Ti']['energy']['ffg']['ffg_AA'] @ popDict['Ti']['ffg_AA'].T
+        totalTi += self.miniDatabase['Ti']['energy']['ffg']['ffg_AB'] @ popDict['Ti']['ffg_AB'].T
+        totalTi += self.miniDatabase['Ti']['energy']['ffg']['ffg_BB'] @ popDict['Ti']['ffg_BB'].T
+
+        totalTi += self.miniDatabase['Ti']['energy']['rho']['rho_A'] @ popDict['Ti']['rho_A'].T
+        totalTi += self.miniDatabase['Ti']['energy']['rho']['rho_B'] @ popDict['Ti']['rho_B'].T
+
+        totalTi = sum(totalTi)
+
+        engSVmethod = totalMo + totalTi
+
+        engDirectMethod = self.dummyTree.directEvaluation(
+            dummyParams,
+            self.atoms,
+            'energy',
+            'fixed',
+            cutoffs=[2.4, 5.2]
+        )
+
+        np.testing.assert_allclose(engSVmethod, engDirectMethod)
+
+
+    def test_wiggly_splines_0end(self):
+        
+        def f():
+            rand = np.random.random(9)
+            rand[-3] = rand[-1] = 0
+            return rand
+
+        dummyParams = np.concatenate([f() for _ in range(18)])
+
+        popDict = self.dummyTree.parseArr2Dict(
+            np.atleast_2d(dummyParams), fillFixedKnots=False
+        )
+
+        totalMo = 0
+
+        totalMo += self.miniDatabase['Mo']['energy']['ffg']['ffg_AA'] @ popDict['Mo']['ffg_AA'].T
+        totalMo += self.miniDatabase['Mo']['energy']['ffg']['ffg_AB'] @ popDict['Mo']['ffg_AB'].T
+        totalMo += self.miniDatabase['Mo']['energy']['ffg']['ffg_BB'] @ popDict['Mo']['ffg_BB'].T
+
+        totalMo += self.miniDatabase['Mo']['energy']['rho']['rho_A'] @ popDict['Mo']['rho_A'].T
+        totalMo += self.miniDatabase['Mo']['energy']['rho']['rho_B'] @ popDict['Mo']['rho_B'].T
+
+        totalMo = sum(totalMo)
+
+        totalTi = 0
+
+        totalTi += self.miniDatabase['Ti']['energy']['ffg']['ffg_AA'] @ popDict['Ti']['ffg_AA'].T
+        totalTi += self.miniDatabase['Ti']['energy']['ffg']['ffg_AB'] @ popDict['Ti']['ffg_AB'].T
+        totalTi += self.miniDatabase['Ti']['energy']['ffg']['ffg_BB'] @ popDict['Ti']['ffg_BB'].T
+
+        totalTi += self.miniDatabase['Ti']['energy']['rho']['rho_A'] @ popDict['Ti']['rho_A'].T
+        totalTi += self.miniDatabase['Ti']['energy']['rho']['rho_B'] @ popDict['Ti']['rho_B'].T
+
+        totalTi = sum(totalTi)
+
+        engSVmethod = totalMo + totalTi
+
+        engDirectMethod = self.dummyTree.directEvaluation(
+            dummyParams,
+            self.atoms,
+            'energy',
+            'fixed',
+            cutoffs=[2.4, 5.2]
+        )
+
+        np.testing.assert_allclose(engSVmethod, engDirectMethod)
+
+
+    def test_linear_rho_wiggly_ffg_0end(self):
+        def wig():
+            rand = np.random.random(9)
+            rand[-3] = rand[-1] = 0
+            return rand
+
+        def lin():
+            rand = np.ones(9)*np.random.random()
+            rand[-3] = rand[-1] = 0
+            return rand
+
+        # rho_A rho_B ffg_AA ffg_AB ffg_BB
+        dummyParams = np.concatenate([
+            lin(),
+            lin(),
+            wig(), wig(),
+            wig(), wig(), wig(),
+            wig(), wig(),
+            lin(),
+            lin(),
+            wig(), wig(),
+            wig(), wig(), wig(),
+            wig(), wig(),
+        ])
+
+        popDict = self.dummyTree.parseArr2Dict(
+            np.atleast_2d(dummyParams), fillFixedKnots=False
+        )
+
+        totalMo = 0
+
+        totalMo += self.miniDatabase['Mo']['energy']['ffg']['ffg_AA'] @ popDict['Mo']['ffg_AA'].T
+        totalMo += self.miniDatabase['Mo']['energy']['ffg']['ffg_AB'] @ popDict['Mo']['ffg_AB'].T
+        totalMo += self.miniDatabase['Mo']['energy']['ffg']['ffg_BB'] @ popDict['Mo']['ffg_BB'].T
+
+        totalMo += self.miniDatabase['Mo']['energy']['rho']['rho_A'] @ popDict['Mo']['rho_A'].T
+        totalMo += self.miniDatabase['Mo']['energy']['rho']['rho_B'] @ popDict['Mo']['rho_B'].T
+
+        totalMo = sum(totalMo)
+
+        totalTi = 0
+
+        totalTi += self.miniDatabase['Ti']['energy']['ffg']['ffg_AA'] @ popDict['Ti']['ffg_AA'].T
+        totalTi += self.miniDatabase['Ti']['energy']['ffg']['ffg_AB'] @ popDict['Ti']['ffg_AB'].T
+        totalTi += self.miniDatabase['Ti']['energy']['ffg']['ffg_BB'] @ popDict['Ti']['ffg_BB'].T
+
+        totalTi += self.miniDatabase['Ti']['energy']['rho']['rho_A'] @ popDict['Ti']['rho_A'].T
+        totalTi += self.miniDatabase['Ti']['energy']['rho']['rho_B'] @ popDict['Ti']['rho_B'].T
+
+        totalTi = sum(totalTi)
+
+        engSVmethod = totalMo + totalTi
+
+        engDirectMethod = self.dummyTree.directEvaluation(
+            dummyParams,
+            self.atoms,
+            'energy',
+            'fixed',
+            cutoffs=[2.4, 5.2]
+        )
+
+        np.testing.assert_allclose(engSVmethod, engDirectMethod)
+
+
+    def test_wiggly_rho_linear_0end(self):
+        def wig():
+            rand = np.random.random(9)
+            rand[-3] = rand[-1] = 0
+            return rand
+
+        def lin():
+            rand = np.ones(9)*np.random.random()
+            rand[-3] = rand[-1] = 0
+            return rand
+
+        # rho_A rho_B ffg_AA ffg_AB ffg_BB
+        dummyParams = np.concatenate([
+            wig(),
+            wig(),
+            lin(), lin(),
+            lin(), lin(), lin(),
+            lin(), lin(),
+            wig(),
+            wig(),
+            lin(), lin(),
+            lin(), lin(), lin(),
+            lin(), lin(),
+        ])
+
+        popDict = self.dummyTree.parseArr2Dict(
+            np.atleast_2d(dummyParams), fillFixedKnots=False
+        )
+
+        totalMo = 0
+
+        totalMo += self.miniDatabase['Mo']['energy']['ffg']['ffg_AA'] @ popDict['Mo']['ffg_AA'].T
+        totalMo += self.miniDatabase['Mo']['energy']['ffg']['ffg_AB'] @ popDict['Mo']['ffg_AB'].T
+        totalMo += self.miniDatabase['Mo']['energy']['ffg']['ffg_BB'] @ popDict['Mo']['ffg_BB'].T
+
+        totalMo += self.miniDatabase['Mo']['energy']['rho']['rho_A'] @ popDict['Mo']['rho_A'].T
+        totalMo += self.miniDatabase['Mo']['energy']['rho']['rho_B'] @ popDict['Mo']['rho_B'].T
+
+        totalMo = sum(totalMo)
+
+        totalTi = 0
+
+        totalTi += self.miniDatabase['Ti']['energy']['ffg']['ffg_AA'] @ popDict['Ti']['ffg_AA'].T
+        totalTi += self.miniDatabase['Ti']['energy']['ffg']['ffg_AB'] @ popDict['Ti']['ffg_AB'].T
+        totalTi += self.miniDatabase['Ti']['energy']['ffg']['ffg_BB'] @ popDict['Ti']['ffg_BB'].T
+
+        totalTi += self.miniDatabase['Ti']['energy']['rho']['rho_A'] @ popDict['Ti']['rho_A'].T
+        totalTi += self.miniDatabase['Ti']['energy']['rho']['rho_B'] @ popDict['Ti']['rho_B'].T
+
+        totalTi = sum(totalTi)
+
+        engSVmethod = totalMo + totalTi
+
+        engDirectMethod = self.dummyTree.directEvaluation(
+            dummyParams,
+            self.atoms,
+            'energy',
+            'fixed',
+            cutoffs=[2.4, 5.2]
+        )
+
+        np.testing.assert_allclose(engSVmethod, engDirectMethod)
+
 
 if __name__ == '__main__':
     unittest.main()

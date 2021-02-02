@@ -7,7 +7,7 @@
 ################################################################################
 
 seed        1123
-runType     GA
+runType     POLISH
 
 ################################################################################
 # Database settings
@@ -18,8 +18,8 @@ runType     GA
 
 # refStruct           Ti48Mo80_type1_c10
 # databasePath        ../svreg_data/hyojung/hj.hdf5-fixed-f32
-refStruct           B2
-databasePath        ../svreg_data/hyojung/hj.hdf5-fixed-f32-mini-full
+refStruct           Ti48Mo80_type1_c10
+databasePath        ../svreg_data/hyojung/hj.hdf5-fixed-f32-mini0
 
 outputPath          ./results/debug
 overwrite           True

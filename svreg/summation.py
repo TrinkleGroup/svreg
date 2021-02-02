@@ -341,6 +341,37 @@ class FFG(Summation):
                     if evalType == 'vector':
                         bondType = self.bondMapping(jtype, ktype)
 
+                        oldRij = rij
+                        oldFjSpline = self.fjSpline
+
+                        if jtype != ktype:  # Then this is a cross-term
+                            # Figure out expected order of bondType
+
+                            # e.g. ['f_A', 'f_B', 'g_AB']
+                            bondComponents = self.bonds[bondType]
+                            bondInputs = None
+                            for bc in bondComponents:
+                                # The G spline will have the expected order
+                                if 'g' in bc:
+                                    # TODO: this currently assumes that the
+                                    # component names are given as 'g_**'
+                                    bondInputs = self.inputTypes[bc]
+
+                            # TODO: is there a problem swapping fjSpline since
+                            # has to be used by multiple evals? Yes. Also rij
+
+                            # If neighbors aren't in the correct order, swap
+                            if [jtypeStr, ktypeStr] != bondInputs:
+                                oldRij = rij
+                                rij = rik
+                                rik = oldRij
+
+                                dirs = np.vstack([d3, d4, d5, d0, d1, d2])
+
+                                oldFjSpline = self.fjSpline
+                                self.fjSpline = self.fkSpline
+                                self.fkSpline = oldFjSpline 
+
                         # Update structure vectors (in-place)
                         self.add_to_energy_sv(
                             energySV[bondType], rij, rik, cosTheta, i
@@ -350,6 +381,9 @@ class FFG(Summation):
                             forcesSV[bondType],
                             rij, rik, cosTheta, dirs, i, j, k
                         )
+
+                        rij = oldRij
+                        self.fjSpline = oldFjSpline
                     elif (evalType == 'energy') or (evalType == 'forces'):
                         fkVal = self.fkSpline(rik)
                         gVal = self.gSpline(cosTheta)
@@ -536,14 +570,6 @@ class Rho(Summation):
         # Note: a Rho Summation will only ever have one spline since it's based
         # on the neighbor type
 
-        """
-        TODO: the problem is that Summation is being used to construct the
-        database AND to evaluate a tree. In the first case, 'elements' will be
-        the elements in the system so that it builds the Rho SV for all
-        elements, but in the second case 'elements' is only the elements being
-        used for the given neighbor types.
-        """
-
         for el in kwargs['neighborElements']:
             self.splines[el] = Spline(
                 knots=np.linspace(
@@ -576,8 +602,6 @@ class Rho(Summation):
 
         N = len(atoms)
         if evalType == 'vector':
-            # if bondType is None:
-            #     raise RuntimeError('Must specify bondType.')
 
             energySV = {bondType: None for bondType in self.bonds}
             forcesSV = {bondType: None for bondType in self.bonds}

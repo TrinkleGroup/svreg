@@ -269,48 +269,42 @@ def polish(client, settings):
     from svreg.nodes import FunctionNode
     from svreg.tree import MultiComponentTree as MCTree
 
-    # tree = MCTree(['Mo', 'Ti'])
-    tree1 = MCTree(['Mo'])
-    tree2 = MCTree(['Mo'])
+    tree = MCTree(['Mo', 'Ti'])
 
     from copy import deepcopy
 
-    treeMo1 = SVTree()
-    treeMo1.nodes = [
-        FunctionNode('add'),
-        deepcopy(regressor.svNodePool[0]),
-        deepcopy(regressor.svNodePool[0]),
-    ]
-
-    treeMo2 = SVTree()
-    treeMo2.nodes = [
+    treeMo = SVTree()
+    treeMo.nodes = [
         FunctionNode('add'),
         deepcopy(regressor.svNodePool[0]),
         FunctionNode('add'),
-        deepcopy(regressor.svNodePool[0]),
         deepcopy(regressor.svNodePool[1]),
+        FunctionNode('add'),
+        deepcopy(regressor.svNodePool[2]),
+        FunctionNode('add'),
+        deepcopy(regressor.svNodePool[3]),
+        deepcopy(regressor.svNodePool[4]),
     ]
 
-    # treeTi = SVTree()
-    # treeTi.nodes = [
-    #     FunctionNode('add'),
-    #     deepcopy(regressor.svNodePool[0]),
-    #     FunctionNode('add'),
-    #     deepcopy(regressor.svNodePool[1]),
-    #     FunctionNode('add'),
-    #     deepcopy(regressor.svNodePool[2]),
-    #     FunctionNode('add'),
-    #     deepcopy(regressor.svNodePool[3]),
-    #     deepcopy(regressor.svNodePool[4]),
-    # ]
+    treeTi = SVTree()
+    treeTi.nodes = [
+        FunctionNode('add'),
+        deepcopy(regressor.svNodePool[0]),
+        FunctionNode('add'),
+        deepcopy(regressor.svNodePool[1]),
+        FunctionNode('add'),
+        deepcopy(regressor.svNodePool[2]),
+        FunctionNode('add'),
+        deepcopy(regressor.svNodePool[3]),
+        deepcopy(regressor.svNodePool[4]),
+    ]
 
-    tree1.chemistryTrees['Mo'] = treeMo1
-    tree2.chemistryTrees['Mo'] = treeMo2
+    tree.chemistryTrees['Mo'] = treeMo
+    tree.chemistryTrees['Ti'] = treeTi
     
-    tree1.updateSVNodes()
-    tree2.updateSVNodes()
+    tree.updateSVNodes()
 
-    regressor.trees = [tree1, tree2]
+    regressor.trees = [tree]
     regressor.initializeOptimizers()
 
     savePath = os.path.join(settings['outputPath'], 'polished')
