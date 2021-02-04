@@ -725,6 +725,11 @@ class SVTree(list):
 
         # Check for single-node tree
         if isinstance(nodes[0], Summation):
+            if len(nodes) > 1:
+                raise RuntimeError(
+                    "First node isn't a funciton, but there is more than one\
+                    node."
+                )
             return nodes[0].loop(atoms, evalType, hostType)
 
         # Constructs a list-of-lists where each sub-list is a sub-tree for a
@@ -954,13 +959,15 @@ class MultiComponentTree(SVTree):
 
         splitPop = np.array_split(y, splits)
 
-        return sum([
+        res = [
             self.chemistryTrees[el].directEvaluation(
                 splitPop[ii], atoms, self.elements, evalType, bc_type, cutoffs,
                 hostType=el
             )
             for ii, el in enumerate(self.elements)
-        ])
+        ]
+
+        return sum(res)
 
 
     def __str__(self):

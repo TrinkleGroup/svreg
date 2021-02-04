@@ -329,12 +329,12 @@ class FFG(Summation):
 
                     cosTheta = np.dot(jvec, kvec)#/rij/rik
 
-                    d0 = jvec
-                    d1 = -cosTheta * jvec / rij
-                    d2 = kvec / rij
-                    d3 = kvec
-                    d4 = -cosTheta * kvec / rik
-                    d5 = jvec / rik
+                    d0 = jvec                       # on i due to j
+                    d1 = -cosTheta * jvec / rij     # on j due to i?
+                    d2 = kvec / rij                 # on i and j due to k?
+                    d3 = kvec                       # on i due to k
+                    d4 = -cosTheta * kvec / rik     # on k due to i?
+                    d5 = jvec / rik                 # on i and k due to j?
 
                     dirs = np.vstack([d0, d1, d2, d3, d4, d5])
 
@@ -357,16 +357,13 @@ class FFG(Summation):
                                     # component names are given as 'g_**'
                                     bondInputs = self.inputTypes[bc]
 
-                            # TODO: is there a problem swapping fjSpline since
-                            # has to be used by multiple evals? Yes. Also rij
-
                             # If neighbors aren't in the correct order, swap
                             if [jtypeStr, ktypeStr] != bondInputs:
                                 oldRij = rij
                                 rij = rik
                                 rik = oldRij
 
-                                dirs = np.vstack([d3, d4, d5, d0, d1, d2])
+                                # dirs = np.vstack([d3, d4, d5, d0, d1, d2])
 
                                 oldFjSpline = self.fjSpline
                                 self.fjSpline = self.fkSpline
@@ -467,18 +464,28 @@ class FFG(Summation):
             fj_1, fk_1, g_1, fj_2, fk_2, g_2, fj_3, fk_3, g_3, dirs
         )
 
-        # TODO: add documentation about why the SV has this 3*N*N shape
+        # TODO: add documentation about what all of these terms mean
+
+        """
+        SV[i, i] is the sum of the forces on atom i due to its neighbors
+        SV[i, j] is the forces on neighbor j due to atom i
+        """
 
         # forcesSV = np.zeros((3*N*N, int((self.numParams+2)**3)))
         N = int(np.sqrt(sv.shape[0]//3))
         N2 = N*N
         for a in range(3):
+            # sv[N2*a + N*i + i, :] += fj[:, a]
+            # sv[N2*a + N*j + i, :] -= fj[:, a]
+
+            # sv[N2*a + N*i + i, :] += fk[:, a]
+            # sv[N2*a + N*k + i, :] -= fk[:, a]
+
             sv[N2*a + N*i + i, :] += fj[:, a]
-            sv[N2*a + N*j + i, :] -= fj[:, a]
+            sv[N2*a + N*i + j, :] -= fj[:, a]
 
             sv[N2*a + N*i + i, :] += fk[:, a]
-            sv[N2*a + N*k + i, :] -= fk[:, a]
-
+            sv[N2*a + N*i + k, :] -= fk[:, a]
 
     @staticmethod
     @jit(
@@ -635,9 +642,10 @@ class Rho(Summation):
 
         for i, atom in enumerate(atoms):
             itype = atomTypes[i]
+            itypeStr = atomTypesStrings[i]
 
             if hostType is not None:
-                if atomTypesStrings[i] != hostType:
+                if itypeStr != hostType:
                     continue
 
             ipos = atom.position
@@ -663,18 +671,42 @@ class Rho(Summation):
                 jvec /= rij
 
                 if evalType == 'vector':
+                    """
+                    I think the problem has to do with how the direct evaluation
+                    loop is short-circuiting, which means that a neighbor's
+                    forces will only be updated if the host atom's forces are
+                    active. The SV construction, on the other hand, will update
+                    all of the neighbors, regardless of if the host is "on" or
+                    not. 
+
+                    Mayb
+                    """
                     bondType = self.bondMapping(jtype)
 
                     self.add_to_energy_sv(energySV[bondType], rij, i)
                     # self.add_to_energy_sv(energySV[bondType], rij, j)
 
+                    # TODO: it's inefficient to call add_to_forces twice since
+                    # it builds the same coefficients; just add to both indices
+                    # at once, like in FFG
+
                     # Forces acting on i
                     self.add_to_forces_sv(forcesSV[bondType], rij,  jvec, i, i)
-                    self.add_to_forces_sv(forcesSV[bondType], rij,  jvec, i, j)
+                    self.add_to_forces_sv(forcesSV[bondType], rij,  -jvec, i, j)
+                    
+                    """
+                    SV[bondType][i, i] is the forces on atom i due to all
+                    neighbors that form the correct bondType
+
+                    SV[bondType][i, j] is the forces on atom j due to the bond
+                    of bondType with atom i
+                    """
+
 
                     # # Forces acting on j
                     # self.add_to_forces_sv(forcesSV[bondType], rij, -jvec, j, i)
                     # self.add_to_forces_sv(forcesSV[bondType], rij, -jvec, j, j)
+
                 elif evalType == 'energy':
                     # Note: i->j == i<-j iff i and j are the same element
                     # type. If they are different types, then they need to be
@@ -683,10 +715,24 @@ class Rho(Summation):
 
                     totalEnergy += self.rho(rij)
                 elif evalType == 'forces':
-                    rhoPrimeI = self.splines[itype](rij, 1)
-                    rhoPrimeJ = self.splines[jtype](rij, 1)
 
-                    fcs = jvec*(rhoPrimeI + rhoPrimeJ)
+                    # TODO: I think I'm missing terms. What is rhoPrimeI?
+                    """
+                    I am still seriously struggling to figure out why there's an
+                    ii an an ij term being added to the SVs. However, it has
+                    worked in the past for single-element trees, so it seems
+                    like it should be correct.
+
+                    I THINK the extra term is because with s-MEAM you have to
+                    make sure that the rho gets multiplied by the correct U'.
+                    in the trees there isn't a per-atom difference in U' for a
+                    single node (that gets handled by having different subtrees)
+                    """
+                    # rhoPrimeI = self.splines[itypeStr](rij, 1)
+                    rhoPrimeJ = self.splines[jtypeStr](rij, 1)
+
+                    # fcs = jvec*(rhoPrimeI + rhoPrimeJ)
+                    fcs = jvec*rhoPrimeJ
 
                     forces[i] += fcs
                     forces[j] -= fcs

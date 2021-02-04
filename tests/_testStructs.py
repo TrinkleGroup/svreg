@@ -69,6 +69,93 @@ trimers = {
 }
 
 ################################################################################
+# Right-angle trimers (for non-zero forces)
+
+trimer_aaa = Atoms([1, 1, 1],
+    positions=[[0, 0, 0], [1.5*r0, 0, 0], [0, 1.5*r0, 0]]
+)
+
+trimer_bbb = Atoms([2, 2, 2],
+    positions=[[0, 0, 0], [1.5*r0, 0, 0], [0, 1.5*r0, 0]]
+)
+
+trimer_abb = Atoms([1, 2, 2],
+    positions=[[0, 0, 0], [1.5*r0, 0, 0], [0, 1.5*r0, 0]]
+)
+
+trimer_bab = Atoms([2, 1, 2],
+    positions=[[0, 0, 0], [1.5*r0, 0, 0], [0, 1.5*r0, 0]]
+)
+
+trimer_baa = Atoms([2, 1, 1],
+    positions=[[0, 0, 0], [1.5*r0, 0, 0], [0, 1.5*r0, 0]]
+)
+
+trimer_aba = Atoms([1, 2, 1],
+    positions=[[0, 0, 0], [1.5*r0, 0, 0], [0, 1.5*r0, 0]]
+)
+
+trimer_aaa.center(vacuum=vac)
+trimer_bbb.center(vacuum=vac)
+trimer_abb.center(vacuum=vac)
+trimer_bab.center(vacuum=vac)
+trimer_baa.center(vacuum=vac)
+trimer_aba.center(vacuum=vac)
+
+trimers_rangle = {
+    'aaa_rangle': trimer_aaa,
+    'bbb_rangle': trimer_bbb,
+    'abb_rangle': trimer_abb,
+    'bab_rangle': trimer_bab,
+    'baa_rangle': trimer_baa,
+    'aba_rangle': trimer_aba,
+}
+
+
+################################################################################
+# Linear trimers (for non-zero forces in opposite directions)
+
+trimer_aaa = Atoms([1, 1, 1],
+    positions=[[-1.2*r0, 0, 0], [0, 0, 0], [1.2*r0, 0, 0]]
+)
+
+trimer_bbb = Atoms([2, 2, 2],
+    positions=[[-1.2*r0, 0, 0], [0, 0, 0], [1.2*r0, 0, 0]]
+)
+
+trimer_abb = Atoms([1, 2, 2],
+    positions=[[-1.2*r0, 0, 0], [0, 0, 0], [1.2*r0, 0, 0]]
+)
+
+trimer_bab = Atoms([2, 1, 2],
+    positions=[[-1.2*r0, 0, 0], [0, 0, 0], [1.2*r0, 0, 0]]
+)
+
+trimer_baa = Atoms([2, 1, 1],
+    positions=[[-1.2*r0, 0, 0], [0, 0, 0], [1.2*r0, 0, 0]]
+)
+
+trimer_aba = Atoms([1, 2, 1],
+    positions=[[-1.2*r0, 0, 0], [0, 0, 0], [1.2*r0, 0, 0]]
+)
+
+trimer_aaa.center(vacuum=vac)
+trimer_bbb.center(vacuum=vac)
+trimer_abb.center(vacuum=vac)
+trimer_bab.center(vacuum=vac)
+trimer_baa.center(vacuum=vac)
+trimer_aba.center(vacuum=vac)
+
+trimers_linear = {
+    'aaa_lin': trimer_aaa,
+    'bbb_lin': trimer_bbb,
+    'abb_lin': trimer_abb,
+    'bab_lin': trimer_bab,
+    'baa_lin': trimer_baa,
+    'aba_lin': trimer_aba,
+}
+
+################################################################################
 # Asymmetric trimers (9-13-14 scalene triangle)
 
 y = 108/28
@@ -132,6 +219,8 @@ bvo = {
 _all_test_structs = {
     **dimers,
     **trimers,
+    **trimers_rangle,
+    **trimers_linear,
     **trimers_asym,
     **bvo,
 }
