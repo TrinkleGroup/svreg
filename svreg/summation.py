@@ -224,12 +224,9 @@ class FFG(Summation):
         iForces = None
         forces = None
 
-        types = sorted(list(set(atoms.get_chemical_symbols())))
-
         atomTypesStrings = atoms.get_chemical_symbols()
         atomTypes = np.array(
             list(map(lambda s: self.allElements.index(s), atomTypesStrings))
-            # list(map(lambda s: types.index(s), atomTypesStrings))
         )
 
         N = len(atoms)
@@ -341,6 +338,16 @@ class FFG(Summation):
                     if evalType == 'vector':
                         bondType = self.bondMapping(jtype, ktype)
 
+                        self.add_to_forces_sv(
+                            forcesSV[bondType],
+                            rij, rik, cosTheta, dirs, i, j, k
+                        )
+
+                        # Only need to swap rij and rik for energy stuff, since
+                        # forces maintain an 3*N*N shape, meaning they still
+                        # distinguish between host-atom type and can be parsed
+                        # later
+
                         oldRij = rij
                         oldFjSpline = self.fjSpline
 
@@ -359,13 +366,11 @@ class FFG(Summation):
 
                             # If neighbors aren't in the correct order, swap
                             if [jtypeStr, ktypeStr] != bondInputs:
-                                oldRij = rij
                                 rij = rik
                                 rik = oldRij
 
                                 # dirs = np.vstack([d3, d4, d5, d0, d1, d2])
 
-                                oldFjSpline = self.fjSpline
                                 self.fjSpline = self.fkSpline
                                 self.fkSpline = oldFjSpline 
 
@@ -373,11 +378,6 @@ class FFG(Summation):
                         self.add_to_energy_sv(
                             energySV[bondType], rij, rik, cosTheta, i
                             )
-
-                        self.add_to_forces_sv(
-                            forcesSV[bondType],
-                            rij, rik, cosTheta, dirs, i, j, k
-                        )
 
                         rij = oldRij
                         self.fjSpline = oldFjSpline
@@ -481,11 +481,12 @@ class FFG(Summation):
             # sv[N2*a + N*i + i, :] += fk[:, a]
             # sv[N2*a + N*k + i, :] -= fk[:, a]
 
-            sv[N2*a + N*i + i, :] += fj[:, a]
-            sv[N2*a + N*i + j, :] -= fj[:, a]
+            sv[3*N*i + 3*i + a, :] += fj[:, a]
+            sv[3*N*i + 3*j + a, :] -= fj[:, a]
 
-            sv[N2*a + N*i + i, :] += fk[:, a]
-            sv[N2*a + N*i + k, :] -= fk[:, a]
+            sv[3*N*i + 3*i + a, :] += fk[:, a]
+            sv[3*N*i + 3*k + a, :] -= fk[:, a]
+
 
     @staticmethod
     @jit(
@@ -621,6 +622,7 @@ class Rho(Summation):
                 ])
 
                 energySV[bondType] = np.zeros((N, totalNumParams))
+                # forcesSV[bondType] = np.zeros((3*N*N, totalNumParams))
                 forcesSV[bondType] = np.zeros((3*N*N, totalNumParams))
 
         elif evalType == 'energy':
@@ -671,16 +673,7 @@ class Rho(Summation):
                 jvec /= rij
 
                 if evalType == 'vector':
-                    """
-                    I think the problem has to do with how the direct evaluation
-                    loop is short-circuiting, which means that a neighbor's
-                    forces will only be updated if the host atom's forces are
-                    active. The SV construction, on the other hand, will update
-                    all of the neighbors, regardless of if the host is "on" or
-                    not. 
 
-                    Mayb
-                    """
                     bondType = self.bondMapping(jtype)
 
                     self.add_to_energy_sv(energySV[bondType], rij, i)
@@ -715,19 +708,6 @@ class Rho(Summation):
 
                     totalEnergy += self.rho(rij)
                 elif evalType == 'forces':
-
-                    # TODO: I think I'm missing terms. What is rhoPrimeI?
-                    """
-                    I am still seriously struggling to figure out why there's an
-                    ii an an ij term being added to the SVs. However, it has
-                    worked in the past for single-element trees, so it seems
-                    like it should be correct.
-
-                    I THINK the extra term is because with s-MEAM you have to
-                    make sure that the rho gets multiplied by the correct U'.
-                    in the trees there isn't a per-atom difference in U' for a
-                    single node (that gets handled by having different subtrees)
-                    """
                     # rhoPrimeI = self.splines[itypeStr](rij, 1)
                     rhoPrimeJ = self.splines[jtypeStr](rij, 1)
 
@@ -753,9 +733,11 @@ class Rho(Summation):
         coeffs = np.einsum('i,j->ij', coeffs, direction)
 
         N = int(np.sqrt(sv.shape[0]//3))
-        N2 = N*N
         for a in range(3):
-            sv[N2*a + N*i + j, :] += coeffs[:, a]
+            # sv[N2*a + N*i + j, :] += coeffs[:, a]
+            sv[3*N*i + 3*j + a, :] += coeffs[:, a]
+            # sv[N*a + i, :] += coeffs[:, a]
+            # sv[3*i + a, :] += coeffs[:, a]
 
 
     def setParams(self, params):
@@ -773,7 +755,7 @@ class Rho(Summation):
 class Spline:
     """
     A helper class for embedding spline input values into vectors of spline
-    coefficients.
+    coefficients and for performing the corresponding direct spline evaluations.
     """
 
     def __init__(self, knots, bc_type=None):
