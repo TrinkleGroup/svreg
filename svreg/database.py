@@ -50,9 +50,12 @@ class SVDatabase(dict):
                 'energy': h5pyFile[struct].attrs['energy'],
             }
 
-            for el in elements:
-                fname = 'forces_' + el
-                self.trueValues[struct][fname] = h5pyFile[struct].attrs[fname]
+            # for el in elements:
+            #     fname = 'forces_' + el
+            #     self.trueValues[struct][fname] = h5pyFile[struct].attrs[fname]
+
+            self.trueValues[struct]['forces'] = h5pyFile[struct].attrs['forces']
+
 
         self.attrs = {
             'structNames': structNames,

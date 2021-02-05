@@ -850,9 +850,7 @@ class MultiComponentTree(SVTree):
 
         eng, fcs = zip(*vals)
 
-        # eng/fcs = [val for val in element_vals]
         return eng, fcs
-        # return sum(eng), np.concatenate(fcs, axis=1)
 
 
     def populate(self, N):

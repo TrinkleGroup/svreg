@@ -516,18 +516,15 @@ def computeErrors(refStruct, energies, forces, database):
 
             engErrors = abs(ediff - trueValues[structName]['energy'])
 
-            fcs =   forces[structName][treeNum]
+            fcs = sum(forces[structName][treeNum])
 
-            fcsErrors = [
-                fcs[ii] - trueValues[structName]['forces_'+el]
-                for ii, el in enumerate(elements)
-            ]
-
-            fcsErrors = [abs(err) for err in fcsErrors]
-            fcsErrors = [np.average(err, axis=(1, 2)) for err in fcsErrors]
+            fcsErrors = np.average(
+                abs(fcs - trueValues[structName]['forces']),
+                axis=(1,2)
+            )
 
             treeErrors.append(engErrors)
-            treeErrors.append(sum(fcsErrors))
+            treeErrors.append(fcsErrors)
 
         errors.append(np.stack(treeErrors))
 

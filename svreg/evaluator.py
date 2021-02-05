@@ -81,7 +81,6 @@ class SVEvaluator:
         def delayedSum(val):
             return val.sum(axis=-1).swapaxes(1, 2)
 
-        # TODO: consider converting results to a dask bag?
         for struct in structNames[::-1]:
             for svName in allSVnames[::-1]:
                 if svName not in populationDict: continue
@@ -94,20 +93,21 @@ class SVEvaluator:
                     # Parse the per-structure results
                     val = None
                     if evalType == 'energy':
+                        # TODO: is this a point of possible SV compression?
                         val = res.sum(axis=0)
                     elif evalType == 'forces':
                         val = res
 
-                        n = self.database.attrs['natoms'][struct]
+                        # n = self.database.attrs['natoms'][struct]
 
-                        if useDask:
-                            val = delayedReshape(val, n)
-                            val = delayedSum(val)
-                        else:
-                            nhost = val.shape[0]//3//n
+                        # if useDask:
+                        #     val = delayedReshape(val, n)
+                        #     val = delayedSum(val)
+                        # else:
+                        #     nhost = val.shape[0]//3//n
 
-                            val = val.T.reshape(res.shape[1], 3, nhost, n)
-                            val = val.sum(axis=-1).swapaxes(1, 2)
+                        #     val = val.T.reshape(res.shape[1], 3, nhost, n)
+                        #     val = val.sum(axis=-1).swapaxes(1, 2)
 
                     summedResults[struct][svName][elem] = val
                 

@@ -175,8 +175,9 @@ class SVRegressor:
                     numNodes = self.numNodes[svName][elem]
 
                     nodeEng = stackedEng.reshape((numNodes, N))
+                    nodeFcs = stackedFcs.T
                     nodeFcs = stackedFcs.reshape(
-                        (numNodes, N, stackedFcs.shape[1], stackedFcs.shape[2])
+                        (numNodes, N, stackedFcs.shape[0], stackedFcs.shape[1])
                     )
 
                     unstackedValues = []
@@ -186,9 +187,6 @@ class SVRegressor:
                         val2 = nodeFcs[valIdx]
 
                         unstackedValues.append((val1, val2))
-
-                    # # # TODO: don't need to reverse here?
-                    # unstackedValues = unstackedValues[::-1]
 
                     # Loop backwards over the list of values
                     for tree in self.trees[::-1]:
