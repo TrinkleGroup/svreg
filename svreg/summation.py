@@ -338,20 +338,29 @@ class FFG(Summation):
                     if evalType == 'vector':
                         bondType = self.bondMapping(jtype, ktype)
 
-                        self.add_to_forces_sv(
-                            forcesSV[bondType],
-                            rij, rik, cosTheta, dirs, i, j, k
-                        )
-
                         # Only need to swap rij and rik for energy stuff, since
                         # forces maintain an 3*N*N shape, meaning they still
                         # distinguish between host-atom type and can be parsed
                         # later
 
+                        oldJ = j
                         oldRij = rij
                         oldFjSpline = self.fjSpline
 
                         if jtype != ktype:  # Then this is a cross-term
+                            """
+                            Since there is only one bond type for cross-terms
+                            (e.g. AB, not AB and BA), we need to flip the
+                            ordering of triplets that aren't in the correct
+                            order. For example, we must flip a BA term so that
+                            is in AB ordering.
+
+                            In the case of forces, we must also flip the atom
+                            tags and the direction vectors to make sure that the
+                            results get added to the proper indices in the force
+                            SV.
+                            """
+
                             # Figure out expected order of bondType
 
                             # e.g. ['f_A', 'f_B', 'g_AB']
@@ -366,10 +375,13 @@ class FFG(Summation):
 
                             # If neighbors aren't in the correct order, swap
                             if [jtypeStr, ktypeStr] != bondInputs:
+                                j = k
+                                k = oldJ
+
                                 rij = rik
                                 rik = oldRij
 
-                                # dirs = np.vstack([d3, d4, d5, d0, d1, d2])
+                                dirs = np.vstack([d3, d4, d5, d0, d1, d2])
 
                                 self.fjSpline = self.fkSpline
                                 self.fkSpline = oldFjSpline 
@@ -379,6 +391,15 @@ class FFG(Summation):
                             energySV[bondType], rij, rik, cosTheta, i
                             )
 
+                        self.add_to_forces_sv(
+                            forcesSV[bondType],
+                            rij, rik, cosTheta, dirs, i, j, k
+                        )
+
+                        # TODO: the problem is that you need to swap the
+                        # functions without swapping the atoms
+
+                        j = oldJ
                         rij = oldRij
                         self.fjSpline = oldFjSpline
                     elif (evalType == 'energy') or (evalType == 'forces'):
@@ -464,23 +485,13 @@ class FFG(Summation):
             fj_1, fk_1, g_1, fj_2, fk_2, g_2, fj_3, fk_3, g_3, dirs
         )
 
-        # TODO: add documentation about what all of these terms mean
-
         """
         SV[i, i] is the sum of the forces on atom i due to its neighbors
         SV[i, j] is the forces on neighbor j due to atom i
         """
 
-        # forcesSV = np.zeros((3*N*N, int((self.numParams+2)**3)))
         N = int(np.sqrt(sv.shape[0]//3))
-        N2 = N*N
         for a in range(3):
-            # sv[N2*a + N*i + i, :] += fj[:, a]
-            # sv[N2*a + N*j + i, :] -= fj[:, a]
-
-            # sv[N2*a + N*i + i, :] += fk[:, a]
-            # sv[N2*a + N*k + i, :] -= fk[:, a]
-
             sv[3*N*i + 3*i + a, :] += fj[:, a]
             sv[3*N*i + 3*j + a, :] -= fj[:, a]
 
@@ -497,6 +508,18 @@ class FFG(Summation):
         v1 = np.outer(np.outer(fj_1, fk_1), g_1).ravel()
         v2 = np.outer(np.outer(fj_2, fk_2), g_2).ravel()
         v3 = np.outer(np.outer(fj_3, fk_3), g_3).ravel()
+
+        """
+        When computing the derivatives of the 3-body term, the derivative must
+        be taken with respect to rij _and_ rik. The forces parallel to the ij
+        bond will 
+
+        When computing forces, the following terms must be computed:
+        dE/d_xi | xj and dE\d_xi | xk
+
+        Using the chain and product rules, these derivatives result in 6 total
+        terms, 3 for the ij bond and 3 for the ik bond.
+        """
 
         # all 6 terms to be added
         t0 = dirs[0]*v1.reshape((-1, 1))

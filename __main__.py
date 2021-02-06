@@ -12,8 +12,8 @@ import numpy as np
 
 from dask_mpi import initialize
 initialize(
-    nthreads=2,
-    memory_limit='4 GB',
+    nthreads=6,
+    memory_limit='12 GB',
     # interface='ipogif0',
     # local_directory='/u/sciteam/vita/scratch/svreg/hyojung/hj_dask_prof_int',
 )
