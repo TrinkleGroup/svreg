@@ -94,7 +94,10 @@ class SVEvaluator:
                     val = None
                     if evalType == 'energy':
                         # TODO: is this a point of possible SV compression?
-                        val = res.sum(axis=0)
+
+                        # val = res.sum(axis=0)
+                        val = res
+
                     elif evalType == 'forces':
                         val = res
 

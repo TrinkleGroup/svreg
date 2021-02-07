@@ -338,11 +338,6 @@ class FFG(Summation):
                     if evalType == 'vector':
                         bondType = self.bondMapping(jtype, ktype)
 
-                        # Only need to swap rij and rik for energy stuff, since
-                        # forces maintain an 3*N*N shape, meaning they still
-                        # distinguish between host-atom type and can be parsed
-                        # later
-
                         oldJ = j
                         oldRij = rij
                         oldFjSpline = self.fjSpline
@@ -395,9 +390,6 @@ class FFG(Summation):
                             forcesSV[bondType],
                             rij, rik, cosTheta, dirs, i, j, k
                         )
-
-                        # TODO: the problem is that you need to swap the
-                        # functions without swapping the atoms
 
                         j = oldJ
                         rij = oldRij

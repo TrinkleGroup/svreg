@@ -175,10 +175,12 @@ class SVRegressor:
                     numNodes = self.numNodes[svName][elem]
 
                     nodeEng = stackedEng.reshape((numNodes, N))
-                    nodeFcs = stackedFcs.T
+
                     nodeFcs = stackedFcs.reshape(
-                        (numNodes, N, stackedFcs.shape[0], stackedFcs.shape[1])
-                    )
+                        (stackedFcs.shape[0], stackedFcs.shape[1], N, numNodes)
+                    ).T
+                    
+                    nodeFcs = nodeFcs.swapaxes(2, 3)
 
                     unstackedValues = []
                     # for val1, val2 in zip(nodeEng, nodeFcs):
