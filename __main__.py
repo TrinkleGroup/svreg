@@ -391,7 +391,6 @@ def polish(client, settings):
                     )
                 )
 
-
 ################################################################################
 # Helper functions
 
@@ -494,7 +493,6 @@ def computeErrors(refStruct, energies, forces, database):
 
     trueValues = database.trueValues
     natoms = database.attrs['natoms']
-    elements = database.attrs['elements']
 
     keys = list(energies.keys())
     numTrees   = len(energies[keys[0]])
@@ -514,7 +512,13 @@ def computeErrors(refStruct, energies, forces, database):
 
             ediff = structEng - refEng
 
-            engErrors = abs(ediff - trueValues[structName]['energy'])
+            # Stored true values should already be per-atom energies
+            # Note that if the database alreayd did subtract off a reference
+            # energy, this won't cause any issues since it will be 0
+            trueEdiff = trueValues[structName]['energy']
+            trueEdiff -= trueValues[refStruct]['energy']
+
+            engErrors = abs(ediff - trueEdiff)
 
             fcs = sum(forces[structName][treeNum])
 

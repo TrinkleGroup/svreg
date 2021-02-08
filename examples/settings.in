@@ -16,10 +16,10 @@ runType     POLISH
 # refStruct           Ground_state_crystal
 # databasePath        ../svreg_data/mlearn/Mo/Mo.hdf5-fixed-newformat0
 
-refStruct           Ti48Mo80_type1_c18
-databasePath        ../svreg_data/hyojung/hj.hdf5-fixed-f32-mini0
 # refStruct           Ti48Mo80_type1_c18
-# databasePath        ../svreg_data/hyojung/hj.hdf5-fixed-f32-newcode-full
+# databasePath        ../svreg_data/hyojung/hj.hdf5-fixed-f32-mini0
+refStruct           Ti48Mo80_type1_c18
+databasePath        ../svreg_data/hyojung/hj.hdf5-fixed-f32-noref-full
 
 outputPath          ./results/debug
 overwrite           True
@@ -42,7 +42,7 @@ pointMutateProb         0.2
 maxTreeDepth            4
 
 numRegressorSteps       3
-maxNumOptimizerSteps    1000
+maxNumOptimizerSteps    20000
 
 energyWeight            10
 forcesWeight            1
