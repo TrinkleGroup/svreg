@@ -151,7 +151,12 @@ class SVTree(list):
 
         # Check for single-node tree
         if isinstance(self.nodes[0], SVNode):
-            return self.nodes[0].values
+
+            eng = self.nodes[0].values[0].sum(axis=1)
+            fcs = self.nodes[0].values[0]
+            fcs = np.einsum('ijkl->ikl', fcs)
+
+            return eng, fcs
 
         # Constructs a list-of-lists where each sub-list is a sub-tree for a
         # function at a given recursion depth. The first node of a sub-tree
@@ -184,6 +189,13 @@ class SVTree(list):
                         (intermediateEng, intermediateFcs)
                     )
                 else:  # Done evaluating all sub-trees
+
+                    # Ne = num atoms of given element type; N = total num atoms
+                    # intermediateEng = (P, Ne)
+                    # intermediateFcs = (P, Ne, N, 3)
+
+                    intermediateEng = intermediateEng.sum(axis=1)
+                    intermediateFcs = np.einsum('ijkl->ikl', intermediateFcs)
 
                     return intermediateEng, intermediateFcs
 
@@ -520,6 +532,10 @@ class SVTree(list):
         return output
 
 
+    def __repr__(self):
+        return str(self)
+
+
     def getSubtree(self):
         """
         Get a random sub-tree. As in gplearn, uses Koza's (1992) approach.
@@ -730,7 +746,12 @@ class SVTree(list):
                     "First node isn't a funciton, but there is more than one\
                     node."
                 )
-            return nodes[0].loop(atoms, evalType, hostType)
+            res = nodes[0].loop(atoms, evalType, hostType)
+
+            if evalType == 'energy':
+                return np.sum(res)
+            elif evalType == 'forces':
+                return np.einsum('ijkl->kl', res)
 
         # Constructs a list-of-lists where each sub-list is a sub-tree for a
         # function at a given recursion depth. The first node of a sub-tree
@@ -752,10 +773,12 @@ class SVTree(list):
                 args = []
                 for n in subTrees[-1][1:]:
                     if isinstance(n, Summation):
-                        eng = np.array([n.loop(atoms, 'energy', hostType)])
+                        # eng = np.array([n.loop(atoms, 'energy', hostType)])
+                        eng = n.loop(atoms, 'energy', hostType)
 
                         if evalType == 'forces':
-                            fcs = np.array([n.loop(atoms, evalType, hostType)])
+                            # fcs = np.array([n.loop(atoms, evalType, hostType)])
+                            fcs = n.loop(atoms, evalType, hostType)
                         else:
                             fcs = None
 
@@ -778,9 +801,16 @@ class SVTree(list):
                         (intermediateEng, intermediateFcs)
                     )
                 else:  # Done evaluating all sub-trees
+
+                    # Ne = num atoms of given element type; N = total num atoms
+                    # intermediateEng = (1, Ne)
+                    # intermediateFcs = (1, Ne, N, 3)
+
                     if evalType == 'energy':
+                        intermediateEng = np.sum(intermediateEng)
                         return intermediateEng
                     else:
+                        intermediateFcs = np.einsum('ijkl->kl', intermediateFcs)
                         return intermediateFcs
 
         raise RuntimeError("Something went wrong in tree evaluation")
@@ -850,7 +880,10 @@ class MultiComponentTree(SVTree):
 
         eng, fcs = zip(*vals)
 
-        return eng, fcs
+        # eng = [(P,) for _ in chemistryTrees]
+        # fcs = [(P, N, 3) for _ in chemistryTrees]
+
+        return sum(eng), sum(fcs)
 
 
     def populate(self, N):

@@ -11,6 +11,7 @@ from svreg.exceptions import StaleValueException
 
 from tests._testStructs import _all_test_structs
 
+atol = 1e-10
 
 def flat(x=None):
     if x is None:
@@ -50,7 +51,7 @@ class Test_SVTree(unittest.TestCase):
         ]
 
         for i, svNode in enumerate(self.svNodePool):
-            svNode.values = (i, 0)
+            svNode.values = (np.ones((1, 5))*i, np.zeros((1, 5, 5, 3)))
             
         self.tree = SVTree(
             nodes=[
@@ -70,36 +71,31 @@ class Test_SVTree(unittest.TestCase):
     def test_tree_print(self):
         self.assertEqual(str(self.tree), 'add(sv0, add(sv1, sv2))')
 
-    
-    def test_eval(self):
-        self.assertEqual(self.tree.eval(), (3, 0))
-
 
     def test_1d_eval(self):
         for node in self.tree.svNodes:
-            node.values = (np.array([1, 2, 3]), 0)
+            node.values = (np.array([[1, 2, 3]]), np.zeros((1, 5, 5, 3)))
 
         results = self.tree.eval()
 
-        np.testing.assert_array_equal(results[0], [3, 6, 9])
-        np.testing.assert_array_equal(results[1], 0)
+        np.testing.assert_array_equal(results[0], np.array([18]))
+        np.testing.assert_array_equal(results[1], np.zeros((1, 5, 3)))
 
 
     def test_2d_eval(self):
         for node in self.tree.svNodes:
-            node.values = (np.tile([1,2,3], reps=(2,)), 0)
+            node.values = (
+                np.array([[1, 2, 3], [1, 2, 3]]), np.zeros((2, 5, 5, 3))
+            )
 
         results = self.tree.eval()
 
-        np.testing.assert_array_equal(
-            results[0], np.tile([3, 6, 9], reps=(2,))
-        )
-
-        np.testing.assert_array_equal(results[1], 0)
+        np.testing.assert_array_equal(results[0], np.array([18, 18]))
+        np.testing.assert_array_equal(results[1], np.zeros((2, 5, 3)))
 
 
     def test_repeat_eval_error(self):
-        self.assertEqual(self.tree.eval(), (3, 0))
+        self.tree.eval()
 
         with self.assertRaises(StaleValueException):
             self.tree.eval()
@@ -1119,7 +1115,6 @@ class Test_Direct_vs_SV_Ti48Mo80_type1_c10(unittest.TestCase):
                     fcsSplit = fcsSV[svName][bondType]
                     fcsSplit = fcsSplit.reshape((n, n, 3, k))
                     fcsSplit = fcsSplit[where, :, :, :]
-                    fcsSplit = np.einsum('ijkl->jkl', fcsSplit)
                     miniDatabase[elem]['forces'][svName][bondType] = fcsSplit.copy()
                    
         from svreg.tree import SVTree
@@ -1283,9 +1278,11 @@ class Test_Direct_vs_SV_Ti48Mo80_type1_c10(unittest.TestCase):
             'forces',
             'fixed',
             cutoffs=[2.4, 5.2]
-        )[0]
+        )
 
-        np.testing.assert_allclose(fcsDirectMethod, (totalMoForces+totalTiForces)[:, :, 0], atol=1e-12)
+        svForces = np.sum(totalMoForces, axis=0) + np.sum(totalTiForces, axis=0)
+        svForces = np.moveaxis(svForces, -1, 0)
+        np.testing.assert_allclose(fcsDirectMethod, svForces[0], atol=atol)
 
 
     def test_angled_splines(self):
@@ -1354,9 +1351,11 @@ class Test_Direct_vs_SV_Ti48Mo80_type1_c10(unittest.TestCase):
             'forces',
             'fixed',
             cutoffs=[2.4, 5.2]
-        )[0]
+        )
 
-        np.testing.assert_allclose(fcsDirectMethod, (totalMoForces+totalTiForces)[:, :, 0])
+        svForces = np.sum(totalMoForces, axis=0) + np.sum(totalTiForces, axis=0)
+        svForces = np.moveaxis(svForces, -1, 0)
+        np.testing.assert_allclose(fcsDirectMethod, svForces[0], atol=atol)
 
 
     def test_wiggly_splines(self):
@@ -1425,11 +1424,11 @@ class Test_Direct_vs_SV_Ti48Mo80_type1_c10(unittest.TestCase):
             'forces',
             'fixed',
             cutoffs=[2.4, 5.2]
-        )[0]
+        )
 
-        np.testing.assert_allclose(fcsDirectMethod, (totalMoForces+totalTiForces)[:, :, 0])
-
-
+        svForces = np.sum(totalMoForces, axis=0) + np.sum(totalTiForces, axis=0)
+        svForces = np.moveaxis(svForces, -1, 0)
+        np.testing.assert_allclose(fcsDirectMethod, svForces[0], atol=atol)
 
 
     def test_linear_rho_wiggly_ffg_0end(self):
@@ -1683,7 +1682,6 @@ class Test_MCTree_Real_Forces(unittest.TestCase):
                         fcsSplit = fcsSV[svName][bondType]
                         fcsSplit = fcsSplit.reshape((n, n, 3, k))
                         fcsSplit = fcsSplit[where, :, :, :]
-                        fcsSplit = np.einsum('ijkl->jkl', fcsSplit)
                         miniDatabase[elem]['forces'][svName][bondType] = fcsSplit.copy()
                     
             return miniDatabase
@@ -1740,7 +1738,7 @@ class Test_MCTree_Real_Forces(unittest.TestCase):
                 cutoffs=self.cutoffs,
             )
 
-            np.testing.assert_allclose(np.sum(fcs, axis=0), 0.0, atol=1e-16)
+            np.testing.assert_allclose(np.sum(fcs, axis=0), 0.0, atol=atol)
     
       
     def test_directEval_rho_A_rho_B_trimers_linear(self):
@@ -1766,9 +1764,9 @@ class Test_MCTree_Real_Forces(unittest.TestCase):
                 evalType='forces',
                 bc_type='fixed',
                 cutoffs=self.cutoffs,
-            )[0]
+            )
 
-            np.testing.assert_allclose(np.sum(fcs, axis=0), 0.0, atol=1e-14)
+            np.testing.assert_allclose(np.sum(fcs, axis=0), 0.0, atol=atol)
           
 
     def test_direct_vs_SV_rho_A_rho_B_trimers_linear_angled(self):
@@ -1796,7 +1794,7 @@ class Test_MCTree_Real_Forces(unittest.TestCase):
                 evalType='forces',
                 bc_type='fixed',
                 cutoffs=self.cutoffs,
-            )[0]
+            )
 
             miniDatabase = self.miniDb(_all_test_structs[struct+'_lin'])
 
@@ -1812,8 +1810,11 @@ class Test_MCTree_Real_Forces(unittest.TestCase):
             totalHeForces += miniDatabase['He']['forces']['rho']['rho_A'] @ popDict['He']['rho_A'].T
             totalHeForces += miniDatabase['He']['forces']['rho']['rho_B'] @ popDict['He']['rho_B'].T
 
-            np.testing.assert_allclose(np.sum(fcs, axis=0), 0.0, atol=1e-14)
-            np.testing.assert_allclose(fcs, (totalHForces+totalHeForces)[:, :, 0])
+            np.testing.assert_allclose(np.sum(fcs, axis=0), 0.0, atol=atol)
+
+            svForces = np.sum(totalHForces, axis=0) + np.sum(totalHeForces, axis=0)
+            svForces = np.moveaxis(svForces, -1, 0)
+            np.testing.assert_allclose(fcs, svForces[0], atol=atol)
 
 
     def test_direct_vs_SV_mixed_trimers_symmetric_angled(self):
@@ -1857,7 +1858,7 @@ class Test_MCTree_Real_Forces(unittest.TestCase):
                 evalType='forces',
                 bc_type='fixed',
                 cutoffs=self.cutoffs,
-            )[0]
+            )
 
             miniDatabase = self.miniDb(_all_test_structs[struct])
 
@@ -1881,8 +1882,11 @@ class Test_MCTree_Real_Forces(unittest.TestCase):
             totalHeForces += miniDatabase['He']['forces']['ffg']['ffg_AB'] @ popDict['He']['ffg_AB'].T
             totalHeForces += miniDatabase['He']['forces']['ffg']['ffg_BB'] @ popDict['He']['ffg_BB'].T
 
-            np.testing.assert_allclose(np.sum(fcs, axis=0), 0.0, atol=1e-14)
-            np.testing.assert_allclose(fcs, (totalHForces+totalHeForces)[:, :, 0], atol=1e-14)
+            np.testing.assert_allclose(np.sum(fcs, axis=0), 0.0, atol=atol)
+
+            svForces = np.sum(totalHForces, axis=0) + np.sum(totalHeForces, axis=0)
+            svForces = np.moveaxis(svForces, -1, 0)
+            np.testing.assert_allclose(fcs, svForces[0], atol=atol)
 
 
     def test_direct_vs_SV_mixed_trimers_linear_angled(self):
@@ -1926,7 +1930,7 @@ class Test_MCTree_Real_Forces(unittest.TestCase):
                 evalType='forces',
                 bc_type='fixed',
                 cutoffs=self.cutoffs,
-            )[0]
+            )
 
             miniDatabase = self.miniDb(_all_test_structs[struct+'_lin'])
 
@@ -1950,8 +1954,11 @@ class Test_MCTree_Real_Forces(unittest.TestCase):
             totalHeForces += miniDatabase['He']['forces']['ffg']['ffg_AB'] @ popDict['He']['ffg_AB'].T
             totalHeForces += miniDatabase['He']['forces']['ffg']['ffg_BB'] @ popDict['He']['ffg_BB'].T
 
-            np.testing.assert_allclose(np.sum(fcs, axis=0), 0.0, atol=1e-14)
-            np.testing.assert_allclose(fcs, (totalHForces+totalHeForces)[:, :, 0], atol=1e-14)
+            np.testing.assert_allclose(np.sum(fcs, axis=0), 0.0, atol=atol)
+
+            svForces = np.sum(totalHForces, axis=0) + np.sum(totalHeForces, axis=0)
+            svForces = np.moveaxis(svForces, -1, 0)
+            np.testing.assert_allclose(fcs, svForces[0], atol=atol)
 
 
     def test_direct_vs_SV_mixed_trimers_asymmetric_angled(self):
@@ -1986,8 +1993,7 @@ class Test_MCTree_Real_Forces(unittest.TestCase):
 
         tree.updateSVNodes()
 
-        # for struct in ['aaa', 'bbb', 'abb', 'bab', 'baa', 'aba']:
-        for struct in ['abb']:
+        for struct in ['aaa', 'bbb', 'abb', 'bab', 'baa', 'aba']:
             y = np.concatenate([angled(i) for i in range(18)])
 
             fcs = tree.directEvaluation(
@@ -1996,7 +2002,7 @@ class Test_MCTree_Real_Forces(unittest.TestCase):
                 evalType='forces',
                 bc_type='fixed',
                 cutoffs=self.cutoffs,
-            )[0]
+            )
 
             miniDatabase = self.miniDb(_all_test_structs[struct+'_asym'])
 
@@ -2020,8 +2026,11 @@ class Test_MCTree_Real_Forces(unittest.TestCase):
             totalHeForces += miniDatabase['He']['forces']['ffg']['ffg_AB'] @ popDict['He']['ffg_AB'].T
             totalHeForces += miniDatabase['He']['forces']['ffg']['ffg_BB'] @ popDict['He']['ffg_BB'].T
 
-            np.testing.assert_allclose(np.sum(fcs, axis=0), 0.0, atol=1e-12)
-            np.testing.assert_allclose(fcs, (totalHForces+totalHeForces)[:, :, 0], atol=1e-14)
+            np.testing.assert_allclose(np.sum(fcs, axis=0), 0.0, atol=atol)
+
+            svForces = np.sum(totalHForces, axis=0) + np.sum(totalHeForces, axis=0)
+            svForces = np.moveaxis(svForces, -1, 0)
+            np.testing.assert_allclose(fcs, svForces[0], atol=atol)
 
 
     def test_direct_vs_SV_rho_A_rho_B_trimers_linear_wiggly(self):
@@ -2049,7 +2058,7 @@ class Test_MCTree_Real_Forces(unittest.TestCase):
                 evalType='forces',
                 bc_type='fixed',
                 cutoffs=self.cutoffs,
-            )[0]
+        )
 
             miniDatabase = self.miniDb(_all_test_structs[struct+'_lin'])
 
@@ -2065,8 +2074,11 @@ class Test_MCTree_Real_Forces(unittest.TestCase):
             totalHeForces += miniDatabase['He']['forces']['rho']['rho_A'] @ popDict['He']['rho_A'].T
             totalHeForces += miniDatabase['He']['forces']['rho']['rho_B'] @ popDict['He']['rho_B'].T
 
-            np.testing.assert_allclose(np.sum(fcs, axis=0), 0.0, atol=1e-14)
-            np.testing.assert_allclose(fcs, (totalHForces+totalHeForces)[:, :, 0])
+            np.testing.assert_allclose(np.sum(fcs, axis=0), 0.0, atol=atol)
+
+            svForces = np.sum(totalHForces, axis=0) + np.sum(totalHeForces, axis=0)
+            svForces = np.moveaxis(svForces, -1, 0)
+            np.testing.assert_allclose(fcs, svForces[0], atol=atol)
 
 
     def test_direct_vs_SV_mixed_trimers_symmetric_wiggly(self):
@@ -2101,8 +2113,7 @@ class Test_MCTree_Real_Forces(unittest.TestCase):
 
         tree.updateSVNodes()
 
-        # for struct in ['aaa', 'bbb', 'abb', 'bab', 'baa', 'aba']:
-        for struct in ['abb']:
+        for struct in ['aaa', 'bbb', 'abb', 'bab', 'baa', 'aba']:
             y = np.concatenate([wiggly() for _ in range(18)])
 
             fcs = tree.directEvaluation(
@@ -2111,7 +2122,7 @@ class Test_MCTree_Real_Forces(unittest.TestCase):
                 evalType='forces',
                 bc_type='fixed',
                 cutoffs=self.cutoffs,
-            )[0]
+            )
 
             miniDatabase = self.miniDb(_all_test_structs[struct])
 
@@ -2135,8 +2146,11 @@ class Test_MCTree_Real_Forces(unittest.TestCase):
             totalHeForces += miniDatabase['He']['forces']['ffg']['ffg_AB'] @ popDict['He']['ffg_AB'].T
             totalHeForces += miniDatabase['He']['forces']['ffg']['ffg_BB'] @ popDict['He']['ffg_BB'].T
 
-            np.testing.assert_allclose(np.sum(fcs, axis=0), 0.0, atol=1e-14)
-            np.testing.assert_allclose(fcs, (totalHForces+totalHeForces)[:, :, 0], atol=1e-14)
+            np.testing.assert_allclose(np.sum(fcs, axis=0), 0.0, atol=atol)
+
+            svForces = np.sum(totalHForces, axis=0) + np.sum(totalHeForces, axis=0)
+            svForces = np.moveaxis(svForces, -1, 0)
+            np.testing.assert_allclose(fcs, svForces[0], atol=atol)
 
 
     def test_direct_vs_SV_mixed_trimers_linear_wiggly(self):
@@ -2180,7 +2194,7 @@ class Test_MCTree_Real_Forces(unittest.TestCase):
                 evalType='forces',
                 bc_type='fixed',
                 cutoffs=self.cutoffs,
-            )[0]
+            )
 
             miniDatabase = self.miniDb(_all_test_structs[struct+'_lin'])
 
@@ -2204,8 +2218,11 @@ class Test_MCTree_Real_Forces(unittest.TestCase):
             totalHeForces += miniDatabase['He']['forces']['ffg']['ffg_AB'] @ popDict['He']['ffg_AB'].T
             totalHeForces += miniDatabase['He']['forces']['ffg']['ffg_BB'] @ popDict['He']['ffg_BB'].T
 
-            np.testing.assert_allclose(np.sum(fcs, axis=0), 0.0, atol=1e-14)
-            np.testing.assert_allclose(fcs, (totalHForces+totalHeForces)[:, :, 0], atol=1e-14)
+            np.testing.assert_allclose(np.sum(fcs, axis=0), 0.0, atol=atol)
+
+            svForces = np.sum(totalHForces, axis=0) + np.sum(totalHeForces, axis=0)
+            svForces = np.moveaxis(svForces, -1, 0)
+            np.testing.assert_allclose(fcs, svForces[0], atol=atol)
 
 
     def test_direct_vs_SV_mixed_trimers_asymmetric_wiggly(self):
@@ -2249,7 +2266,7 @@ class Test_MCTree_Real_Forces(unittest.TestCase):
                 evalType='forces',
                 bc_type='fixed',
                 cutoffs=self.cutoffs,
-            )[0]
+            )
 
             miniDatabase = self.miniDb(_all_test_structs[struct+'_asym'])
 
@@ -2273,9 +2290,50 @@ class Test_MCTree_Real_Forces(unittest.TestCase):
             totalHeForces += miniDatabase['He']['forces']['ffg']['ffg_AB'] @ popDict['He']['ffg_AB'].T
             totalHeForces += miniDatabase['He']['forces']['ffg']['ffg_BB'] @ popDict['He']['ffg_BB'].T
 
-            np.testing.assert_allclose(np.sum(fcs, axis=0), 0.0, atol=1e-14)
-            np.testing.assert_allclose(fcs, (totalHForces+totalHeForces)[:, :, 0], atol=1e-14)
+            np.testing.assert_allclose(np.sum(fcs, axis=0), 0.0, atol=atol)
 
+            svForces = np.sum(totalHForces, axis=0) + np.sum(totalHeForces, axis=0)
+            svForces = np.moveaxis(svForces, -1, 0)
+            np.testing.assert_allclose(fcs, svForces[0], atol=atol)
+
+      
+
+    def test_nonlinear_embedders_dont_crash(self):
+        from svreg.functions import _function_map
+
+        for fxn in _function_map:
+            tree = MCTree(['H', 'He'])
+            
+            subtree0 = SVTree(nodes=[
+                FunctionNode(fxn),
+                deepcopy(self.rho_A),
+                deepcopy(self.ffg_AB),
+                ])
+
+            subtree1 = SVTree(nodes=[
+                FunctionNode(fxn),
+                deepcopy(self.rho_A),
+                deepcopy(self.ffg_AB),
+                ])
+
+            tree.chemistryTrees['H']    = subtree0
+            tree.chemistryTrees['He']   = subtree1
+
+            tree.updateSVNodes()
+
+            for struct in ['aaa', 'bbb', 'abb', 'bab', 'baa', 'aba']:
+                y = np.concatenate([wiggly() for _ in range(18)])
+
+                fcs = tree.directEvaluation(
+                    y,
+                    _all_test_structs[struct+'_asym'],
+                    evalType='forces',
+                    bc_type='fixed',
+                    cutoffs=self.cutoffs,
+                )
+
+                np.testing.assert_allclose(np.sum(fcs, axis=0), 0.0, atol=atol)
+         
 
 if __name__ == '__main__':
     unittest.main()

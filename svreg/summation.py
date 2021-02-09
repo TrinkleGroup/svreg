@@ -148,10 +148,15 @@ class Summation:
                 hostType is None then it loops over all atoms.
 
         Returns:
-            Depends upon specified `evalType`. If `energy`, returns a single
-            float corresponding to the total energy of the system. If `forces`,
-            returns an (N, 3) array of forces on each atom. If `vector`, returns
-            a dictionary of the form {bondType: {energy/forces: vector}}.
+            Depends upon specified `evalType`. If `energy`, returns a (1, N)
+            array corresponding to the per-atom energies of the system. If
+            `forces`, returns an (1, N, N, 3) array of forces on each atom. If
+            `vector`, returns a dictionary of the form
+            {bondType: {energy/forces: vector}}.
+
+            Note that the specific shapes of the energies and forces matrices is
+            so that the derivatives can be computed properly for the embedding
+            functions.
         """
 
 
@@ -167,16 +172,6 @@ class FFG(Summation):
         self.gSplines = {}
 
         for el1 in kwargs['neighborElements']:
-            # TODO: if numParams or knot positions are ever not the same for all
-            # splines, then this section is going to need to change
-
-            # TODO: currently assumes components is only [f_A, g_AA]; won't be
-            # true for multi-component
-
-            # TODO: I think this code is only working right now because all of
-            # the splines of a given type (F or G) have the same number of
-            # parameters and the same restrictions
-
             self.fSplines[el1] = Spline(
                 knots=np.linspace(
                     self.cutoffs[0], self.cutoffs[1],
@@ -245,9 +240,9 @@ class FFG(Summation):
                 forcesSV[bondType] = np.zeros((3*N*N, cartsize))
 
         elif evalType == 'energy':
-            totalEnergy = 0.0
+            totalEnergy = np.zeros((1, N))
         elif evalType == 'forces':
-            forces = np.zeros((N, 3))
+            forces = np.zeros((1, N, N, 3))
 
         # Allows double counting bonds; needed for embedding energy calculations
         nl = NeighborList(
@@ -421,18 +416,18 @@ class FFG(Summation):
                         jForces += fj
                         iForces -= fk
 
-                        forces[k] += fk
+                        forces[:, i, k, :] += fk
                 # end triplet loop
 
                 if evalType == 'energy':
-                    totalEnergy += fjVal*partialsum
+                    totalEnergy[:, i] += fjVal*partialsum
                 elif evalType == 'forces':
-                    forces[i] -= jForces
-                    forces[j] += jForces
+                    forces[:, i, i, :] -= jForces
+                    forces[:, i, j, :] += jForces
             # end neighbor loop
 
             if evalType == 'forces':
-                forces[i] += iForces
+                forces[:, i, i, :] += iForces
         # end atom loop
 
         if evalType == 'vector':
@@ -616,7 +611,6 @@ class Rho(Summation):
         forcesSV = None
         forces = None
 
-        types = sorted(list(set(atoms.get_chemical_symbols())))
         atomTypesStrings = atoms.get_chemical_symbols()
         atomTypes = np.array(
             list(map(lambda s: self.allElements.index(s), atomTypesStrings))
@@ -641,9 +635,9 @@ class Rho(Summation):
                 forcesSV[bondType] = np.zeros((3*N*N, totalNumParams))
 
         elif evalType == 'energy':
-            totalEnergy = 0.0
+            totalEnergy = np.zeros((1, N))
         elif evalType == 'forces':
-            forces = np.zeros((N, 3))
+            forces = np.zeros((1, N, N, 3))
 
         # Note that double counting is always allowed, but it must be done
         # manually (rather than directly multiplying each bond by 2)
@@ -658,7 +652,6 @@ class Rho(Summation):
         cell = atoms.get_cell()
 
         for i, atom in enumerate(atoms):
-            itype = atomTypes[i]
             itypeStr = atomTypesStrings[i]
 
             if hostType is not None:
@@ -721,7 +714,7 @@ class Rho(Summation):
                     # evaluated with different Rho splines, which is why you
                     # can't simply multiply by 2 here
 
-                    totalEnergy += self.rho(rij)
+                    totalEnergy[:, i] += self.rho(rij)
                 elif evalType == 'forces':
                     # rhoPrimeI = self.splines[itypeStr](rij, 1)
                     rhoPrimeJ = self.splines[jtypeStr](rij, 1)
@@ -729,8 +722,8 @@ class Rho(Summation):
                     # fcs = jvec*(rhoPrimeI + rhoPrimeJ)
                     fcs = jvec*rhoPrimeJ
 
-                    forces[i] += fcs
-                    forces[j] -= fcs
+                    forces[:, i, i, :] += fcs
+                    forces[:, i, j, :] -= fcs
 
         if evalType == 'vector':
             return energySV, forcesSV

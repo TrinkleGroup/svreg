@@ -33,11 +33,11 @@ class Test_FunctionNode(unittest.TestCase):
             self.assertEquals(node.function.arity, _function_map[key].arity)
 
             args = [
-                (random.random(), random.random())
+                (np.random.random(size=(10, 7)), np.random.random((10, 7, 7, 3)))
                 for _ in range(node.function.arity)
             ]
 
-            self.assertEquals(
+            np.testing.assert_allclose(
                 node.function(*args), _function_map[key](*args)
             )
 

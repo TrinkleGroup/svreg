@@ -64,9 +64,6 @@ class SVDatabase(dict):
             'natoms': {s: h5pyFile[s].attrs['natoms'] for s in structNames},
         }
 
-        # self.attrs['structNames'] = np.char.decode(
-        #     self.attrs['structNames'].astype(np.bytes_)
-        # )
 
     def load(self, h5pyFile, useDask=True):
 

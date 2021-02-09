@@ -136,7 +136,7 @@ class SVRegressor:
             self.trees = treesToAdd
 
 
-    def evaluateTrees(self, svEng, svFcs, N):
+    def evaluateTrees(self, svEng, svFcs, P):
         """
         Updates the SVNode objects in the trees with the given values, then
         evaluate the trees
@@ -148,7 +148,7 @@ class SVRegressor:
             svFcs (dict):
                 svFcs[structName][svName][elem] = computed values for given node
 
-            N (int):
+            P (int):
                 The number of parameter sets for each node. Used for splitting
                 the population of results.
 
@@ -171,16 +171,33 @@ class SVRegressor:
                     if stackedEng is None: continue
 
                     # Un-stack values for each element, and append to list
-                    # numNodes = stackedEng.shape[0]//N
+                    # numNodes = stackedEng.shape[0]//P
                     numNodes = self.numNodes[svName][elem]
 
-                    nodeEng = stackedEng.reshape((numNodes, N))
+                    nelem = stackedFcs.shape[0]
+                    natom = stackedFcs.shape[1]
 
-                    nodeFcs = stackedFcs.reshape(
-                        (stackedFcs.shape[0], stackedFcs.shape[1], N, numNodes)
-                    ).T
+                    # stackedEng will have the shape (P*Nn, Ne) and will need to
+                    # be reshaped to separate out the per-node contributions,
+                    # but can't be summed until after full tree evaluation
+                    nodeEng = stackedEng.reshape((numNodes, P, nelem))
+
+                    # stackedFcs has the shape (Ne, N, 3, P*Nn), where Ne is the
+                    # number of atoms of the current element type and Nn is the
+                    # number of  nodes of the given node type. Note that
+                    # this needs to be reshaped to separate out the per-node
+                    # contributions, but cannot be summed over until after full
+                    # tree evaluation.
+                    nodeFcs = stackedFcs.reshape((nelem, natom, 3, P, numNodes))
+                    nodeFcs = np.moveaxis(nodeFcs, -1, 0)
+                    nodeFcs = np.moveaxis(nodeFcs, -1, 1)
+                    # nodeFcs = (numNodes, P, nelem, natom, 3)
+
+                    # nodeFcs = stackedFcs.reshape(
+                    #     (stackedFcs.shape[0], stackedFcs.shape[1], N, numNodes)
+                    # ).T
                     
-                    nodeFcs = nodeFcs.swapaxes(2, 3)
+                    # nodeFcs = nodeFcs.swapaxes(2, 3)
 
                     unstackedValues = []
                     # for val1, val2 in zip(nodeEng, nodeFcs):
@@ -206,6 +223,9 @@ class SVRegressor:
             for tree in self.trees:
                 # eng, fcs = tree.eval()
                 future = tree.eval()
+
+                # future[0] = (P,)
+                # future[1] = (P, N, 3)
 
                 energies[structName].append(future[0])
                 forces[structName].append(future[1])
