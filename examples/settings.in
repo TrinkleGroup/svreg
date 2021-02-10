@@ -18,10 +18,10 @@ runType     POLISH
 
 # refStruct           Ti48Mo80_type1_c18
 # databasePath        ../svreg_data/hyojung/hj.hdf5-fixed-f32-mini0
-refStruct           Ti48Mo80_type1_c18
+refStruct           Ti48Mo80_type1_c10
 databasePath        ../svreg_data/hyojung/hj.hdf5-fixed-f32-noref-full
 
-outputPath          ./results/debug
+outputPath          ./results/debug2
 overwrite           True
 
 ################################################################################

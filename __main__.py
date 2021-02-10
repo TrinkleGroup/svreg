@@ -340,6 +340,8 @@ def polish(client, settings):
             for el, pop in populationDict[svName].items():
                 populationDict[svName][el] = client.scatter(pop)
 
+        populationDict = client.gather(populationDict)
+
         svFcs = evaluator.evaluate(populationDict, 'forces')
         svFcs = client.compute(svFcs)
         svFcs = client.gather(svFcs)
@@ -504,10 +506,12 @@ def computeErrors(refStruct, energies, forces, database):
         treeErrors = []
         for structName in sorted(keys):
 
-            structEng  = np.sum(energies[structName][treeNum], axis=0)
+            # structEng  = np.sum(energies[structName][treeNum], axis=0)
+            structEng  = energies[structName][treeNum]
             structEng /= natoms[structName]
 
-            refEng  = np.sum(energies[refStruct][treeNum], axis=0)
+            # refEng  = np.sum(energies[refStruct][treeNum], axis=0)
+            refEng  = energies[refStruct][treeNum]
             refEng /= natoms[refStruct]
 
             ediff = structEng - refEng
@@ -520,7 +524,7 @@ def computeErrors(refStruct, energies, forces, database):
 
             engErrors = abs(ediff - trueEdiff)
 
-            fcs = sum(forces[structName][treeNum])
+            fcs = forces[structName][treeNum]
 
             fcsErrors = np.average(
                 abs(fcs - trueValues[structName]['forces']),

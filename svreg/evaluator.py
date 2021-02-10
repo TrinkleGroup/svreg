@@ -54,10 +54,11 @@ class SVEvaluator:
                     pop = populationDict[svName][elem]
 
                     if useDask:
-                        if evalType == 'energy':
-                            results.append(sv.dot(pop))
-                        else:
-                            results.append(delayedEval(sv, pop))
+                        # if evalType == 'energy':
+                        #     results.append(sv.dot(pop))
+                        # else:
+                        #     results.append(delayedEval(sv, pop))
+                        results.append(sv.dot(pop))
                     else:
                         results.append(np.array(sv).dot(pop))
 
