@@ -178,13 +178,13 @@ _function_map = {
     'add': add2,
     'mul': mul2,
     # 'sqrt': sqrt1,
-    'log': log1,
+    # 'log': log1,
     # 'inv': inv1,
     # 'sin': sin1,
     # 'cos': cos1,
     # 'tan': tan1,
     # 'arctan': arctan1,
-    'exp': exp,
+    # 'exp': exp,
     'sig': sig,
     'softplus': softplus
 }

@@ -208,19 +208,11 @@ def main(client, settings):
 
         svEng = evaluator.evaluate(populationDict, 'energy')
 
-        # futures = []
         for svName in populationDict:
             for el, pop in populationDict[svName].items():
                 populationDict[svName][el] = client.scatter(pop, broadcast=True)
-                # futures.append(populationDict[svName][el])
-
-        # futures = client.gather(futures)
-
-        # print('futures', futures)
 
         svFcs = evaluator.evaluate(populationDict, 'forces')
-        svFcs = client.compute(svFcs)
-        svFcs = client.gather(svFcs)
 
         energies, forces = regressor.evaluateTrees(svEng, svFcs, N)
 

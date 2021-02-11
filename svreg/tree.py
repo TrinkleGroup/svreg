@@ -163,8 +163,10 @@ class SVTree(list):
             # eng = client.submit(np.sum, self.nodes[0].values[0], axis=1)
             # fcs = client.submit(np.einsum, 'ijkl->ikl', self.nodes[0].values[0])
 
-            eng = dask.delayed(np.sum)(self.nodes[0].values[0], axis=1)
-            fcs = dask.delayed(np.einsum)('ijkl->ikl', self.nodes[0].values[0])
+            values = self.nodes[0].values
+
+            eng = dask.delayed(np.sum)(values[0], axis=1)
+            fcs = dask.delayed(np.einsum)('ijkl->ikl', values[1])
 
             return eng, fcs
 
