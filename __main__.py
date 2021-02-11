@@ -504,15 +504,15 @@ def computeErrors(refStruct, energies, forces, database):
         treeErrors = []
         for structName in sorted(keys):
 
-            # # structEng  = np.sum(energies[structName][treeNum], axis=0)
-            # structEng  = energies[structName][treeNum]
-            # structEng /= natoms[structName]
+            # structEng  = np.sum(energies[structName][treeNum], axis=0)
+            structEng  = energies[structName][treeNum]
+            structEng /= natoms[structName]
 
-            # # refEng  = np.sum(energies[refStruct][treeNum], axis=0)
-            # refEng  = energies[refStruct][treeNum]
-            # refEng /= natoms[refStruct]
+            # refEng  = np.sum(energies[refStruct][treeNum], axis=0)
+            refEng  = energies[refStruct][treeNum]
+            refEng /= natoms[refStruct]
 
-            # ediff = structEng - refEng
+            ediff = structEng - refEng
 
             # Stored true values should already be per-atom energies
             # Note that if the database alreayd did subtract off a reference
@@ -520,7 +520,7 @@ def computeErrors(refStruct, energies, forces, database):
             trueEdiff = trueValues[structName]['energy']
             trueEdiff -= trueValues[refStruct]['energy']
 
-            # engErrors = abs(ediff - trueEdiff)
+            engErrors = abs(ediff - trueEdiff)
 
             # engErrors = client.submit(
             #     engErr,
@@ -529,11 +529,11 @@ def computeErrors(refStruct, energies, forces, database):
             #     trueEdiff
             # )
 
-            engErrors = dask.delayed(engErr)(
-                energies[structName][treeNum], natoms[structName],
-                energies[refStruct][treeNum], natoms[refStruct],
-                trueEdiff
-            )
+            # engErrors = dask.delayed(engErr)(
+            #     energies[structName][treeNum], natoms[structName],
+            #     energies[refStruct][treeNum], natoms[refStruct],
+            #     trueEdiff
+            # )
 
             fcs = forces[structName][treeNum]
 

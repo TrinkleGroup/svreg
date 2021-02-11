@@ -160,15 +160,12 @@ class SVRegressor:
         energies = {struct: [] for struct in svEng.keys()}
         forces   = {struct: [] for struct in svFcs.keys()}
 
-        from dask.distributed import get_client
-        client = get_client()
+        # def reshapeEng(eng, fcs, numNodes, P):
+        #     nelem = fcs.shape[0]
 
-        def reshapeEng(eng, fcs, numNodes, P):
-            nelem = fcs.shape[0]
+        #     eng = eng.reshape((numNodes, P, nelem))
 
-            eng = eng.reshape((numNodes, P, nelem))
-
-            return eng
+        #     return eng
 
         def reshapeFcs(fcs, numNodes, P):
             nelem = fcs.shape[0]
@@ -208,9 +205,15 @@ class SVRegressor:
                     #     reshapeFcs, stackedFcs, numNodes, P
                     # )
 
-                    nodeEng = dask.delayed(reshapeEng)(
-                        stackedEng, stackedFcs, numNodes, P
-                    )
+                    # nodeEng = dask.delayed(reshapeEng)(
+                    #     stackedEng, stackedFcs, numNodes, P
+                    # )
+
+                    nelem = stackedEng.shape[0]
+                    # nodeEng = stackedEng.reshape((numNodes, P, nelem))
+                    nodeEng = stackedEng.reshape((nelem, numNodes, P))
+                    nodeEng = np.moveaxis(nodeEng, 1, 0)
+                    nodeEng = np.moveaxis(nodeEng, -1, 1)
 
                     nodeFcs = dask.delayed(reshapeFcs)(
                         stackedFcs, numNodes, P
@@ -238,12 +241,12 @@ class SVRegressor:
                     unstackedValues = []
                     # for val1, val2 in zip(nodeEng, nodeFcs):
                     for valIdx in range(numNodes):
-                        # val1 = nodeEng[valIdx]
+                        val1 = nodeEng[valIdx]
                         # val2 = nodeFcs[valIdx]
                         # val1 = client.submit(indexEng, nodeEng, valIdx)
                         # val2 = client.submit(indexFcs, nodeFcs, valIdx)
 
-                        val1 = dask.delayed(indexEng)(nodeEng, valIdx)
+                        # val1 = dask.delayed(indexEng)(nodeEng, valIdx)
                         val2 = dask.delayed(indexFcs)(nodeFcs, valIdx)
 
                         unstackedValues.append((val1, val2))
@@ -274,12 +277,12 @@ class SVRegressor:
                 # future[0] = (P,)
                 # future[1] = (P, N, 3)
 
-                # energies[structName].append(future[0])
+                energies[structName].append(sum(future[0]))
                 # forces[structName].append(future[1])
                 # energies[structName].append(client.submit(getEng, future))
                 # forces[structName].append(client.submit(getFcs, future))
 
-                energies[structName].append(dask.delayed(getEng)(future))
+                # energies[structName].append(dask.delayed(getEng)(future))
                 forces[structName].append(dask.delayed(getFcs)(future))
 
         return energies, forces

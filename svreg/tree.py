@@ -150,8 +150,6 @@ class SVTree(list):
         """
 
         import dask
-        from dask.distributed import get_client
-        client = get_client()
 
         # Check for single-node tree
         if isinstance(self.nodes[0], SVNode):
@@ -165,7 +163,8 @@ class SVTree(list):
 
             values = self.nodes[0].values
 
-            eng = dask.delayed(np.sum)(values[0], axis=1)
+            # eng = dask.delayed(np.sum)(values[0], axis=1)
+            eng = np.sum(values[0], axis=1)
             fcs = dask.delayed(np.einsum)('ijkl->ikl', values[1])
 
             return eng, fcs
@@ -199,7 +198,8 @@ class SVTree(list):
                 # intermediateEng = client.submit(subTrees[-1][0].function, *args)
                 # intermediateFcs = client.submit(subTrees[-1][0].function.derivative, *args)
 
-                intermediateEng = dask.delayed(subTrees[-1][0].function)(*args)
+                # intermediateEng = dask.delayed(subTrees[-1][0].function)(*args)
+                intermediateEng = subTrees[-1][0].function(*args)
                 intermediateFcs = dask.delayed(subTrees[-1][0].function.derivative)(*args)
 
                 if len(subTrees) != 1:  # Still some left to evaluate
@@ -220,7 +220,8 @@ class SVTree(list):
                     # intermediateEng = client.submit(np.sum, intermediateEng, axis=1)
                     # intermediateFcs = client.submit(np.einsum, 'ijkl->ikl', intermediateFcs)
 
-                    intermediateEng = dask.delayed(np.sum)(intermediateEng, axis=1)
+                    # intermediateEng = dask.delayed(np.sum)(intermediateEng, axis=1)
+                    intermediateEng = np.sum(intermediateEng, axis=1)
                     intermediateFcs = dask.delayed(np.einsum)('ijkl->ikl', intermediateFcs)
                     
                     return intermediateEng, intermediateFcs
