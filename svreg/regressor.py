@@ -160,6 +160,32 @@ class SVRegressor:
         energies = {struct: [] for struct in svEng.keys()}
         forces   = {struct: [] for struct in svFcs.keys()}
 
+        from dask.distributed import get_client
+        client = get_client()
+
+        def reshapeEng(eng, fcs, numNodes, P):
+            nelem = fcs.shape[0]
+
+            eng = eng.reshape((numNodes, P, nelem))
+
+            return eng
+
+        def reshapeFcs(fcs, numNodes, P):
+            nelem = fcs.shape[0]
+            natom = fcs.shape[1]
+
+            fcs = fcs.reshape((nelem, natom, 3, P, numNodes))
+            fcs = np.moveaxis(fcs, -1, 0)
+            fcs = np.moveaxis(fcs, -1, 1)
+
+            return fcs
+
+        def indexEng(eng, idx):
+            return eng[idx]
+
+        def indexFcs(fcs, idx):
+            return fcs[idx]
+
         for structName in energies:
             for svName in svEng[structName]:
                 for elem in svEng[structName][svName]:
@@ -174,36 +200,40 @@ class SVRegressor:
                     # numNodes = stackedEng.shape[0]//P
                     numNodes = self.numNodes[svName][elem]
 
-                    nelem = stackedFcs.shape[0]
-                    natom = stackedFcs.shape[1]
+                    nodeEng = client.submit(
+                        reshapeEng, stackedEng, stackedFcs, numNodes, P
+                    )
 
-                    # stackedEng will have the shape (P*Nn, Ne) and will need to
-                    # be reshaped to separate out the per-node contributions,
-                    # but can't be summed until after full tree evaluation
-                    nodeEng = stackedEng.reshape((numNodes, P, nelem))
+                    nodeFcs = client.submit(
+                        reshapeFcs, stackedFcs, numNodes, P
+                    )
 
-                    # stackedFcs has the shape (Ne, N, 3, P*Nn), where Ne is the
-                    # number of atoms of the current element type and Nn is the
-                    # number of  nodes of the given node type. Note that
-                    # this needs to be reshaped to separate out the per-node
-                    # contributions, but cannot be summed over until after full
-                    # tree evaluation.
-                    nodeFcs = stackedFcs.reshape((nelem, natom, 3, P, numNodes))
-                    nodeFcs = np.moveaxis(nodeFcs, -1, 0)
-                    nodeFcs = np.moveaxis(nodeFcs, -1, 1)
-                    # nodeFcs = (numNodes, P, nelem, natom, 3)
+                    # nelem = stackedFcs.shape[0]
+                    # natom = stackedFcs.shape[1]
 
-                    # nodeFcs = stackedFcs.reshape(
-                    #     (stackedFcs.shape[0], stackedFcs.shape[1], N, numNodes)
-                    # ).T
-                    
-                    # nodeFcs = nodeFcs.swapaxes(2, 3)
+                    # # stackedEng will have the shape (P*Nn, Ne) and will need to
+                    # # be reshaped to separate out the per-node contributions,
+                    # # but can't be summed until after full tree evaluation
+                    # nodeEng = stackedEng.reshape((numNodes, P, nelem))
+
+                    # # stackedFcs has the shape (Ne, N, 3, P*Nn), where Ne is the
+                    # # number of atoms of the current element type and Nn is the
+                    # # number of  nodes of the given node type. Note that
+                    # # this needs to be reshaped to separate out the per-node
+                    # # contributions, but cannot be summed over until after full
+                    # # tree evaluation.
+                    # nodeFcs = stackedFcs.reshape((nelem, natom, 3, P, numNodes))
+                    # nodeFcs = np.moveaxis(nodeFcs, -1, 0)
+                    # nodeFcs = np.moveaxis(nodeFcs, -1, 1)
+                    # # nodeFcs = (numNodes, P, nelem, natom, 3)
 
                     unstackedValues = []
                     # for val1, val2 in zip(nodeEng, nodeFcs):
                     for valIdx in range(numNodes):
-                        val1 = nodeEng[valIdx]
-                        val2 = nodeFcs[valIdx]
+                        # val1 = nodeEng[valIdx]
+                        # val2 = nodeFcs[valIdx]
+                        val1 = client.submit(indexEng, nodeEng, valIdx)
+                        val2 = client.submit(indexFcs, nodeFcs, valIdx)
 
                         unstackedValues.append((val1, val2))
 
@@ -219,6 +249,12 @@ class SVRegressor:
                     if leftovers > 0:
                         raise RuntimeError('Found leftover results.')
 
+            def getEng(fut):
+                return sum(fut[0])
+
+            def getFcs(fut):
+                return sum(fut[1])
+
             # If here, all of the nodes have been updated with their values
             for tree in self.trees:
                 # eng, fcs = tree.eval()
@@ -227,8 +263,10 @@ class SVRegressor:
                 # future[0] = (P,)
                 # future[1] = (P, N, 3)
 
-                energies[structName].append(future[0])
-                forces[structName].append(future[1])
+                # energies[structName].append(future[0])
+                # forces[structName].append(future[1])
+                energies[structName].append(client.submit(getEng, future))
+                forces[structName].append(client.submit(getFcs, future))
 
         return energies, forces
 

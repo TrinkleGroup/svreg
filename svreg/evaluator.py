@@ -41,8 +41,11 @@ class SVEvaluator:
         structNames = list(self.database.attrs['structNames'])
         allSVnames  = list(self.database.attrs['svNames'])
         elements    = list(self.database.attrs['elements'])
+        
+        from dask.distributed import get_client
+        client = get_client()
 
-        results = []
+        tasks = []
         for struct in structNames:
             for svName in allSVnames:
                 if svName not in populationDict: continue
@@ -53,16 +56,34 @@ class SVEvaluator:
                     sv = self.database[struct][svName][elem][evalType]
                     pop = populationDict[svName][elem]
 
-                    if useDask:
-                        # if evalType == 'energy':
-                        #     results.append(sv.dot(pop))
-                        # else:
-                        #     results.append(delayedEval(sv, pop))
-                        results.append(sv.dot(pop))
-                    else:
-                        results.append(np.array(sv).dot(pop))
+                    tasks.append((sv, pop))
 
-        # Now sum by chunks before computing to avoid extra communication
+        def dot(tup):
+            return tup[0].dot(tup[1])
+
+
+        results = client.map(dot, tasks)
+
+        # results = []
+        # for struct in structNames:
+        #     for svName in allSVnames:
+        #         if svName not in populationDict: continue
+
+        #         for elem in elements:
+        #             if elem not in populationDict[svName]: continue
+
+        #             sv = self.database[struct][svName][elem][evalType]
+        #             pop = populationDict[svName][elem]
+
+        #             if useDask:
+        #                 # if evalType == 'energy':
+        #                 #     results.append(sv.dot(pop))
+        #                 # else:
+        #                 #     results.append(delayedEval(sv, pop))
+        #                 results.append(sv.dot(pop))
+        #             else:
+        #                 results.append(np.array(sv).dot(pop))
+
         summedResults = {
             structName: {
                 svName: {
@@ -73,15 +94,6 @@ class SVEvaluator:
             for structName in structNames
         }
 
-        @dask.delayed
-        def delayedReshape(val, n):
-            nhost = val.shape[0]//3//n
-            return val.T.reshape(val.shape[1], 3, nhost, n)
-        
-        @dask.delayed
-        def delayedSum(val):
-            return val.sum(axis=-1).swapaxes(1, 2)
-
         for struct in structNames[::-1]:
             for svName in allSVnames[::-1]:
                 if svName not in populationDict: continue
@@ -89,30 +101,6 @@ class SVEvaluator:
                 for elem in elements[::-1]:
                     if elem not in populationDict[svName]: continue
 
-                    res = results.pop()
-
-                    # Parse the per-structure results
-                    val = None
-                    if evalType == 'energy':
-                        # TODO: is this a point of possible SV compression?
-
-                        # val = res.sum(axis=0)
-                        val = res
-
-                    elif evalType == 'forces':
-                        val = res
-
-                        # n = self.database.attrs['natoms'][struct]
-
-                        # if useDask:
-                        #     val = delayedReshape(val, n)
-                        #     val = delayedSum(val)
-                        # else:
-                        #     nhost = val.shape[0]//3//n
-
-                        #     val = val.T.reshape(res.shape[1], 3, nhost, n)
-                        #     val = val.sum(axis=-1).swapaxes(1, 2)
-
-                    summedResults[struct][svName][elem] = val
+                    summedResults[struct][svName][elem] = results.pop()
                 
         return summedResults

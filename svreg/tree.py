@@ -149,19 +149,25 @@ class SVTree(list):
                 where N is the number of atoms in the current structure.
         """
 
+        import dask
+        from dask.distributed import get_client
+        client = get_client()
+
         # Check for single-node tree
         if isinstance(self.nodes[0], SVNode):
 
-            eng = self.nodes[0].values[0].sum(axis=1)
-            fcs = self.nodes[0].values[0]
-            fcs = np.einsum('ijkl->ikl', fcs)
+            # eng = self.nodes[0].values[0].sum(axis=1)
+            # fcs = self.nodes[0].values[0]
+            # fcs = np.einsum('ijkl->ikl', fcs)
+
+            eng = client.submit(np.sum, self.nodes[0].values[0], axis=1)
+            fcs = client.submit(np.einsum, 'ijkl->ikl', self.nodes[0].values[0])
 
             return eng, fcs
 
         # Constructs a list-of-lists where each sub-list is a sub-tree for a
         # function at a given recursion depth. The first node of a sub-tree
         # should always be a FunctionNode
-
         subTrees = []
 
         for node in self.nodes:
@@ -180,8 +186,13 @@ class SVTree(list):
                     for n in subTrees[-1][1:]
                 ]
 
-                intermediateEng = subTrees[-1][0].function(*args)
-                intermediateFcs = subTrees[-1][0].function.derivative(*args)
+                # intermediateEng = subTrees[-1][0].function(*args)
+                # intermediateFcs = subTrees[-1][0].function.derivative(*args)
+
+                # intermediateEng = dask.delayed(subTrees[-1][0].function)(*args)
+                # intermediateFcs = dask.delayed(subTrees[-1][0].function.derivative)(*args)
+                intermediateEng = client.submit(subTrees[-1][0].function, *args)
+                intermediateFcs = client.submit(subTrees[-1][0].function.derivative, *args)
 
                 if len(subTrees) != 1:  # Still some left to evaluate
                     subTrees.pop()
@@ -194,9 +205,13 @@ class SVTree(list):
                     # intermediateEng = (P, Ne)
                     # intermediateFcs = (P, Ne, N, 3)
 
-                    intermediateEng = intermediateEng.sum(axis=1)
-                    intermediateFcs = np.einsum('ijkl->ikl', intermediateFcs)
+                    # intermediateEng = intermediateEng.sum(axis=1)
+                    # intermediateEng = dask.delayed(np.sum)(intermediateEng, axis=1)
+                    # intermediateFcs = dask.delayed(np.einsum)('ijkl->ikl', intermediateFcs)
 
+                    intermediateEng = client.submit(np.sum, intermediateEng, axis=1)
+                    intermediateFcs = client.submit(np.einsum, 'ijkl->ikl', intermediateFcs)
+                    
                     return intermediateEng, intermediateFcs
 
         raise RuntimeError("Something went wrong in tree evaluation")
@@ -883,7 +898,7 @@ class MultiComponentTree(SVTree):
         # eng = [(P,) for _ in chemistryTrees]
         # fcs = [(P, N, 3) for _ in chemistryTrees]
 
-        return sum(eng), sum(fcs)
+        return eng, fcs
 
 
     def populate(self, N):

@@ -338,13 +338,9 @@ def polish(client, settings):
 
         for svName in populationDict:
             for el, pop in populationDict[svName].items():
-                populationDict[svName][el] = client.scatter(pop)
-
-        populationDict = client.gather(populationDict)
+                populationDict[svName][el] = client.scatter(pop, broadcast=True)
 
         svFcs = evaluator.evaluate(populationDict, 'forces')
-        svFcs = client.compute(svFcs)
-        svFcs = client.gather(svFcs)
 
         energies, forces = regressor.evaluateTrees(svEng, svFcs, N)
 
@@ -486,7 +482,7 @@ def computeErrors(refStruct, energies, forces, database):
 
     Returns:
         costs (list):
-            A list of the total costs for the populations of each tree. Eeach
+            A list of the total costs for the populations of each tree. Each
             entry will have a shape of (P, 2*S) where P is the population size
             and S is the number of structures being evaluated.
     """
@@ -501,20 +497,30 @@ def computeErrors(refStruct, energies, forces, database):
 
     keys = list(energies.keys())
 
+    from dask.distributed import get_client
+    client = get_client()
+
+    def engErr(seng, reng, ns, nr, tv):
+        diff = (seng/ns) - (reng/nr)
+        return abs(diff - tv)
+
+    def fcsErr(fcs, tv):
+        return np.average(abs(fcs - tv), axis=(1,2))
+
     errors = []
     for treeNum in range(numTrees):
         treeErrors = []
         for structName in sorted(keys):
 
-            # structEng  = np.sum(energies[structName][treeNum], axis=0)
-            structEng  = energies[structName][treeNum]
-            structEng /= natoms[structName]
+            # # structEng  = np.sum(energies[structName][treeNum], axis=0)
+            # structEng  = energies[structName][treeNum]
+            # structEng /= natoms[structName]
 
-            # refEng  = np.sum(energies[refStruct][treeNum], axis=0)
-            refEng  = energies[refStruct][treeNum]
-            refEng /= natoms[refStruct]
+            # # refEng  = np.sum(energies[refStruct][treeNum], axis=0)
+            # refEng  = energies[refStruct][treeNum]
+            # refEng /= natoms[refStruct]
 
-            ediff = structEng - refEng
+            # ediff = structEng - refEng
 
             # Stored true values should already be per-atom energies
             # Note that if the database alreayd did subtract off a reference
@@ -522,21 +528,42 @@ def computeErrors(refStruct, energies, forces, database):
             trueEdiff = trueValues[structName]['energy']
             trueEdiff -= trueValues[refStruct]['energy']
 
-            engErrors = abs(ediff - trueEdiff)
+            # engErrors = abs(ediff - trueEdiff)
+
+            engErrors = client.submit(
+                engErr,
+                energies[structName][treeNum], natoms[structName],
+                energies[refStruct][treeNum], natoms[refStruct],
+                trueEdiff
+            )
 
             fcs = forces[structName][treeNum]
 
-            fcsErrors = np.average(
-                abs(fcs - trueValues[structName]['forces']),
-                axis=(1,2)
+            # fcsErrors = dask.delayed(np.average)(
+            #     abs(fcs - trueValues[structName]['forces']),
+            #     axis=(1,2)
+            # )
+
+            fcsErrors = client.submit(
+                fcsErr,
+                fcs, trueValues[structName]['forces']
             )
 
-            treeErrors.append(engErrors)
-            treeErrors.append(fcsErrors)
+            errors.append(engErrors)
+            errors.append(fcsErrors)
+        #     treeErrors.append(engErrors)
+        #     treeErrors.append(fcsErrors)
 
-        errors.append(np.stack(treeErrors))
+        # # treeErrors = client.gather(client.compute(treeErrors))
+        # # errors.append(np.stack(treeErrors))
+        # errors.append(treeErrors)
 
-    errors = [np.stack(err).T for err in errors]
+    # errors = [np.stack(err).T for err in errors]
+
+    errors = client.gather(client.compute(errors))
+
+    errors = np.stack(errors).T
+    errors = np.split(errors, numTrees, axis=1)
 
     return errors
 
