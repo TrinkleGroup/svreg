@@ -160,13 +160,6 @@ class SVRegressor:
         energies = {struct: [] for struct in svEng.keys()}
         forces   = {struct: [] for struct in svFcs.keys()}
 
-        # def reshapeEng(eng, fcs, numNodes, P):
-        #     nelem = fcs.shape[0]
-
-        #     eng = eng.reshape((numNodes, P, nelem))
-
-        #     return eng
-
         def reshapeFcs(fcs, numNodes, P):
             nelem = fcs.shape[0]
             natom = fcs.shape[1]
@@ -176,12 +169,6 @@ class SVRegressor:
             fcs = np.moveaxis(fcs, -1, 1)
 
             return fcs
-
-        def indexEng(eng, idx):
-            return eng[idx]
-
-        def indexFcs(fcs, idx):
-            return fcs[idx]
 
         for structName in energies:
             for svName in svEng[structName]:
@@ -197,58 +184,33 @@ class SVRegressor:
                     # numNodes = stackedEng.shape[0]//P
                     numNodes = self.numNodes[svName][elem]
 
-                    # nodeEng = client.submit(
-                    #     reshapeEng, stackedEng, stackedFcs, numNodes, P
-                    # )
-
-                    # nodeFcs = client.submit(
-                    #     reshapeFcs, stackedFcs, numNodes, P
-                    # )
-
-                    # nodeEng = dask.delayed(reshapeEng)(
-                    #     stackedEng, stackedFcs, numNodes, P
-                    # )
+                    # stackedEng will have the shape (N3, P*Nn) and will need to
+                    # be reshaped to separate out the per-node contributions,
+                    # but can't be summed until after full tree evaluation
 
                     nelem = stackedEng.shape[0]
-                    # nodeEng = stackedEng.reshape((numNodes, P, nelem))
+
                     nodeEng = stackedEng.reshape((nelem, numNodes, P))
                     nodeEng = np.moveaxis(nodeEng, 1, 0)
                     nodeEng = np.moveaxis(nodeEng, -1, 1)
 
-                    nodeFcs = dask.delayed(reshapeFcs)(
+                    # stackedFcs has the shape (Ne, N, 3, P*Nn), where Ne is the
+                    # number of atoms of the current element type and Nn is the
+                    # number of  nodes of the given node type. Note that
+                    # this needs to be reshaped to separate out the per-node
+                    # contributions, but cannot be summed over until after full
+                    # tree evaluation.
+                    # nodeFcs = (numNodes, P, nelem, natom, 3)
+
+                    nodeFcs = dask.delayed(reshapeFcs, nout=numNodes)(
                         stackedFcs, numNodes, P
                     )
-
-                    # nelem = stackedFcs.shape[0]
-                    # natom = stackedFcs.shape[1]
-
-                    # # stackedEng will have the shape (P*Nn, Ne) and will need to
-                    # # be reshaped to separate out the per-node contributions,
-                    # # but can't be summed until after full tree evaluation
-                    # nodeEng = stackedEng.reshape((numNodes, P, nelem))
-
-                    # # stackedFcs has the shape (Ne, N, 3, P*Nn), where Ne is the
-                    # # number of atoms of the current element type and Nn is the
-                    # # number of  nodes of the given node type. Note that
-                    # # this needs to be reshaped to separate out the per-node
-                    # # contributions, but cannot be summed over until after full
-                    # # tree evaluation.
-                    # nodeFcs = stackedFcs.reshape((nelem, natom, 3, P, numNodes))
-                    # nodeFcs = np.moveaxis(nodeFcs, -1, 0)
-                    # nodeFcs = np.moveaxis(nodeFcs, -1, 1)
-                    # # nodeFcs = (numNodes, P, nelem, natom, 3)
 
                     unstackedValues = []
                     # for val1, val2 in zip(nodeEng, nodeFcs):
                     for valIdx in range(numNodes):
                         val1 = nodeEng[valIdx]
-                        # val2 = nodeFcs[valIdx]
-                        # val1 = client.submit(indexEng, nodeEng, valIdx)
-                        # val2 = client.submit(indexFcs, nodeFcs, valIdx)
-
-                        # val1 = dask.delayed(indexEng)(nodeEng, valIdx)
-                        val2 = dask.delayed(indexFcs)(nodeFcs, valIdx)
-
+                        val2 = nodeFcs[valIdx]
                         unstackedValues.append((val1, val2))
 
                     # Loop backwards over the list of values
@@ -266,24 +228,18 @@ class SVRegressor:
             def getEng(fut):
                 return sum(fut[0])
 
-            def getFcs(fut):
+            def sumFcs(fut):
                 return sum(fut[1])
 
             # If here, all of the nodes have been updated with their values
             for tree in self.trees:
-                # eng, fcs = tree.eval()
                 future = tree.eval()
 
                 # future[0] = (P,)
                 # future[1] = (P, N, 3)
 
                 energies[structName].append(sum(future[0]))
-                # forces[structName].append(future[1])
-                # energies[structName].append(client.submit(getEng, future))
-                # forces[structName].append(client.submit(getFcs, future))
-
-                # energies[structName].append(dask.delayed(getEng)(future))
-                forces[structName].append(dask.delayed(getFcs)(future))
+                forces[structName].append(future[1])
 
         return energies, forces
 
@@ -460,32 +416,9 @@ class SVRegressor:
         # Stack each group
         for svName in populationDict:
             for elem, popList in populationDict[svName].items():
-                # TODO: convert this to Dask array?
                 dat = np.concatenate(popList, axis=0).T
 
-                # if self.populationDict is None:
-                #     populationDict[svName][elem] = dask.array.from_array(
-                #         dat,
-                #         chunks=dat.shape
-                #     ).persist()
-                #     futures.append(populationDict[svName][elem])
-                # else:
-                #     populationDict[svName][elem][:] = dat
-
                 populationDict[svName][elem] = dat
-
-                # populationDict[svName][elem] = dask.array.from_array(
-                #     dat,
-                #     chunks=dat.shape,
-                #     # chunks=(100, popList[0].shape[1]),
-                # ).persist()
-                # futures.append(populationDict[svName][elem])
-
-        # from dask.distributed import wait
-        # wait(futures)
-
-        # if self.populationDict is None:
-        #     self.populationDict = populationDict
 
         return populationDict, rawPopulations
 

@@ -426,7 +426,6 @@ def buildCostFunction(settings, numStructs):
     def delayedMAE(err):
         return np.average(np.multiply(err, scaler), axis=1)
 
-    # @profile
     def mae(errors):
 
         costs = []
@@ -454,7 +453,6 @@ def buildCostFunction(settings, numStructs):
         raise RuntimeError("costFxn must be 'MAE' or 'RMSE'.")
 
 
-# @profile
 def computeErrors(refStruct, energies, forces, database):
     """
     Takes in dictionaries of energies and forces and returns the energy/force
@@ -479,8 +477,6 @@ def computeErrors(refStruct, energies, forces, database):
             and S is the number of structures being evaluated.
     """
 
-    global start
-
     trueValues = database.trueValues
     natoms = database.attrs['natoms']
 
@@ -492,23 +488,16 @@ def computeErrors(refStruct, energies, forces, database):
     from dask.distributed import get_client
     client = get_client()
 
-    def engErr(seng, reng, ns, nr, tv):
-        diff = (seng/ns) - (reng/nr)
-        return abs(diff - tv)
-
     def fcsErr(fcs, tv):
-        return np.average(abs(fcs - tv), axis=(1,2))
+        return np.average(abs(sum(fcs) - tv), axis=(1,2))
 
     errors = []
     for treeNum in range(numTrees):
-        treeErrors = []
         for structName in sorted(keys):
 
-            # structEng  = np.sum(energies[structName][treeNum], axis=0)
             structEng  = energies[structName][treeNum]
             structEng /= natoms[structName]
 
-            # refEng  = np.sum(energies[refStruct][treeNum], axis=0)
             refEng  = energies[refStruct][treeNum]
             refEng /= natoms[refStruct]
 
@@ -522,30 +511,7 @@ def computeErrors(refStruct, energies, forces, database):
 
             engErrors = abs(ediff - trueEdiff)
 
-            # engErrors = client.submit(
-            #     engErr,
-            #     energies[structName][treeNum], natoms[structName],
-            #     energies[refStruct][treeNum], natoms[refStruct],
-            #     trueEdiff
-            # )
-
-            # engErrors = dask.delayed(engErr)(
-            #     energies[structName][treeNum], natoms[structName],
-            #     energies[refStruct][treeNum], natoms[refStruct],
-            #     trueEdiff
-            # )
-
             fcs = forces[structName][treeNum]
-
-            # fcsErrors = dask.delayed(np.average)(
-            #     abs(fcs - trueValues[structName]['forces']),
-            #     axis=(1,2)
-            # )
-
-            # fcsErrors = client.submit(
-            #     fcsErr,
-            #     fcs, trueValues[structName]['forces']
-            # )
 
             fcsErrors = dask.delayed(fcsErr)(
                 fcs, trueValues[structName]['forces']
@@ -553,14 +519,6 @@ def computeErrors(refStruct, energies, forces, database):
 
             errors.append(engErrors)
             errors.append(fcsErrors)
-        #     treeErrors.append(engErrors)
-        #     treeErrors.append(fcsErrors)
-
-        # # treeErrors = client.gather(client.compute(treeErrors))
-        # # errors.append(np.stack(treeErrors))
-        # errors.append(treeErrors)
-
-    # errors = [np.stack(err).T for err in errors]
 
     errors = client.gather(client.compute(errors))
 

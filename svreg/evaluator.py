@@ -1,12 +1,12 @@
 import dask
 import dask.array
-import numpy as np
+from dask.distributed import get_client
 
 from numba import jit
 
 @dask.delayed
 @jit(nopython=True)
-def jitEval(sv, pop):
+def jitDot(sv, pop):
     return sv @ pop
 
 def futureEval(sv, pop):
@@ -58,31 +58,14 @@ class SVEvaluator:
         def dot(tup):
             return tup[0].dot(tup[1])
 
-
         if useDask:
             results = [dask.delayed(dot)(t) for t in tasks]
+            results = [jitDot(t[0], t[1]) for t in tasks]
+
+            client = get_client()
+            results = client.compute(results)
         else:
             results = [dot(t) for t in tasks]
-
-        # results = []
-        # for struct in structNames:
-        #     for svName in allSVnames:
-        #         if svName not in populationDict: continue
-
-        #         for elem in elements:
-        #             if elem not in populationDict[svName]: continue
-
-        #             sv = self.database[struct][svName][elem][evalType]
-        #             pop = populationDict[svName][elem]
-
-        #             if useDask:
-        #                 # if evalType == 'energy':
-        #                 #     results.append(sv.dot(pop))
-        #                 # else:
-        #                 #     results.append(delayedEval(sv, pop))
-        #                 results.append(sv.dot(pop))
-        #             else:
-        #                 results.append(np.array(sv).dot(pop))
 
         summedResults = {
             structName: {
