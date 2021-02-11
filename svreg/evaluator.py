@@ -62,7 +62,8 @@ class SVEvaluator:
             return tup[0].dot(tup[1])
 
 
-        results = client.map(dot, tasks)
+        # results = client.map(dot, tasks)
+        results = [dask.delayed(dot)(t) for t in tasks]
 
         # results = []
         # for struct in structNames:

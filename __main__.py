@@ -530,8 +530,14 @@ def computeErrors(refStruct, energies, forces, database):
 
             # engErrors = abs(ediff - trueEdiff)
 
-            engErrors = client.submit(
-                engErr,
+            # engErrors = client.submit(
+            #     engErr,
+            #     energies[structName][treeNum], natoms[structName],
+            #     energies[refStruct][treeNum], natoms[refStruct],
+            #     trueEdiff
+            # )
+
+            engErrors = dask.delayed(engErr)(
                 energies[structName][treeNum], natoms[structName],
                 energies[refStruct][treeNum], natoms[refStruct],
                 trueEdiff
@@ -544,8 +550,12 @@ def computeErrors(refStruct, energies, forces, database):
             #     axis=(1,2)
             # )
 
-            fcsErrors = client.submit(
-                fcsErr,
+            # fcsErrors = client.submit(
+            #     fcsErr,
+            #     fcs, trueValues[structName]['forces']
+            # )
+
+            fcsErrors = dask.delayed(fcsErr)(
                 fcs, trueValues[structName]['forces']
             )
 

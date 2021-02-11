@@ -160,8 +160,11 @@ class SVTree(list):
             # fcs = self.nodes[0].values[0]
             # fcs = np.einsum('ijkl->ikl', fcs)
 
-            eng = client.submit(np.sum, self.nodes[0].values[0], axis=1)
-            fcs = client.submit(np.einsum, 'ijkl->ikl', self.nodes[0].values[0])
+            # eng = client.submit(np.sum, self.nodes[0].values[0], axis=1)
+            # fcs = client.submit(np.einsum, 'ijkl->ikl', self.nodes[0].values[0])
+
+            eng = dask.delayed(np.sum)(self.nodes[0].values[0], axis=1)
+            fcs = dask.delayed(np.einsum)('ijkl->ikl', self.nodes[0].values[0])
 
             return eng, fcs
 
@@ -191,8 +194,11 @@ class SVTree(list):
 
                 # intermediateEng = dask.delayed(subTrees[-1][0].function)(*args)
                 # intermediateFcs = dask.delayed(subTrees[-1][0].function.derivative)(*args)
-                intermediateEng = client.submit(subTrees[-1][0].function, *args)
-                intermediateFcs = client.submit(subTrees[-1][0].function.derivative, *args)
+                # intermediateEng = client.submit(subTrees[-1][0].function, *args)
+                # intermediateFcs = client.submit(subTrees[-1][0].function.derivative, *args)
+
+                intermediateEng = dask.delayed(subTrees[-1][0].function)(*args)
+                intermediateFcs = dask.delayed(subTrees[-1][0].function.derivative)(*args)
 
                 if len(subTrees) != 1:  # Still some left to evaluate
                     subTrees.pop()
@@ -209,8 +215,11 @@ class SVTree(list):
                     # intermediateEng = dask.delayed(np.sum)(intermediateEng, axis=1)
                     # intermediateFcs = dask.delayed(np.einsum)('ijkl->ikl', intermediateFcs)
 
-                    intermediateEng = client.submit(np.sum, intermediateEng, axis=1)
-                    intermediateFcs = client.submit(np.einsum, 'ijkl->ikl', intermediateFcs)
+                    # intermediateEng = client.submit(np.sum, intermediateEng, axis=1)
+                    # intermediateFcs = client.submit(np.einsum, 'ijkl->ikl', intermediateFcs)
+
+                    intermediateEng = dask.delayed(np.sum)(intermediateEng, axis=1)
+                    intermediateFcs = dask.delayed(np.einsum)('ijkl->ikl', intermediateFcs)
                     
                     return intermediateEng, intermediateFcs
 

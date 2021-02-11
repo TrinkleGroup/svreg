@@ -200,12 +200,20 @@ class SVRegressor:
                     # numNodes = stackedEng.shape[0]//P
                     numNodes = self.numNodes[svName][elem]
 
-                    nodeEng = client.submit(
-                        reshapeEng, stackedEng, stackedFcs, numNodes, P
+                    # nodeEng = client.submit(
+                    #     reshapeEng, stackedEng, stackedFcs, numNodes, P
+                    # )
+
+                    # nodeFcs = client.submit(
+                    #     reshapeFcs, stackedFcs, numNodes, P
+                    # )
+
+                    nodeEng = dask.delayed(reshapeEng)(
+                        stackedEng, stackedFcs, numNodes, P
                     )
 
-                    nodeFcs = client.submit(
-                        reshapeFcs, stackedFcs, numNodes, P
+                    nodeFcs = dask.delayed(reshapeFcs)(
+                        stackedFcs, numNodes, P
                     )
 
                     # nelem = stackedFcs.shape[0]
@@ -232,8 +240,11 @@ class SVRegressor:
                     for valIdx in range(numNodes):
                         # val1 = nodeEng[valIdx]
                         # val2 = nodeFcs[valIdx]
-                        val1 = client.submit(indexEng, nodeEng, valIdx)
-                        val2 = client.submit(indexFcs, nodeFcs, valIdx)
+                        # val1 = client.submit(indexEng, nodeEng, valIdx)
+                        # val2 = client.submit(indexFcs, nodeFcs, valIdx)
+
+                        val1 = dask.delayed(indexEng)(nodeEng, valIdx)
+                        val2 = dask.delayed(indexFcs)(nodeFcs, valIdx)
 
                         unstackedValues.append((val1, val2))
 
@@ -265,8 +276,11 @@ class SVRegressor:
 
                 # energies[structName].append(future[0])
                 # forces[structName].append(future[1])
-                energies[structName].append(client.submit(getEng, future))
-                forces[structName].append(client.submit(getFcs, future))
+                # energies[structName].append(client.submit(getEng, future))
+                # forces[structName].append(client.submit(getFcs, future))
+
+                energies[structName].append(dask.delayed(getEng)(future))
+                forces[structName].append(dask.delayed(getFcs)(future))
 
         return energies, forces
 
