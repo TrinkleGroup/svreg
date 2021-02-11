@@ -206,7 +206,7 @@ def main(client, settings):
         # Continue optimization of currently active trees
         populationDict, rawPopulations = regressor.generatePopulationDict(N)
 
-        svEng = evaluator.evaluate(populationDict, 'energy')
+        svEng = evaluator.evaluate(populationDict, 'energy', useDask=False)
 
         for svName in populationDict:
             for el, pop in populationDict[svName].items():
@@ -326,7 +326,7 @@ def polish(client, settings):
 
         populationDict, rawPopulations = regressor.generatePopulationDict(N)
 
-        svEng = evaluator.evaluate(populationDict, 'energy')
+        svEng = evaluator.evaluate(populationDict, 'energy', useDask=False)
 
         for svName in populationDict:
             for el, pop in populationDict[svName].items():
