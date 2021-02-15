@@ -62,7 +62,6 @@ class SVEvaluator:
 
         if useDask:
             results = [dask.delayed(dot)(t) for t in tasks]
-            results = [jitDot(t[0], t[1]) for t in tasks]
 
             client = get_client()
             results = client.compute(results)

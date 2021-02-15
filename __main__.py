@@ -22,7 +22,7 @@ import dask
 import dask.array
 from dask.distributed import Client, wait
 
-from svreg.archive import Archive
+from svreg.archive import Archive, md5Hash
 from svreg.settings import Settings
 from svreg.database import SVDatabase
 from svreg.regressor import SVRegressor
@@ -136,7 +136,7 @@ def main(client, settings):
             # Replace completed tree with new tree
 
             # Make sure new tree isn't already in archive or active population
-            currentRegNames = [str(t) for t in regressor.trees]
+            currentRegNames = [md5Hash(t) for t in regressor.trees]
 
             newTree, parent1, parent2 = population.newIndividual()
 
@@ -145,8 +145,8 @@ def main(client, settings):
 
                 treeName = str(newTree)
 
-                inArchive   = treeName in archive
-                inReg       = treeName in currentRegNames
+                inArchive   = md5Hash(treeName) in archive
+                inReg       = md5Hash(treeName) in currentRegNames
 
                 if inArchive:
                     print("Already in archive:", newTree)
@@ -316,8 +316,8 @@ def polish(client, settings):
 
     from svreg.archive import Entry
 
-    entries = {str(t): Entry(t, savePath) for t in regressor.trees}
-    prevBestCosts = {str(t): np.inf for t in regressor.trees}
+    entries = {md5Hash(t): Entry(t, savePath) for t in regressor.trees}
+    prevBestCosts = {md5Hash(t): np.inf for t in regressor.trees}
 
     import pickle
 
@@ -361,7 +361,7 @@ def polish(client, settings):
 
         for treeNum, tree in enumerate(regressor.trees):
             opt = regressor.optimizers[treeNum]
-            treeName = str(tree)
+            treeName = md5Hash(tree)
 
             entry = entries[treeName]
 
