@@ -453,7 +453,7 @@ def buildCostFunction(settings, numStructs):
         raise RuntimeError("costFxn must be 'MAE' or 'RMSE'.")
 
 
-def computeErrors(refStruct, energies, forces, database):
+def computeErrors(refStruct, energies, forces, database, useDask=True):
     """
     Takes in dictionaries of energies and forces and returns the energy/force
     errors for each structure for each tree. Sorts structure names first.
@@ -484,9 +484,6 @@ def computeErrors(refStruct, energies, forces, database):
     numTrees   = len(energies[keys[0]])
 
     keys = list(energies.keys())
-
-    from dask.distributed import get_client
-    client = get_client()
 
     def fcsErr(fcs, tv):
         return np.average(abs(sum(fcs) - tv), axis=(1,2))
@@ -520,7 +517,11 @@ def computeErrors(refStruct, energies, forces, database):
             errors.append(engErrors)
             errors.append(fcsErrors)
 
-    errors = client.gather(client.compute(errors))
+    if useDask:
+        from dask.distributed import get_client
+        client = get_client()
+
+        errors = client.gather(client.compute(errors))
 
     errors = np.stack(errors).T
     errors = np.split(errors, numTrees, axis=1)

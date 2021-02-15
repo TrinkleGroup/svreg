@@ -2,6 +2,8 @@ import dask
 import dask.array
 from dask.distributed import get_client
 
+import numpy as np
+
 from numba import jit
 
 @dask.delayed
@@ -65,7 +67,7 @@ class SVEvaluator:
             client = get_client()
             results = client.compute(results)
         else:
-            results = [dot(t) for t in tasks]
+            results = [dot((np.array(t[0]), t[1])) for t in tasks]
 
         summedResults = {
             structName: {
