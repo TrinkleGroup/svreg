@@ -176,7 +176,7 @@ softplus = _Function(function=splus, name='softplus', arity=1)
 
 _function_map = {
     'add': add2,
-    'mul': mul2,
+    # 'mul': mul2,
     # 'sqrt': sqrt1,
     # 'log': log1,
     # 'inv': inv1,
@@ -185,26 +185,26 @@ _function_map = {
     # 'tan': tan1,
     # 'arctan': arctan1,
     # 'exp': exp,
-    'sig': sig,
+    # 'sig': sig,
     'softplus': softplus
 }
 
 _arities = {
     1: [
         # 'sqrt',
-        'log',
+        # 'log',
         # 'inv',
         # 'sin',
         # 'cos',
         # 'tan',
         # 'arctan',
-        'exp',
-        'sig',
+        # 'exp',
+        # 'sig',
         'softplus',
     ],
     2: [
         'add',
-        'mul'
+        # 'mul'
     ],
 }
 

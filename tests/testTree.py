@@ -63,6 +63,55 @@ class Test_SVTree(unittest.TestCase):
             ],
         )
 
+    def test_equality(self):
+        tree1 = SVTree(
+            nodes=[
+                FunctionNode('add'),
+                deepcopy(self.svNodePool[0]),
+                FunctionNode('add'),
+                deepcopy(self.svNodePool[1]),
+                deepcopy(self.svNodePool[2]),
+            ]
+        )
+
+        tree2 = SVTree(
+            nodes=[
+                FunctionNode('add'),
+                deepcopy(self.svNodePool[0]),
+                deepcopy(self.svNodePool[1]),
+            ]
+        )
+
+
+        tree3 = SVTree(
+            nodes=[
+                FunctionNode('add'),
+                deepcopy(self.svNodePool[0]),
+                FunctionNode('add'),
+                deepcopy(self.svNodePool[1]),
+                FunctionNode('softplus'),
+                deepcopy(self.svNodePool[1]),
+            ]
+        )
+
+        tree4 = SVTree(
+            nodes=[
+                FunctionNode('add'),
+                deepcopy(self.svNodePool[0]),
+                FunctionNode('add'),
+                deepcopy(self.svNodePool[1]),
+                deepcopy(self.svNodePool[1]),
+            ]
+        )
+
+        self.assertTrue(self.tree == tree1)
+
+        self.assertFalse(self.tree == tree2)
+        self.assertFalse(self.tree == tree3)
+        self.assertFalse(self.tree == tree4)
+
+
+
     def test_verify_constructor(self):
         self.assertEqual(5, len(self.tree.nodes))
         self.assertEqual(3, len(self.tree.svNodes))

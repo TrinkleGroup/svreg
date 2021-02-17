@@ -40,7 +40,7 @@ class SVDatabase(dict):
         self['energy'] = {}
         self['forces'] = {}
 
-        structNames = list(h5pyFile.keys())
+        structNames = list(h5pyFile.keys())[:4]
         svNames =  list(h5pyFile[structNames[0]].keys())
         elements = sorted(list(h5pyFile[structNames[0]][svNames[0]].keys()))
 
@@ -65,7 +65,7 @@ class SVDatabase(dict):
         }
 
 
-    def load(self, h5pyFile, useDask=True):
+    def load(self, h5pyFile, useDask=True, allSums=False):
 
         structNames = self.attrs['structNames']
         svNames = self.attrs['svNames']
@@ -90,6 +90,9 @@ class SVDatabase(dict):
                     forceData = group['forces']
 
                     self[struct][sv][elem]['energy'] = group['energy'][()]
+
+                    if allSums:
+                        forceData = np.einsum('ijkl->jkl', forceData)
 
                     if useDask:
                         self[struct][sv][elem]['forces'] = da.from_array(

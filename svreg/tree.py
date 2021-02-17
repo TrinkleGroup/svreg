@@ -39,8 +39,56 @@ class SVTree(list):
         self.cost = np.inf
 
 
+    def __eq__(self, other):
+        """
+        Logic to check for equality of two chemistry trees:
+
+        Inequal if:
+            - different number of nodes
+            - different frequency count of each node type
+            - they don't evaluate to the same thing with dummy values
+        """
+
+        n = len(self.nodes)
+
+        # Check incorrect length
+        if len(other.nodes) != n:
+            return False
+
+        # Check mis-matched nodes
+        selfCounts = {}
+        otherCounts = {}
+
+        for node in self.nodes:
+            name = node.description
+            selfCounts[name] = selfCounts.get(name, 0) + 1
+
+        for node in other.nodes:
+            name = node.description
+            otherCounts[name] = otherCounts.get(name, 0) + 1
+
+        for name in selfCounts:
+            if selfCounts[name] != otherCounts[name]:
+                return False
+
+        # Check dummy evaluation
+        nsv = len(self.svNodes)
+
+        dummyEnergies = np.random.random((nsv, 1, 1))
+        dummyForces   = np.random.random((nsv, 1, 1, 1, 1))
+
+        for i in range(nsv):
+            self.svNodes[i].values = (dummyEnergies[i], dummyForces[i])
+            other.svNodes[i].values = (dummyEnergies[i], dummyForces[i])
+
+        if self.eval(useDask=False) != other.eval(useDask=False):
+            return False
+        
+        return True
+
+
     @classmethod
-    def random(cls, svNodePool, maxDepth=1, method='full'):
+    def random(cls, svNodePool, maxDepth=1, method='grow', maxNumSVs=1):
         """
         Generates a random tree with a maximum depth of maxDepth by randomly
         adding nodes from a pool of function nodes and the given svNodes list.
@@ -95,22 +143,32 @@ class SVTree(list):
         # is complete once this list is empty
         nodesToAdd = [tree.nodes[0].function.arity]
 
+        numNestedFunctions = int(tree.nodes[0].description != 'add')
+        numSVs = 0
+
         while nodesToAdd:
-            depth = len(nodesToAdd)
+            # depth = len(nodesToAdd)
 
             choice = random.randint(0, numNodeChoices)
 
-            if (depth < maxDepth) and (
-                (choice <= numFuncs) or (method == 'full')):
+            if (numNestedFunctions < maxDepth) and (
+                (choice <= numFuncs) or (method == 'full')) and (
+                    numSVs < maxNumSVs
+                ):
 
                 # Chose to add a FunctionNode
                 tree.nodes.append(FunctionNode.random())
                 nodesToAdd.append(tree.nodes[-1].function.arity)
+
+                # Only count embedding functions (or *) when considering depth
+                numNestedFunctions += int(tree.nodes[-1].description != 'add')
             else:
                 # Add an SVNode
                 sv = random.choice(deepcopy(svNodePool))
                 tree.nodes.append(sv)
                 tree.svNodes.append(sv)
+
+                numSVs += 1
 
                 # See if you need to add any more nodes to the sub-tree
                 nodesToAdd[-1] -= 1
@@ -135,7 +193,7 @@ class SVTree(list):
         raise RuntimeError("Something went wrong in tree construction")
 
 
-    def eval(self):
+    def eval(self, useDask=True, allSums=False):
         """
         Evaluates the tree. Assumes that each SVNode has already been updated to
         contain the SV of the desired structure.
@@ -165,7 +223,15 @@ class SVTree(list):
 
             # eng = dask.delayed(np.sum)(values[0], axis=1)
             eng = np.sum(values[0], axis=1)
-            fcs = dask.delayed(np.einsum)('ijkl->ikl', values[1])
+
+            if allSums:
+                fcs = values[1]
+            else:
+                if useDask:
+                        fcs = dask.delayed(np.einsum)('ijkl->ikl', values[1])
+                else:
+                    if allSums:
+                        fcs = np.einsum('ijkl->ikl', values[1])
 
             return eng, fcs
 
@@ -200,7 +266,11 @@ class SVTree(list):
 
                 # intermediateEng = dask.delayed(subTrees[-1][0].function)(*args)
                 intermediateEng = subTrees[-1][0].function(*args)
-                intermediateFcs = dask.delayed(subTrees[-1][0].function.derivative)(*args)
+
+                if useDask:
+                    intermediateFcs = dask.delayed(subTrees[-1][0].function.derivative)(*args)
+                else:
+                    intermediateFcs = subTrees[-1][0].function.derivative(*args)
 
                 if len(subTrees) != 1:  # Still some left to evaluate
                     subTrees.pop()
@@ -222,7 +292,12 @@ class SVTree(list):
 
                     # intermediateEng = dask.delayed(np.sum)(intermediateEng, axis=1)
                     intermediateEng = np.sum(intermediateEng, axis=1)
-                    intermediateFcs = dask.delayed(np.einsum)('ijkl->ikl', intermediateFcs)
+
+                    if not allSums:
+                        if useDask:
+                            intermediateFcs = dask.delayed(np.einsum)('ijkl->ikl', intermediateFcs)
+                        else:
+                            intermediateFcs = np.einsum('ijkl->ikl', intermediateFcs)
                     
                     return intermediateEng, intermediateFcs
 
@@ -902,8 +977,11 @@ class MultiComponentTree(SVTree):
         return tree
 
     
-    def eval(self):
-        vals = [self.chemistryTrees[el].eval() for el in self.elements]
+    def eval(self, useDask=True):
+        vals = [
+            self.chemistryTrees[el].eval(useDask=useDask)
+            for el in self.elements
+        ]
 
         eng, fcs = zip(*vals)
 

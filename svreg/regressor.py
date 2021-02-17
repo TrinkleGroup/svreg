@@ -136,7 +136,7 @@ class SVRegressor:
             self.trees = treesToAdd
 
 
-    def evaluateTrees(self, svEng, svFcs, P):
+    def evaluateTrees(self, svEng, svFcs, P, useDask=True):
         """
         Updates the SVNode objects in the trees with the given values, then
         evaluate the trees
@@ -202,9 +202,12 @@ class SVRegressor:
                     # tree evaluation.
                     # nodeFcs = (numNodes, P, nelem, natom, 3)
 
-                    nodeFcs = dask.delayed(reshapeFcs, nout=numNodes)(
-                        stackedFcs, numNodes, P
-                    )
+                    if useDask:
+                        nodeFcs = dask.delayed(reshapeFcs, nout=numNodes)(
+                            stackedFcs, numNodes, P
+                        )
+                    else:
+                        nodeFcs = reshapeFcs(stackedFcs, numNodes, P)
 
                     unstackedValues = []
                     # for val1, val2 in zip(nodeEng, nodeFcs):
@@ -233,7 +236,10 @@ class SVRegressor:
 
             # If here, all of the nodes have been updated with their values
             for tree in self.trees:
-                future = tree.eval()
+                future = tree.eval(
+                    useDask=useDask,
+                    allSums=self.settings['allSums']
+                )
 
                 # future[0] = (P,)
                 # future[1] = (P, N, 3)

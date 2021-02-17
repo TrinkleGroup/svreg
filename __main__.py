@@ -28,6 +28,7 @@ from svreg.database import SVDatabase
 from svreg.regressor import SVRegressor
 from svreg.evaluator import SVEvaluator
 from svreg.population import Population
+from svreg.functions import _function_map
 
 ################################################################################
 # Parse all command-line arguments
@@ -54,7 +55,7 @@ def main(client, settings):
     # Setup
     with h5py.File(settings['databasePath'], 'r') as h5pyFile:
         database = SVDatabase(h5pyFile)
-        wait(database.load(h5pyFile))
+        wait(database.load(h5pyFile, settings['allSums']))
 
         evaluator = SVEvaluator(database, settings)
 
@@ -75,6 +76,8 @@ def main(client, settings):
 
     print()
     print()
+
+    return
 
     N = settings['optimizerPopSize']
 
@@ -251,7 +254,7 @@ def polish(client, settings):
     # Setup
     with h5py.File(settings['databasePath'], 'r') as h5pyFile:
         database = SVDatabase(h5pyFile)
-        wait(database.load(h5pyFile))
+        wait(database.load(h5pyFile, settings['allSums']))
 
         evaluator = SVEvaluator(database, settings)
 
@@ -546,6 +549,13 @@ if __name__ == '__main__':
 
     print("Current settings:\n")
     settings.printSettings()
+
+    if settings['allSums']:
+        for key in _function_map:
+            if key != 'add':
+                raise RuntimeError(
+                    "allSums == True, but function map includes other functions"
+                )
 
     # Prepare save directories
     if os.path.isdir(settings['outputPath']):

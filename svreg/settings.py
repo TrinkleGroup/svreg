@@ -18,17 +18,6 @@ class Option:
 
 
 _valid_options = {
-    'PROCS_PER_MANAGER': Option(
-        'PROCS_PER_MANAGER', int, (1,), 32,
-        'The size of the processor farm given to each Manager object;'\
-            ' used for tuning parallelization.'
-    ),
-    'PROCS_PER_PHYS_NODE': Option(
-        'PROCS_PER_PHYS_NODE', int, (1,), 32,
-        'The number of cores on a physical compute node. The number of'\
-            ' compute nodes assigned to each Manager is equal to'\
-                ' (PROCS_PER_MANAGER / PROCS_PER_PHYS_NODE.'
-    ),
     'seed' : Option(
         'seed', int, None, 42,
         'The seed to pass to the random number generators.'
@@ -66,6 +55,12 @@ _valid_options = {
         'optimizer', str, None, 'CMA',
         'The name of the optimizer object to use for optimizing strings.'
     ),
+    'allSums': Option(
+        'allSums', bool, (False, True), False,
+        'If True, only "+" function nodes will be added. This limits the'\
+            'non-linearity of the trees, but allows for significantly lower'\
+                'computational costs during optimization.'
+    ),
     'numberOfTrees': Option(
         'numberOfTrees', int, None, [10, 100],
         'The number of equation trees for the regressor to generate at'\
@@ -98,6 +93,11 @@ _valid_options = {
         'The maximum allowed tree depth. Trees should be kept relatively '\
             'shallow to encourage speed and interpretability of the final '\
                 'potential form.'
+    ),
+    'maxNumSVs': Option(
+        'maxNumSVs', int, (1,), 10,
+        'The maximum number of structure vectors that a chemistry tree can'\
+            'have.'
     ),
     'numRegressorSteps': Option(
         'numRegressorSteps', int, None, [100, 1000],
