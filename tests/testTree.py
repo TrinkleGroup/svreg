@@ -11,6 +11,29 @@ from svreg.exceptions import StaleValueException
 
 from tests._testStructs import _all_test_structs
 
+atol = 1e-10
+
+def flat(x=None):
+    if x is None:
+        x = np.random.random()
+
+    rand = np.ones(9)*x
+    rand[-2] = rand[-1] = 0
+    return rand
+
+
+def angled(x=None):
+    if x is None:
+        x = np.random.random()
+
+    rand = np.linspace(2.4, 5.2, 9)*x
+    rand[-2] = rand[-1] = x
+    return rand
+
+def wiggly():
+    rand = np.random.random(9)
+    return rand
+
 
 class Test_SVTree(unittest.TestCase):
 
@@ -28,7 +51,7 @@ class Test_SVTree(unittest.TestCase):
         ]
 
         for i, svNode in enumerate(self.svNodePool):
-            svNode.values = (i, 0)
+            svNode.values = (np.ones((1, 5))*i, np.zeros((1, 5, 5, 3)))
             
         self.tree = SVTree(
             nodes=[
@@ -40,6 +63,55 @@ class Test_SVTree(unittest.TestCase):
             ],
         )
 
+    def test_equality(self):
+        tree1 = SVTree(
+            nodes=[
+                FunctionNode('add'),
+                deepcopy(self.svNodePool[0]),
+                FunctionNode('add'),
+                deepcopy(self.svNodePool[1]),
+                deepcopy(self.svNodePool[2]),
+            ]
+        )
+
+        tree2 = SVTree(
+            nodes=[
+                FunctionNode('add'),
+                deepcopy(self.svNodePool[0]),
+                deepcopy(self.svNodePool[1]),
+            ]
+        )
+
+
+        tree3 = SVTree(
+            nodes=[
+                FunctionNode('add'),
+                deepcopy(self.svNodePool[0]),
+                FunctionNode('add'),
+                deepcopy(self.svNodePool[1]),
+                FunctionNode('softplus'),
+                deepcopy(self.svNodePool[1]),
+            ]
+        )
+
+        tree4 = SVTree(
+            nodes=[
+                FunctionNode('add'),
+                deepcopy(self.svNodePool[0]),
+                FunctionNode('add'),
+                deepcopy(self.svNodePool[1]),
+                deepcopy(self.svNodePool[1]),
+            ]
+        )
+
+        self.assertTrue(self.tree == tree1)
+
+        self.assertFalse(self.tree == tree2)
+        self.assertFalse(self.tree == tree3)
+        self.assertFalse(self.tree == tree4)
+
+
+
     def test_verify_constructor(self):
         self.assertEqual(5, len(self.tree.nodes))
         self.assertEqual(3, len(self.tree.svNodes))
@@ -48,36 +120,31 @@ class Test_SVTree(unittest.TestCase):
     def test_tree_print(self):
         self.assertEqual(str(self.tree), 'add(sv0, add(sv1, sv2))')
 
-    
-    def test_eval(self):
-        self.assertEqual(self.tree.eval(), (3, 0))
-
 
     def test_1d_eval(self):
         for node in self.tree.svNodes:
-            node.values = (np.array([1, 2, 3]), 0)
+            node.values = (np.array([[1, 2, 3]]), np.zeros((1, 5, 5, 3)))
 
         results = self.tree.eval()
 
-        np.testing.assert_array_equal(results[0], [3, 6, 9])
-        np.testing.assert_array_equal(results[1], 0)
+        np.testing.assert_array_equal(results[0], np.array([18]))
+        np.testing.assert_array_equal(results[1], np.zeros((1, 5, 3)))
 
 
     def test_2d_eval(self):
         for node in self.tree.svNodes:
-            node.values = (np.tile([1,2,3], reps=(2,)), 0)
+            node.values = (
+                np.array([[1, 2, 3], [1, 2, 3]]), np.zeros((2, 5, 5, 3))
+            )
 
         results = self.tree.eval()
 
-        np.testing.assert_array_equal(
-            results[0], np.tile([3, 6, 9], reps=(2,))
-        )
-
-        np.testing.assert_array_equal(results[1], 0)
+        np.testing.assert_array_equal(results[0], np.array([18, 18]))
+        np.testing.assert_array_equal(results[1], np.zeros((2, 5, 3)))
 
 
     def test_repeat_eval_error(self):
-        self.assertEqual(self.tree.eval(), (3, 0))
+        self.tree.eval()
 
         with self.assertRaises(StaleValueException):
             self.tree.eval()
@@ -417,6 +484,8 @@ class Test_SVTree_Real(unittest.TestCase):
 
 class Test_MCTree_Real(unittest.TestCase):
 
+    # rzm: get Rho working without the nhost dimension
+
     def setUp(self):
         self.rho_A = SVNode(
             description='rho_A',
@@ -497,7 +566,20 @@ class Test_MCTree_Real(unittest.TestCase):
         )
 
         self.assertEqual(eng, 2.0)
-          
+ 
+        # fcs = tree.directEvaluation(
+        #     np.concatenate([
+        #         np.array([1, 1, 1, 1, 1, 1, 1, 0, 0]),  # H
+        #         np.array([2, 2, 2, 2, 2, 2, 2, 0, 0]),  # He
+        #     ]),
+        #     _all_test_structs['aa'],
+        #     evalType='forces',
+        #     bc_type='fixed',
+        #     cutoffs=self.cutoffs,
+        # )
+
+        # np.testing.assert_allclose(fcs, 0.0)
+                   
     def test_directEval_rho_a_rho_a_dimer_ab(self):
 
         tree = MCTree(['H', 'He'])
@@ -981,6 +1063,1326 @@ class Test_MCTree_Real(unittest.TestCase):
             self.assertEqual(eng, true)
 
 
+class Test_Direct_vs_SV_Ti48Mo80_type1_c10(unittest.TestCase):
+
+    @classmethod
+    def setUpClass(cls):
+
+        import os
+        from ase.io import read
+        from svreg.summation import Rho, FFG
+
+        ffg = FFG(
+            name='ffg',
+            allElements=['Mo', 'Ti'],
+            neighborElements=['Mo', 'Ti'],
+            components=['f_A', 'f_B', 'g_AA', 'g_BB', 'g_AB'],
+            inputTypes={'f_A': ['Mo'], 'f_B': ['Ti'], 'g_AA': ['Mo', 'Mo'], 'g_AB': ['Mo', 'Ti'], 'g_BB': ['Ti', 'Ti']},
+            numParams={'f_A': 7, 'f_B': 7, 'g_AA': 9, 'g_BB': 9, 'g_AB': 9},
+            restrictions={
+                'f_A': [(6, 0), (8, 0)],
+                'f_B': [(6, 0), (8, 0)],
+                'g_AA':[],
+                'g_AB':[],
+                'g_BB':[],
+            },
+            paramRanges={'f_A': None, 'f_B': None, 'g_AA': None, 'g_AB': None, 'g_BB': None},
+            bonds={
+                'ffg_AA': ['f_A', 'f_A', 'g_AA'],
+                'ffg_AB': ['f_A', 'f_B', 'g_AB'],
+                'ffg_BB': ['f_B', 'f_B', 'g_BB'],
+            },
+            bondMapping="lambda i,j: 'ffg_AA' if i+j==0 else ('ffg_AB' if i+j==1 else 'ffg_BB')",
+            cutoffs=[2.4, 5.2],
+            numElements=2,
+            bc_type='fixed',
+        )
+
+        rho = Rho(
+            name='rho',
+            allElements=['Mo', 'Ti'],
+            neighborElements=['Mo', 'Ti'],
+            components=['rho_A', 'rho_B'],
+            inputTypes={'rho_A': ['Mo'], 'rho_B': ['Ti']},
+            numParams={'rho_A': 7, 'rho_B': 7},
+            restrictions={'rho_A': [(6, 0), (8, 0)], 'rho_B': [(6, 0), (8, 0)]},
+            paramRanges={'rho_A': None, 'rho_B': None},
+            bonds={
+                'rho_A': ['rho_A'],
+                'rho_B': ['rho_B'],
+            },
+            bondMapping="lambda i: 'rho_A' if i == 0 else 'rho_B'",
+            cutoffs=[2.4, 5.2],
+            numElements=2,
+            bc_type='fixed',
+        )
+
+        engSV = {'rho': None, 'ffg': None}
+        fcsSV = {'rho': None, 'ffg': None}
+
+        struct = 'Ti48Mo80_type1_c10'
+
+        atoms = read(
+            os.path.join('examples/{}.data'.format(struct)),
+            format='lammps-data',
+            style='atomic'
+        )
+
+        types = np.array([
+            'Ti' if t == 'H' else 'Mo' for t in atoms.get_chemical_symbols()
+        ])
+
+        atoms.set_chemical_symbols(types)
+
+        engSV['rho'], fcsSV['rho'] = rho.loop(atoms, evalType='vector')
+        engSV['ffg'], fcsSV['ffg'] = ffg.loop(atoms, evalType='vector')
+
+        elements = ['Mo', 'Ti']
+
+        miniDatabase = {
+            el: {
+                evalType: {
+                    'rho': {'rho_A': None, 'rho_B': None},
+                    'ffg': {'ffg_AA': None, 'ffg_AB': None, 'ffg_BB': None}
+                } for evalType in ['energy', 'forces']
+            }
+            for el in elements
+        }
+
+        n = len(atoms)
+
+        for svName in ['rho', 'ffg']:
+            k = 729 if svName == 'ffg' else 9
+
+            for bondType in engSV[svName].keys():
+  
+                for elem in ['Mo', 'Ti']:
+                    where = np.where(types == elem)[0]
+
+                    miniDatabase[elem]['energy'][svName][bondType] = engSV[svName][bondType][where, :]
+          
+                    fcsSplit = fcsSV[svName][bondType]
+                    fcsSplit = fcsSplit.reshape((n, n, 3, k))
+                    fcsSplit = fcsSplit[where, :, :, :]
+                    miniDatabase[elem]['forces'][svName][bondType] = fcsSplit.copy()
+                   
+        from svreg.tree import SVTree
+        from svreg.nodes import FunctionNode
+        from svreg.tree import MultiComponentTree as MCTree
+
+        rho_A = SVNode(
+            description='rho_A',
+            components=['rho_A'],
+            constructor=['rho_A'],
+            numParams=[9],
+            restrictions=[(6, 0), (8, 0)],
+            paramRanges=[None],
+            inputTypes={'rho_A': ['Mo']},
+        )
+
+        rho_B = SVNode(
+            description='rho_B',
+            components=['rho_B'],
+            constructor=['rho_B'],
+            numParams=[9],
+            restrictions=[(6, 0), (8, 0)],
+            paramRanges=[None],
+            inputTypes={'rho_B': ['Ti']},
+        )
+
+        ffg_AA = SVNode(
+            description='ffg_AA',
+            components=['f_A', 'g_AA'],
+            constructor=['f_A', 'f_A', 'g_AA'],
+            numParams=[9, 9],
+            restrictions=[[(6, 0), (8, 0)], []],
+            paramRanges=[None, None],
+            inputTypes={'f_A': ['Mo'], 'g_AA': ['Mo', 'Mo']},
+        )
+
+
+        ffg_AB = SVNode(
+            description='ffg_AB',
+            components=['f_A', 'f_B', 'g_AB'],
+            constructor=['f_A', 'f_B', 'g_AB'],
+            numParams=[9, 9, 9],
+            restrictions=[[(6, 0), (8, 0)], [(6, 0), (8, 0)], []],
+            paramRanges=[None, None, None],
+            inputTypes={'f_A': ['Mo'], 'f_B': ['Ti'], 'g_AB': ['Mo', 'Ti']},
+        )
+
+
+        ffg_BB = SVNode(
+            description='ffg_BB',
+            components=['f_B', 'g_BB'],
+            constructor=['f_B', 'f_B', 'g_BB'],
+            numParams=[9, 9],
+            restrictions=[[(6, 0), (8, 0)], []],
+            paramRanges=[None, None],
+            inputTypes={'f_B': ['Ti'], 'g_BB': ['Ti', 'Ti']},
+        )
+
+        dummyTree = MCTree(['Mo', 'Ti'])
+
+        from copy import deepcopy
+
+        treeMo = SVTree()
+        treeMo.nodes = [
+            FunctionNode('add'),
+            deepcopy(rho_A),
+            FunctionNode('add'),
+            deepcopy(rho_B),
+            FunctionNode('add'),
+            deepcopy(ffg_AA),
+            FunctionNode('add'),
+            deepcopy(ffg_AB),
+            deepcopy(ffg_BB),
+        ]
+
+        treeTi = SVTree()
+        treeTi.nodes = [
+            FunctionNode('add'),
+            deepcopy(rho_A),
+            FunctionNode('add'),
+            deepcopy(rho_B),
+            FunctionNode('add'),
+            deepcopy(ffg_AA),
+            FunctionNode('add'),
+            deepcopy(ffg_AB),
+            deepcopy(ffg_BB),
+        ]
+
+        dummyTree.chemistryTrees['Mo'] = treeMo
+        dummyTree.chemistryTrees['Ti'] = treeTi
+
+        dummyTree.updateSVNodes()
+
+        cls.dummyTree = dummyTree
+        cls.miniDatabase = miniDatabase
+        cls.atoms = atoms
+
+
+    def test_flat_splines(self):
+        dummyParams = np.concatenate([flat() for _ in range(18)])
+
+        popDict = self.dummyTree.parseArr2Dict(
+            np.atleast_2d(dummyParams), fillFixedKnots=False
+        )
+
+        totalMo = 0
+
+        totalMo += self.miniDatabase['Mo']['energy']['ffg']['ffg_AA'] @ popDict['Mo']['ffg_AA'].T
+        totalMo += self.miniDatabase['Mo']['energy']['ffg']['ffg_AB'] @ popDict['Mo']['ffg_AB'].T
+        totalMo += self.miniDatabase['Mo']['energy']['ffg']['ffg_BB'] @ popDict['Mo']['ffg_BB'].T
+
+        totalMo += self.miniDatabase['Mo']['energy']['rho']['rho_A'] @ popDict['Mo']['rho_A'].T
+        totalMo += self.miniDatabase['Mo']['energy']['rho']['rho_B'] @ popDict['Mo']['rho_B'].T
+
+        totalMo = sum(totalMo)
+
+        totalTi = 0
+
+        totalTi += self.miniDatabase['Ti']['energy']['ffg']['ffg_AA'] @ popDict['Ti']['ffg_AA'].T
+        totalTi += self.miniDatabase['Ti']['energy']['ffg']['ffg_AB'] @ popDict['Ti']['ffg_AB'].T
+        totalTi += self.miniDatabase['Ti']['energy']['ffg']['ffg_BB'] @ popDict['Ti']['ffg_BB'].T
+
+        totalTi += self.miniDatabase['Ti']['energy']['rho']['rho_A'] @ popDict['Ti']['rho_A'].T
+        totalTi += self.miniDatabase['Ti']['energy']['rho']['rho_B'] @ popDict['Ti']['rho_B'].T
+
+        totalTi = sum(totalTi)
+
+        engSVmethod = totalMo + totalTi
+
+        engDirectMethod = self.dummyTree.directEvaluation(
+            dummyParams,
+            self.atoms,
+            'energy',
+            'fixed',
+            cutoffs=[2.4, 5.2]
+        )
+
+        np.testing.assert_allclose(engSVmethod, engDirectMethod)
+
+        totalMoForces = 0
+
+        totalMoForces += self.miniDatabase['Mo']['forces']['ffg']['ffg_AA'] @ popDict['Mo']['ffg_AA'].T
+        totalMoForces += self.miniDatabase['Mo']['forces']['ffg']['ffg_AB'] @ popDict['Mo']['ffg_AB'].T
+        totalMoForces += self.miniDatabase['Mo']['forces']['ffg']['ffg_BB'] @ popDict['Mo']['ffg_BB'].T
+
+        totalMoForces += self.miniDatabase['Mo']['forces']['rho']['rho_A'] @ popDict['Mo']['rho_A'].T
+        totalMoForces += self.miniDatabase['Mo']['forces']['rho']['rho_B'] @ popDict['Mo']['rho_B'].T
+
+        totalTiForces = 0
+
+        totalTiForces += self.miniDatabase['Ti']['forces']['ffg']['ffg_AA'] @ popDict['Ti']['ffg_AA'].T
+        totalTiForces += self.miniDatabase['Ti']['forces']['ffg']['ffg_AB'] @ popDict['Ti']['ffg_AB'].T
+        totalTiForces += self.miniDatabase['Ti']['forces']['ffg']['ffg_BB'] @ popDict['Ti']['ffg_BB'].T
+
+        totalTiForces += self.miniDatabase['Ti']['forces']['rho']['rho_A'] @ popDict['Ti']['rho_A'].T
+        totalTiForces += self.miniDatabase['Ti']['forces']['rho']['rho_B'] @ popDict['Ti']['rho_B'].T
+
+        fcsDirectMethod = self.dummyTree.directEvaluation(
+            dummyParams,
+            self.atoms,
+            'forces',
+            'fixed',
+            cutoffs=[2.4, 5.2]
+        )
+
+        svForces = np.sum(totalMoForces, axis=0) + np.sum(totalTiForces, axis=0)
+        svForces = np.moveaxis(svForces, -1, 0)
+        np.testing.assert_allclose(fcsDirectMethod, svForces[0], atol=atol)
+
+
+    def test_angled_splines(self):
+
+        dummyParams = np.concatenate([angled() for _ in range(18)])
+
+        popDict = self.dummyTree.parseArr2Dict(
+            np.atleast_2d(dummyParams), fillFixedKnots=False
+        )
+
+        totalMo = 0
+
+        totalMo += self.miniDatabase['Mo']['energy']['ffg']['ffg_AA'] @ popDict['Mo']['ffg_AA'].T
+        totalMo += self.miniDatabase['Mo']['energy']['ffg']['ffg_AB'] @ popDict['Mo']['ffg_AB'].T
+        totalMo += self.miniDatabase['Mo']['energy']['ffg']['ffg_BB'] @ popDict['Mo']['ffg_BB'].T
+
+        totalMo += self.miniDatabase['Mo']['energy']['rho']['rho_A'] @ popDict['Mo']['rho_A'].T
+        totalMo += self.miniDatabase['Mo']['energy']['rho']['rho_B'] @ popDict['Mo']['rho_B'].T
+
+        totalMo = sum(totalMo)
+
+        totalTi = 0
+
+        totalTi += self.miniDatabase['Ti']['energy']['ffg']['ffg_AA'] @ popDict['Ti']['ffg_AA'].T
+        totalTi += self.miniDatabase['Ti']['energy']['ffg']['ffg_AB'] @ popDict['Ti']['ffg_AB'].T
+        totalTi += self.miniDatabase['Ti']['energy']['ffg']['ffg_BB'] @ popDict['Ti']['ffg_BB'].T
+
+        totalTi += self.miniDatabase['Ti']['energy']['rho']['rho_A'] @ popDict['Ti']['rho_A'].T
+        totalTi += self.miniDatabase['Ti']['energy']['rho']['rho_B'] @ popDict['Ti']['rho_B'].T
+
+        totalTi = sum(totalTi)
+
+        engSVmethod = totalMo + totalTi
+
+        engDirectMethod = self.dummyTree.directEvaluation(
+            dummyParams,
+            self.atoms,
+            'energy',
+            'fixed',
+            cutoffs=[2.4, 5.2]
+        )
+
+        np.testing.assert_allclose(engSVmethod, engDirectMethod)
+
+        totalMoForces = 0
+
+        totalMoForces += self.miniDatabase['Mo']['forces']['ffg']['ffg_AA'] @ popDict['Mo']['ffg_AA'].T
+        totalMoForces += self.miniDatabase['Mo']['forces']['ffg']['ffg_AB'] @ popDict['Mo']['ffg_AB'].T
+        totalMoForces += self.miniDatabase['Mo']['forces']['ffg']['ffg_BB'] @ popDict['Mo']['ffg_BB'].T
+
+        totalMoForces += self.miniDatabase['Mo']['forces']['rho']['rho_A'] @ popDict['Mo']['rho_A'].T
+        totalMoForces += self.miniDatabase['Mo']['forces']['rho']['rho_B'] @ popDict['Mo']['rho_B'].T
+
+        totalTiForces = 0
+
+        totalTiForces += self.miniDatabase['Ti']['forces']['ffg']['ffg_AA'] @ popDict['Ti']['ffg_AA'].T
+        totalTiForces += self.miniDatabase['Ti']['forces']['ffg']['ffg_AB'] @ popDict['Ti']['ffg_AB'].T
+        totalTiForces += self.miniDatabase['Ti']['forces']['ffg']['ffg_BB'] @ popDict['Ti']['ffg_BB'].T
+
+        totalTiForces += self.miniDatabase['Ti']['forces']['rho']['rho_A'] @ popDict['Ti']['rho_A'].T
+        totalTiForces += self.miniDatabase['Ti']['forces']['rho']['rho_B'] @ popDict['Ti']['rho_B'].T
+
+        fcsDirectMethod = self.dummyTree.directEvaluation(
+            dummyParams,
+            self.atoms,
+            'forces',
+            'fixed',
+            cutoffs=[2.4, 5.2]
+        )
+
+        svForces = np.sum(totalMoForces, axis=0) + np.sum(totalTiForces, axis=0)
+        svForces = np.moveaxis(svForces, -1, 0)
+        np.testing.assert_allclose(fcsDirectMethod, svForces[0], atol=atol)
+
+
+    def test_wiggly_splines(self):
+
+        dummyParams = np.concatenate([wiggly() for _ in range(18)])
+
+        popDict = self.dummyTree.parseArr2Dict(
+            np.atleast_2d(dummyParams), fillFixedKnots=False
+        )
+
+        totalMo = 0
+
+        totalMo += self.miniDatabase['Mo']['energy']['ffg']['ffg_AA'] @ popDict['Mo']['ffg_AA'].T
+        totalMo += self.miniDatabase['Mo']['energy']['ffg']['ffg_AB'] @ popDict['Mo']['ffg_AB'].T
+        totalMo += self.miniDatabase['Mo']['energy']['ffg']['ffg_BB'] @ popDict['Mo']['ffg_BB'].T
+
+        totalMo += self.miniDatabase['Mo']['energy']['rho']['rho_A'] @ popDict['Mo']['rho_A'].T
+        totalMo += self.miniDatabase['Mo']['energy']['rho']['rho_B'] @ popDict['Mo']['rho_B'].T
+
+        totalMo = sum(totalMo)
+
+        totalTi = 0
+
+        totalTi += self.miniDatabase['Ti']['energy']['ffg']['ffg_AA'] @ popDict['Ti']['ffg_AA'].T
+        totalTi += self.miniDatabase['Ti']['energy']['ffg']['ffg_AB'] @ popDict['Ti']['ffg_AB'].T
+        totalTi += self.miniDatabase['Ti']['energy']['ffg']['ffg_BB'] @ popDict['Ti']['ffg_BB'].T
+
+        totalTi += self.miniDatabase['Ti']['energy']['rho']['rho_A'] @ popDict['Ti']['rho_A'].T
+        totalTi += self.miniDatabase['Ti']['energy']['rho']['rho_B'] @ popDict['Ti']['rho_B'].T
+
+        totalTi = sum(totalTi)
+
+        engSVmethod = totalMo + totalTi
+
+        engDirectMethod = self.dummyTree.directEvaluation(
+            dummyParams,
+            self.atoms,
+            'energy',
+            'fixed',
+            cutoffs=[2.4, 5.2]
+        )
+
+        np.testing.assert_allclose(engSVmethod, engDirectMethod)
+
+        totalMoForces = 0
+
+        totalMoForces += self.miniDatabase['Mo']['forces']['ffg']['ffg_AA'] @ popDict['Mo']['ffg_AA'].T
+        totalMoForces += self.miniDatabase['Mo']['forces']['ffg']['ffg_AB'] @ popDict['Mo']['ffg_AB'].T
+        totalMoForces += self.miniDatabase['Mo']['forces']['ffg']['ffg_BB'] @ popDict['Mo']['ffg_BB'].T
+
+        totalMoForces += self.miniDatabase['Mo']['forces']['rho']['rho_A'] @ popDict['Mo']['rho_A'].T
+        totalMoForces += self.miniDatabase['Mo']['forces']['rho']['rho_B'] @ popDict['Mo']['rho_B'].T
+
+        totalTiForces = 0
+
+        totalTiForces += self.miniDatabase['Ti']['forces']['ffg']['ffg_AA'] @ popDict['Ti']['ffg_AA'].T
+        totalTiForces += self.miniDatabase['Ti']['forces']['ffg']['ffg_AB'] @ popDict['Ti']['ffg_AB'].T
+        totalTiForces += self.miniDatabase['Ti']['forces']['ffg']['ffg_BB'] @ popDict['Ti']['ffg_BB'].T
+
+        totalTiForces += self.miniDatabase['Ti']['forces']['rho']['rho_A'] @ popDict['Ti']['rho_A'].T
+        totalTiForces += self.miniDatabase['Ti']['forces']['rho']['rho_B'] @ popDict['Ti']['rho_B'].T
+
+        fcsDirectMethod = self.dummyTree.directEvaluation(
+            dummyParams,
+            self.atoms,
+            'forces',
+            'fixed',
+            cutoffs=[2.4, 5.2]
+        )
+
+        svForces = np.sum(totalMoForces, axis=0) + np.sum(totalTiForces, axis=0)
+        svForces = np.moveaxis(svForces, -1, 0)
+        np.testing.assert_allclose(fcsDirectMethod, svForces[0], atol=atol)
+
+
+    def test_linear_rho_wiggly_ffg_0end(self):
+        # rho_A rho_B ffg_AA ffg_AB ffg_BB
+        dummyParams = np.concatenate([
+            flat(),
+            flat(),
+            wiggly(), wiggly(),
+            wiggly(), wiggly(), wiggly(),
+            wiggly(), wiggly(),
+            flat(),
+            flat(),
+            wiggly(), wiggly(),
+            wiggly(), wiggly(), wiggly(),
+            wiggly(), wiggly(),
+        ])
+
+        popDict = self.dummyTree.parseArr2Dict(
+            np.atleast_2d(dummyParams), fillFixedKnots=False
+        )
+
+        totalMo = 0
+
+        totalMo += self.miniDatabase['Mo']['energy']['ffg']['ffg_AA'] @ popDict['Mo']['ffg_AA'].T
+        totalMo += self.miniDatabase['Mo']['energy']['ffg']['ffg_AB'] @ popDict['Mo']['ffg_AB'].T
+        totalMo += self.miniDatabase['Mo']['energy']['ffg']['ffg_BB'] @ popDict['Mo']['ffg_BB'].T
+
+        totalMo += self.miniDatabase['Mo']['energy']['rho']['rho_A'] @ popDict['Mo']['rho_A'].T
+        totalMo += self.miniDatabase['Mo']['energy']['rho']['rho_B'] @ popDict['Mo']['rho_B'].T
+
+        totalMo = sum(totalMo)
+
+        totalTi = 0
+
+        totalTi += self.miniDatabase['Ti']['energy']['ffg']['ffg_AA'] @ popDict['Ti']['ffg_AA'].T
+        totalTi += self.miniDatabase['Ti']['energy']['ffg']['ffg_AB'] @ popDict['Ti']['ffg_AB'].T
+        totalTi += self.miniDatabase['Ti']['energy']['ffg']['ffg_BB'] @ popDict['Ti']['ffg_BB'].T
+
+        totalTi += self.miniDatabase['Ti']['energy']['rho']['rho_A'] @ popDict['Ti']['rho_A'].T
+        totalTi += self.miniDatabase['Ti']['energy']['rho']['rho_B'] @ popDict['Ti']['rho_B'].T
+
+        totalTi = sum(totalTi)
+
+        engSVmethod = totalMo + totalTi
+
+        engDirectMethod = self.dummyTree.directEvaluation(
+            dummyParams,
+            self.atoms,
+            'energy',
+            'fixed',
+            cutoffs=[2.4, 5.2]
+        )
+
+        np.testing.assert_allclose(engSVmethod, engDirectMethod)
+
+
+    def test_wiggly_rho_linear_0end(self):
+
+        # rho_A rho_B ffg_AA ffg_AB ffg_B
+        dummyParams = np.concatenate([
+            wiggly(),
+            wiggly(),
+            flat(), flat(),
+            flat(), flat(), flat(),
+            flat(), flat(),
+            wiggly(),
+            wiggly(),
+            flat(), flat(),
+            flat(), flat(), flat(),
+            flat(), flat(),
+        ])
+
+        popDict = self.dummyTree.parseArr2Dict(
+            np.atleast_2d(dummyParams), fillFixedKnots=False
+        )
+
+        totalMo = 0
+
+        totalMo += self.miniDatabase['Mo']['energy']['ffg']['ffg_AA'] @ popDict['Mo']['ffg_AA'].T
+        totalMo += self.miniDatabase['Mo']['energy']['ffg']['ffg_AB'] @ popDict['Mo']['ffg_AB'].T
+        totalMo += self.miniDatabase['Mo']['energy']['ffg']['ffg_BB'] @ popDict['Mo']['ffg_BB'].T
+
+        totalMo += self.miniDatabase['Mo']['energy']['rho']['rho_A'] @ popDict['Mo']['rho_A'].T
+        totalMo += self.miniDatabase['Mo']['energy']['rho']['rho_B'] @ popDict['Mo']['rho_B'].T
+
+        totalMo = sum(totalMo)
+
+        totalTi = 0
+
+        totalTi += self.miniDatabase['Ti']['energy']['ffg']['ffg_AA'] @ popDict['Ti']['ffg_AA'].T
+        totalTi += self.miniDatabase['Ti']['energy']['ffg']['ffg_AB'] @ popDict['Ti']['ffg_AB'].T
+        totalTi += self.miniDatabase['Ti']['energy']['ffg']['ffg_BB'] @ popDict['Ti']['ffg_BB'].T
+
+        totalTi += self.miniDatabase['Ti']['energy']['rho']['rho_A'] @ popDict['Ti']['rho_A'].T
+        totalTi += self.miniDatabase['Ti']['energy']['rho']['rho_B'] @ popDict['Ti']['rho_B'].T
+
+        totalTi = sum(totalTi)
+
+        engSVmethod = totalMo + totalTi
+
+        engDirectMethod = self.dummyTree.directEvaluation(
+            dummyParams,
+            self.atoms,
+            'energy',
+            'fixed',
+            cutoffs=[2.4, 5.2]
+        )
+
+        np.testing.assert_allclose(engSVmethod, engDirectMethod)
+
+
+class Test_MCTree_Real_Forces(unittest.TestCase):
+
+    def setUp(self):
+        self.rho_A = SVNode(
+            description='rho_A',
+            components=['rho_A'],
+            constructor=['rho_A'],
+            numParams=[9],
+            restrictions=[(6, 0), (8, 0)],
+            paramRanges=[None],
+            inputTypes={'rho_A': ['H']},
+        )
+
+        self.rho_B = SVNode(
+            description='rho_B',
+            components=['rho_B'],
+            constructor=['rho_B'],
+            numParams=[9],
+            restrictions=[(6, 0), (8, 0)],
+            paramRanges=[None],
+            inputTypes={'rho_B': ['He']},
+        )
+
+        self.ffg_AA = SVNode(
+            description='ffg_AA',
+            components=['f_A', 'g_AA'],
+            constructor=['f_A', 'f_A', 'g_AA'],
+            numParams=[9, 9],
+            restrictions=[[(6, 0), (8, 0)], []],
+            paramRanges=[None, None],
+            inputTypes={'f_A': ['H'], 'g_AA': ['H', 'H']},
+        )
+
+
+        self.ffg_AB = SVNode(
+            description='ffg_AB',
+            components=['f_A', 'f_B', 'g_AB'],
+            constructor=['f_A', 'f_B', 'g_AB'],
+            numParams=[9, 9, 9],
+            restrictions=[[(6, 0), (8, 0)], [(6, 0), (8, 0)], []],
+            paramRanges=[None, None, None],
+            inputTypes={'f_A': ['H'], 'f_B': ['He'], 'g_AB': ['H', 'He']},
+        )
+
+
+        self.ffg_BB = SVNode(
+            description='ffg_BB',
+            components=['f_B', 'g_BB'],
+            constructor=['f_B', 'f_B', 'g_BB'],
+            numParams=[9, 9],
+            restrictions=[[(6, 0), (8, 0)], []],
+            paramRanges=[None, None],
+            inputTypes={'f_B': ['He'], 'g_BB': ['He', 'He']},
+        )
+
+        self.cutoffs = [1.0, 50.0]
+
+        from svreg.summation import Rho, FFG
+
+        ffg = FFG(
+            name='ffg',
+            allElements=['H', 'He'],
+            neighborElements=['H', 'He'],
+            components=['f_A', 'f_B', 'g_AA', 'g_BB', 'g_AB'],
+            inputTypes={'f_A': ['H'], 'f_B': ['He'], 'g_AA': ['H', 'H'], 'g_AB': ['H', 'He'], 'g_BB': ['He', 'He']},
+            numParams={'f_A': 7, 'f_B': 7, 'g_AA': 9, 'g_BB': 9, 'g_AB': 9},
+            restrictions={
+                'f_A': [(6, 0), (8, 0)],
+                'f_B': [(6, 0), (8, 0)],
+                'g_AA':[],
+                'g_AB':[],
+                'g_BB':[],
+            },
+            paramRanges={'f_A': None, 'f_B': None, 'g_AA': None, 'g_AB': None, 'g_BB': None},
+            bonds={
+                'ffg_AA': ['f_A', 'f_A', 'g_AA'],
+                'ffg_AB': ['f_A', 'f_B', 'g_AB'],
+                'ffg_BB': ['f_B', 'f_B', 'g_BB'],
+            },
+            bondMapping="lambda i,j: 'ffg_AA' if i+j==0 else ('ffg_AB' if i+j==1 else 'ffg_BB')",
+            cutoffs=self.cutoffs,
+            numElements=2,
+            bc_type='fixed',
+        )
+
+        rho = Rho(
+            name='rho',
+            allElements=['H', 'He'],
+            neighborElements=['H', 'He'],
+            components=['rho_A', 'rho_B'],
+            inputTypes={'rho_A': ['H'], 'rho_B': ['He']},
+            numParams={'rho_A': 7, 'rho_B': 7},
+            restrictions={'rho_A': [(6, 0), (8, 0)], 'rho_B': [(6, 0), (8, 0)]},
+            paramRanges={'rho_A': None, 'rho_B': None},
+            bonds={
+                'rho_A': ['rho_A'],
+                'rho_B': ['rho_B'],
+            },
+            bondMapping="lambda i: 'rho_A' if i == 0 else 'rho_B'",
+            cutoffs=self.cutoffs,
+            numElements=2,
+            bc_type='fixed',
+        )
+
+
+        def miniDb(atoms):
+
+            engSV = {'rho': None, 'ffg': None}
+            fcsSV = {'rho': None, 'ffg': None}
+
+            engSV['rho'], fcsSV['rho'] = rho.loop(atoms, evalType='vector')
+            engSV['ffg'], fcsSV['ffg'] = ffg.loop(atoms, evalType='vector')
+
+            elements = ['H', 'He']
+
+            miniDatabase = {
+                el: {
+                    evalType: {
+                        'rho': {'rho_A': None, 'rho_B': None},
+                        'ffg': {'ffg_AA': None, 'ffg_AB': None, 'ffg_BB': None}
+                    } for evalType in ['energy', 'forces']
+                }
+                for el in elements
+            }
+
+            types = np.array(atoms.get_chemical_symbols())
+
+            n = len(atoms)
+
+            for svName in ['rho', 'ffg']:
+                k = 729 if svName == 'ffg' else 9
+
+                for bondType in engSV[svName].keys():
+
+                    for elem in ['H', 'He']:
+                        where       = np.where(types == elem)[0]
+
+                        miniDatabase[elem]['energy'][svName][bondType] = engSV[svName][bondType][where, :]
+
+                        fcsSplit = fcsSV[svName][bondType]
+                        fcsSplit = fcsSplit.reshape((n, n, 3, k))
+                        fcsSplit = fcsSplit[where, :, :, :]
+                        miniDatabase[elem]['forces'][svName][bondType] = fcsSplit.copy()
+                    
+            return miniDatabase
+
+        self.miniDb = miniDb
+        
+  
+    def test_directEval_rho_A_rho_A_dimers(self):
+        tree = MCTree(['H', 'He'])
+        
+        subtree0 = SVTree(nodes=[deepcopy(self.rho_A)])
+        subtree1 = SVTree(nodes=[deepcopy(self.rho_A)])
+        
+        tree.chemistryTrees['H']    = subtree0
+        tree.chemistryTrees['He']   = subtree1
+
+        tree.updateSVNodes()
+
+        for struct in ['aa', 'ab', 'bb']:
+            fcs = tree.directEvaluation(
+                np.concatenate([
+                    flat(1),  # H
+                    flat(2),  # He
+                ]),
+                _all_test_structs[struct],
+                evalType='forces',
+                bc_type='fixed',
+                cutoffs=self.cutoffs,
+            )
+
+            np.testing.assert_allclose(np.sum(fcs, axis=0), 0)
+
+      
+    def test_directEval_rho_A_rho_A_trimers(self):
+        tree = MCTree(['H', 'He'])
+        
+        subtree0 = SVTree(nodes=[deepcopy(self.rho_A)])
+        subtree1 = SVTree(nodes=[deepcopy(self.rho_A)])
+        
+        tree.chemistryTrees['H']    = subtree0
+        tree.chemistryTrees['He']   = subtree1
+
+        tree.updateSVNodes()
+
+        for struct in ['aaa', 'bbb', 'abb', 'bab', 'baa', 'aba']:
+            fcs = tree.directEvaluation(
+                np.concatenate([
+                    flat(1),  # H
+                    flat(2),  # He
+                ]),
+                _all_test_structs[struct],
+                evalType='forces',
+                bc_type='fixed',
+                cutoffs=self.cutoffs,
+            )
+
+            np.testing.assert_allclose(np.sum(fcs, axis=0), 0.0, atol=atol)
+    
+      
+    def test_directEval_rho_A_rho_B_trimers_linear(self):
+        tree = MCTree(['H', 'He'])
+        
+        subtree0 = SVTree(nodes=[FunctionNode('add'), deepcopy(self.rho_A), deepcopy(self.rho_B)])
+        subtree1 = SVTree(nodes=[FunctionNode('add'), deepcopy(self.rho_A), deepcopy(self.rho_B)])
+        
+        tree.chemistryTrees['H']    = subtree0
+        tree.chemistryTrees['He']   = subtree1
+
+        tree.updateSVNodes()
+
+        for struct in ['aaa', 'bbb', 'abb', 'bab', 'baa', 'aba']:
+            fcs = tree.directEvaluation(
+                np.concatenate([
+                    angled(10),  # H on H
+                    angled(20),  # He on H
+                    angled(10),  # H on He
+                    angled(20),  # He on He
+                ]),
+                _all_test_structs[struct+'_lin'],
+                evalType='forces',
+                bc_type='fixed',
+                cutoffs=self.cutoffs,
+            )
+
+            np.testing.assert_allclose(np.sum(fcs, axis=0), 0.0, atol=atol)
+          
+
+    def test_direct_vs_SV_rho_A_rho_B_trimers_linear_angled(self):
+        tree = MCTree(['H', 'He'])
+        
+        subtree0 = SVTree(nodes=[FunctionNode('add'), deepcopy(self.rho_A), deepcopy(self.rho_B)])
+        subtree1 = SVTree(nodes=[FunctionNode('add'), deepcopy(self.rho_A), deepcopy(self.rho_B)])
+
+        tree.chemistryTrees['H']    = subtree0
+        tree.chemistryTrees['He']   = subtree1
+
+        tree.updateSVNodes()
+
+        for struct in ['aaa', 'bbb', 'abb', 'bab', 'baa', 'aba']:
+            y = np.concatenate([
+                angled(10),  # H on H
+                angled(20),  # He on H
+                angled(10),  # H on He
+                angled(20),  # He on He
+            ])
+
+            fcs = tree.directEvaluation(
+                y,
+                _all_test_structs[struct+'_lin'],
+                evalType='forces',
+                bc_type='fixed',
+                cutoffs=self.cutoffs,
+            )
+
+            miniDatabase = self.miniDb(_all_test_structs[struct+'_lin'])
+
+            popDict = tree.parseArr2Dict(np.atleast_2d(y), fillFixedKnots=False)
+
+            totalHForces = 0
+
+            totalHForces += miniDatabase['H']['forces']['rho']['rho_A'] @ popDict['H']['rho_A'].T
+            totalHForces += miniDatabase['H']['forces']['rho']['rho_B'] @ popDict['H']['rho_B'].T
+
+            totalHeForces = 0
+
+            totalHeForces += miniDatabase['He']['forces']['rho']['rho_A'] @ popDict['He']['rho_A'].T
+            totalHeForces += miniDatabase['He']['forces']['rho']['rho_B'] @ popDict['He']['rho_B'].T
+
+            np.testing.assert_allclose(np.sum(fcs, axis=0), 0.0, atol=atol)
+
+            svForces = np.sum(totalHForces, axis=0) + np.sum(totalHeForces, axis=0)
+            svForces = np.moveaxis(svForces, -1, 0)
+            np.testing.assert_allclose(fcs, svForces[0], atol=atol)
+
+
+    def test_direct_vs_SV_mixed_trimers_symmetric_angled(self):
+        tree = MCTree(['H', 'He'])
+        
+        subtree0 = SVTree(nodes=[
+            FunctionNode('add'),
+            deepcopy(self.rho_A),
+            FunctionNode('add'),
+            deepcopy(self.rho_B),
+            FunctionNode('add'),
+            deepcopy(self.ffg_AA),
+            FunctionNode('add'),
+            deepcopy(self.ffg_AB),
+            deepcopy(self.ffg_BB)
+            ])
+
+        subtree1 = SVTree(nodes=[
+            FunctionNode('add'),
+            deepcopy(self.rho_A),
+            FunctionNode('add'),
+            deepcopy(self.rho_B),
+            FunctionNode('add'),
+            deepcopy(self.ffg_AA),
+            FunctionNode('add'),
+            deepcopy(self.ffg_AB),
+            deepcopy(self.ffg_BB)
+            ])
+
+        tree.chemistryTrees['H']    = subtree0
+        tree.chemistryTrees['He']   = subtree1
+
+        tree.updateSVNodes()
+
+        for struct in ['aaa', 'bbb', 'abb', 'bab', 'baa', 'aba']:
+            y = np.concatenate([angled() for _ in range(18)])
+
+            fcs = tree.directEvaluation(
+                y,
+                _all_test_structs[struct],
+                evalType='forces',
+                bc_type='fixed',
+                cutoffs=self.cutoffs,
+            )
+
+            miniDatabase = self.miniDb(_all_test_structs[struct])
+
+            popDict = tree.parseArr2Dict(np.atleast_2d(y), fillFixedKnots=False)
+
+            totalHForces = 0
+
+            totalHForces += miniDatabase['H']['forces']['rho']['rho_A'] @ popDict['H']['rho_A'].T
+            totalHForces += miniDatabase['H']['forces']['rho']['rho_B'] @ popDict['H']['rho_B'].T
+
+            totalHForces += miniDatabase['H']['forces']['ffg']['ffg_AA'] @ popDict['H']['ffg_AA'].T
+            totalHForces += miniDatabase['H']['forces']['ffg']['ffg_AB'] @ popDict['H']['ffg_AB'].T
+            totalHForces += miniDatabase['H']['forces']['ffg']['ffg_BB'] @ popDict['H']['ffg_BB'].T
+
+            totalHeForces = 0
+
+            totalHeForces += miniDatabase['He']['forces']['rho']['rho_A'] @ popDict['He']['rho_A'].T
+            totalHeForces += miniDatabase['He']['forces']['rho']['rho_B'] @ popDict['He']['rho_B'].T
+
+            totalHeForces += miniDatabase['He']['forces']['ffg']['ffg_AA'] @ popDict['He']['ffg_AA'].T
+            totalHeForces += miniDatabase['He']['forces']['ffg']['ffg_AB'] @ popDict['He']['ffg_AB'].T
+            totalHeForces += miniDatabase['He']['forces']['ffg']['ffg_BB'] @ popDict['He']['ffg_BB'].T
+
+            np.testing.assert_allclose(np.sum(fcs, axis=0), 0.0, atol=atol)
+
+            svForces = np.sum(totalHForces, axis=0) + np.sum(totalHeForces, axis=0)
+            svForces = np.moveaxis(svForces, -1, 0)
+            np.testing.assert_allclose(fcs, svForces[0], atol=atol)
+
+
+    def test_direct_vs_SV_mixed_trimers_linear_angled(self):
+        tree = MCTree(['H', 'He'])
+        
+        subtree0 = SVTree(nodes=[
+            FunctionNode('add'),
+            deepcopy(self.rho_A),
+            FunctionNode('add'),
+            deepcopy(self.rho_B),
+            FunctionNode('add'),
+            deepcopy(self.ffg_AA),
+            FunctionNode('add'),
+            deepcopy(self.ffg_AB),
+            deepcopy(self.ffg_BB)
+            ])
+
+        subtree1 = SVTree(nodes=[
+            FunctionNode('add'),
+            deepcopy(self.rho_A),
+            FunctionNode('add'),
+            deepcopy(self.rho_B),
+            FunctionNode('add'),
+            deepcopy(self.ffg_AA),
+            FunctionNode('add'),
+            deepcopy(self.ffg_AB),
+            deepcopy(self.ffg_BB)
+            ])
+
+        tree.chemistryTrees['H']    = subtree0
+        tree.chemistryTrees['He']   = subtree1
+
+        tree.updateSVNodes()
+
+        for struct in ['aaa', 'bbb', 'abb', 'bab', 'baa', 'aba']:
+            y = np.concatenate([angled() for _ in range(18)])
+
+            fcs = tree.directEvaluation(
+                y,
+                _all_test_structs[struct+'_lin'],
+                evalType='forces',
+                bc_type='fixed',
+                cutoffs=self.cutoffs,
+            )
+
+            miniDatabase = self.miniDb(_all_test_structs[struct+'_lin'])
+
+            popDict = tree.parseArr2Dict(np.atleast_2d(y), fillFixedKnots=False)
+
+            totalHForces = 0
+
+            totalHForces += miniDatabase['H']['forces']['rho']['rho_A'] @ popDict['H']['rho_A'].T
+            totalHForces += miniDatabase['H']['forces']['rho']['rho_B'] @ popDict['H']['rho_B'].T
+
+            totalHForces += miniDatabase['H']['forces']['ffg']['ffg_AA'] @ popDict['H']['ffg_AA'].T
+            totalHForces += miniDatabase['H']['forces']['ffg']['ffg_AB'] @ popDict['H']['ffg_AB'].T
+            totalHForces += miniDatabase['H']['forces']['ffg']['ffg_BB'] @ popDict['H']['ffg_BB'].T
+
+            totalHeForces = 0
+
+            totalHeForces += miniDatabase['He']['forces']['rho']['rho_A'] @ popDict['He']['rho_A'].T
+            totalHeForces += miniDatabase['He']['forces']['rho']['rho_B'] @ popDict['He']['rho_B'].T
+
+            totalHeForces += miniDatabase['He']['forces']['ffg']['ffg_AA'] @ popDict['He']['ffg_AA'].T
+            totalHeForces += miniDatabase['He']['forces']['ffg']['ffg_AB'] @ popDict['He']['ffg_AB'].T
+            totalHeForces += miniDatabase['He']['forces']['ffg']['ffg_BB'] @ popDict['He']['ffg_BB'].T
+
+            np.testing.assert_allclose(np.sum(fcs, axis=0), 0.0, atol=atol)
+
+            svForces = np.sum(totalHForces, axis=0) + np.sum(totalHeForces, axis=0)
+            svForces = np.moveaxis(svForces, -1, 0)
+            np.testing.assert_allclose(fcs, svForces[0], atol=atol)
+
+
+    def test_direct_vs_SV_mixed_trimers_asymmetric_angled(self):
+        tree = MCTree(['H', 'He'])
+        
+        subtree0 = SVTree(nodes=[
+            FunctionNode('add'),
+            deepcopy(self.rho_A),
+            FunctionNode('add'),
+            deepcopy(self.rho_B),
+            FunctionNode('add'),
+            deepcopy(self.ffg_AA),
+            FunctionNode('add'),
+            deepcopy(self.ffg_AB),
+            deepcopy(self.ffg_BB)
+            ])
+
+        subtree1 = SVTree(nodes=[
+            FunctionNode('add'),
+            deepcopy(self.rho_A),
+            FunctionNode('add'),
+            deepcopy(self.rho_B),
+            FunctionNode('add'),
+            deepcopy(self.ffg_AA),
+            FunctionNode('add'),
+            deepcopy(self.ffg_AB),
+            deepcopy(self.ffg_BB)
+            ])
+
+        tree.chemistryTrees['H']    = subtree0
+        tree.chemistryTrees['He']   = subtree1
+
+        tree.updateSVNodes()
+
+        for struct in ['aaa', 'bbb', 'abb', 'bab', 'baa', 'aba']:
+            y = np.concatenate([angled(i) for i in range(18)])
+
+            fcs = tree.directEvaluation(
+                y,
+                _all_test_structs[struct+'_asym'],
+                evalType='forces',
+                bc_type='fixed',
+                cutoffs=self.cutoffs,
+            )
+
+            miniDatabase = self.miniDb(_all_test_structs[struct+'_asym'])
+
+            popDict = tree.parseArr2Dict(np.atleast_2d(y), fillFixedKnots=False)
+
+            totalHForces = 0
+
+            totalHForces += miniDatabase['H']['forces']['rho']['rho_A'] @ popDict['H']['rho_A'].T
+            totalHForces += miniDatabase['H']['forces']['rho']['rho_B'] @ popDict['H']['rho_B'].T
+
+            totalHForces += miniDatabase['H']['forces']['ffg']['ffg_AA'] @ popDict['H']['ffg_AA'].T
+            totalHForces += miniDatabase['H']['forces']['ffg']['ffg_AB'] @ popDict['H']['ffg_AB'].T
+            totalHForces += miniDatabase['H']['forces']['ffg']['ffg_BB'] @ popDict['H']['ffg_BB'].T
+
+            totalHeForces = 0
+
+            totalHeForces += miniDatabase['He']['forces']['rho']['rho_A'] @ popDict['He']['rho_A'].T
+            totalHeForces += miniDatabase['He']['forces']['rho']['rho_B'] @ popDict['He']['rho_B'].T
+
+            totalHeForces += miniDatabase['He']['forces']['ffg']['ffg_AA'] @ popDict['He']['ffg_AA'].T
+            totalHeForces += miniDatabase['He']['forces']['ffg']['ffg_AB'] @ popDict['He']['ffg_AB'].T
+            totalHeForces += miniDatabase['He']['forces']['ffg']['ffg_BB'] @ popDict['He']['ffg_BB'].T
+
+            np.testing.assert_allclose(np.sum(fcs, axis=0), 0.0, atol=atol)
+
+            svForces = np.sum(totalHForces, axis=0) + np.sum(totalHeForces, axis=0)
+            svForces = np.moveaxis(svForces, -1, 0)
+            np.testing.assert_allclose(fcs, svForces[0], atol=atol)
+
+
+    def test_direct_vs_SV_rho_A_rho_B_trimers_linear_wiggly(self):
+        tree = MCTree(['H', 'He'])
+        
+        subtree0 = SVTree(nodes=[FunctionNode('add'), deepcopy(self.rho_A), deepcopy(self.rho_B)])
+        subtree1 = SVTree(nodes=[FunctionNode('add'), deepcopy(self.rho_A), deepcopy(self.rho_B)])
+
+        tree.chemistryTrees['H']    = subtree0
+        tree.chemistryTrees['He']   = subtree1
+
+        tree.updateSVNodes()
+
+        for struct in ['aaa', 'bbb', 'abb', 'bab', 'baa', 'aba']:
+            y = np.concatenate([
+                wiggly(),  # H on H
+                wiggly(),  # He on H
+                wiggly(),  # H on He
+                wiggly(),  # He on He
+            ])
+
+            fcs = tree.directEvaluation(
+                y,
+                _all_test_structs[struct+'_lin'],
+                evalType='forces',
+                bc_type='fixed',
+                cutoffs=self.cutoffs,
+        )
+
+            miniDatabase = self.miniDb(_all_test_structs[struct+'_lin'])
+
+            popDict = tree.parseArr2Dict(np.atleast_2d(y), fillFixedKnots=False)
+
+            totalHForces = 0
+
+            totalHForces += miniDatabase['H']['forces']['rho']['rho_A'] @ popDict['H']['rho_A'].T
+            totalHForces += miniDatabase['H']['forces']['rho']['rho_B'] @ popDict['H']['rho_B'].T
+
+            totalHeForces = 0
+
+            totalHeForces += miniDatabase['He']['forces']['rho']['rho_A'] @ popDict['He']['rho_A'].T
+            totalHeForces += miniDatabase['He']['forces']['rho']['rho_B'] @ popDict['He']['rho_B'].T
+
+            np.testing.assert_allclose(np.sum(fcs, axis=0), 0.0, atol=atol)
+
+            svForces = np.sum(totalHForces, axis=0) + np.sum(totalHeForces, axis=0)
+            svForces = np.moveaxis(svForces, -1, 0)
+            np.testing.assert_allclose(fcs, svForces[0], atol=atol)
+
+
+    def test_direct_vs_SV_mixed_trimers_symmetric_wiggly(self):
+        tree = MCTree(['H', 'He'])
+        
+        subtree0 = SVTree(nodes=[
+            FunctionNode('add'),
+            deepcopy(self.rho_A),
+            FunctionNode('add'),
+            deepcopy(self.rho_B),
+            FunctionNode('add'),
+            deepcopy(self.ffg_AA),
+            FunctionNode('add'),
+            deepcopy(self.ffg_AB),
+            deepcopy(self.ffg_BB)
+            ])
+
+        subtree1 = SVTree(nodes=[
+            FunctionNode('add'),
+            deepcopy(self.rho_A),
+            FunctionNode('add'),
+            deepcopy(self.rho_B),
+            FunctionNode('add'),
+            deepcopy(self.ffg_AA),
+            FunctionNode('add'),
+            deepcopy(self.ffg_AB),
+            deepcopy(self.ffg_BB)
+            ])
+
+        tree.chemistryTrees['H']    = subtree0
+        tree.chemistryTrees['He']   = subtree1
+
+        tree.updateSVNodes()
+
+        for struct in ['aaa', 'bbb', 'abb', 'bab', 'baa', 'aba']:
+            y = np.concatenate([wiggly() for _ in range(18)])
+
+            fcs = tree.directEvaluation(
+                y,
+                _all_test_structs[struct],
+                evalType='forces',
+                bc_type='fixed',
+                cutoffs=self.cutoffs,
+            )
+
+            miniDatabase = self.miniDb(_all_test_structs[struct])
+
+            popDict = tree.parseArr2Dict(np.atleast_2d(y), fillFixedKnots=False)
+
+            totalHForces = 0
+
+            totalHForces += miniDatabase['H']['forces']['rho']['rho_A'] @ popDict['H']['rho_A'].T
+            totalHForces += miniDatabase['H']['forces']['rho']['rho_B'] @ popDict['H']['rho_B'].T
+
+            totalHForces += miniDatabase['H']['forces']['ffg']['ffg_AA'] @ popDict['H']['ffg_AA'].T
+            totalHForces += miniDatabase['H']['forces']['ffg']['ffg_AB'] @ popDict['H']['ffg_AB'].T
+            totalHForces += miniDatabase['H']['forces']['ffg']['ffg_BB'] @ popDict['H']['ffg_BB'].T
+
+            totalHeForces = 0
+
+            totalHeForces += miniDatabase['He']['forces']['rho']['rho_A'] @ popDict['He']['rho_A'].T
+            totalHeForces += miniDatabase['He']['forces']['rho']['rho_B'] @ popDict['He']['rho_B'].T
+
+            totalHeForces += miniDatabase['He']['forces']['ffg']['ffg_AA'] @ popDict['He']['ffg_AA'].T
+            totalHeForces += miniDatabase['He']['forces']['ffg']['ffg_AB'] @ popDict['He']['ffg_AB'].T
+            totalHeForces += miniDatabase['He']['forces']['ffg']['ffg_BB'] @ popDict['He']['ffg_BB'].T
+
+            np.testing.assert_allclose(np.sum(fcs, axis=0), 0.0, atol=atol)
+
+            svForces = np.sum(totalHForces, axis=0) + np.sum(totalHeForces, axis=0)
+            svForces = np.moveaxis(svForces, -1, 0)
+            np.testing.assert_allclose(fcs, svForces[0], atol=atol)
+
+
+    def test_direct_vs_SV_mixed_trimers_linear_wiggly(self):
+        tree = MCTree(['H', 'He'])
+        
+        subtree0 = SVTree(nodes=[
+            FunctionNode('add'),
+            deepcopy(self.rho_A),
+            FunctionNode('add'),
+            deepcopy(self.rho_B),
+            FunctionNode('add'),
+            deepcopy(self.ffg_AA),
+            FunctionNode('add'),
+            deepcopy(self.ffg_AB),
+            deepcopy(self.ffg_BB)
+            ])
+
+        subtree1 = SVTree(nodes=[
+            FunctionNode('add'),
+            deepcopy(self.rho_A),
+            FunctionNode('add'),
+            deepcopy(self.rho_B),
+            FunctionNode('add'),
+            deepcopy(self.ffg_AA),
+            FunctionNode('add'),
+            deepcopy(self.ffg_AB),
+            deepcopy(self.ffg_BB)
+            ])
+
+        tree.chemistryTrees['H']    = subtree0
+        tree.chemistryTrees['He']   = subtree1
+
+        tree.updateSVNodes()
+
+        for struct in ['aaa', 'bbb', 'abb', 'bab', 'baa', 'aba']:
+            y = np.concatenate([wiggly() for _ in range(18)])
+
+            fcs = tree.directEvaluation(
+                y,
+                _all_test_structs[struct+'_lin'],
+                evalType='forces',
+                bc_type='fixed',
+                cutoffs=self.cutoffs,
+            )
+
+            miniDatabase = self.miniDb(_all_test_structs[struct+'_lin'])
+
+            popDict = tree.parseArr2Dict(np.atleast_2d(y), fillFixedKnots=False)
+
+            totalHForces = 0
+
+            totalHForces += miniDatabase['H']['forces']['rho']['rho_A'] @ popDict['H']['rho_A'].T
+            totalHForces += miniDatabase['H']['forces']['rho']['rho_B'] @ popDict['H']['rho_B'].T
+
+            totalHForces += miniDatabase['H']['forces']['ffg']['ffg_AA'] @ popDict['H']['ffg_AA'].T
+            totalHForces += miniDatabase['H']['forces']['ffg']['ffg_AB'] @ popDict['H']['ffg_AB'].T
+            totalHForces += miniDatabase['H']['forces']['ffg']['ffg_BB'] @ popDict['H']['ffg_BB'].T
+
+            totalHeForces = 0
+
+            totalHeForces += miniDatabase['He']['forces']['rho']['rho_A'] @ popDict['He']['rho_A'].T
+            totalHeForces += miniDatabase['He']['forces']['rho']['rho_B'] @ popDict['He']['rho_B'].T
+
+            totalHeForces += miniDatabase['He']['forces']['ffg']['ffg_AA'] @ popDict['He']['ffg_AA'].T
+            totalHeForces += miniDatabase['He']['forces']['ffg']['ffg_AB'] @ popDict['He']['ffg_AB'].T
+            totalHeForces += miniDatabase['He']['forces']['ffg']['ffg_BB'] @ popDict['He']['ffg_BB'].T
+
+            np.testing.assert_allclose(np.sum(fcs, axis=0), 0.0, atol=atol)
+
+            svForces = np.sum(totalHForces, axis=0) + np.sum(totalHeForces, axis=0)
+            svForces = np.moveaxis(svForces, -1, 0)
+            np.testing.assert_allclose(fcs, svForces[0], atol=atol)
+
+
+    def test_direct_vs_SV_mixed_trimers_asymmetric_wiggly(self):
+        tree = MCTree(['H', 'He'])
+        
+        subtree0 = SVTree(nodes=[
+            FunctionNode('add'),
+            deepcopy(self.rho_A),
+            FunctionNode('add'),
+            deepcopy(self.rho_B),
+            FunctionNode('add'),
+            deepcopy(self.ffg_AA),
+            FunctionNode('add'),
+            deepcopy(self.ffg_AB),
+            deepcopy(self.ffg_BB)
+            ])
+
+        subtree1 = SVTree(nodes=[
+            FunctionNode('add'),
+            deepcopy(self.rho_A),
+            FunctionNode('add'),
+            deepcopy(self.rho_B),
+            FunctionNode('add'),
+            deepcopy(self.ffg_AA),
+            FunctionNode('add'),
+            deepcopy(self.ffg_AB),
+            deepcopy(self.ffg_BB)
+            ])
+
+        tree.chemistryTrees['H']    = subtree0
+        tree.chemistryTrees['He']   = subtree1
+
+        tree.updateSVNodes()
+
+        for struct in ['aaa', 'bbb', 'abb', 'bab', 'baa', 'aba']:
+            y = np.concatenate([wiggly() for _ in range(18)])
+
+            fcs = tree.directEvaluation(
+                y,
+                _all_test_structs[struct+'_asym'],
+                evalType='forces',
+                bc_type='fixed',
+                cutoffs=self.cutoffs,
+            )
+
+            miniDatabase = self.miniDb(_all_test_structs[struct+'_asym'])
+
+            popDict = tree.parseArr2Dict(np.atleast_2d(y), fillFixedKnots=False)
+
+            totalHForces = 0
+
+            totalHForces += miniDatabase['H']['forces']['rho']['rho_A'] @ popDict['H']['rho_A'].T
+            totalHForces += miniDatabase['H']['forces']['rho']['rho_B'] @ popDict['H']['rho_B'].T
+
+            totalHForces += miniDatabase['H']['forces']['ffg']['ffg_AA'] @ popDict['H']['ffg_AA'].T
+            totalHForces += miniDatabase['H']['forces']['ffg']['ffg_AB'] @ popDict['H']['ffg_AB'].T
+            totalHForces += miniDatabase['H']['forces']['ffg']['ffg_BB'] @ popDict['H']['ffg_BB'].T
+
+            totalHeForces = 0
+
+            totalHeForces += miniDatabase['He']['forces']['rho']['rho_A'] @ popDict['He']['rho_A'].T
+            totalHeForces += miniDatabase['He']['forces']['rho']['rho_B'] @ popDict['He']['rho_B'].T
+
+            totalHeForces += miniDatabase['He']['forces']['ffg']['ffg_AA'] @ popDict['He']['ffg_AA'].T
+            totalHeForces += miniDatabase['He']['forces']['ffg']['ffg_AB'] @ popDict['He']['ffg_AB'].T
+            totalHeForces += miniDatabase['He']['forces']['ffg']['ffg_BB'] @ popDict['He']['ffg_BB'].T
+
+            np.testing.assert_allclose(np.sum(fcs, axis=0), 0.0, atol=atol)
+
+            svForces = np.sum(totalHForces, axis=0) + np.sum(totalHeForces, axis=0)
+            svForces = np.moveaxis(svForces, -1, 0)
+            np.testing.assert_allclose(fcs, svForces[0], atol=atol)
+
+      
+
+    def test_nonlinear_embedders_dont_crash(self):
+        from svreg.functions import _function_map
+
+        for fxn in _function_map:
+            tree = MCTree(['H', 'He'])
+            
+            subtree0 = SVTree(nodes=[
+                FunctionNode(fxn),
+                deepcopy(self.rho_A),
+                deepcopy(self.ffg_AB),
+                ])
+
+            subtree1 = SVTree(nodes=[
+                FunctionNode(fxn),
+                deepcopy(self.rho_A),
+                deepcopy(self.ffg_AB),
+                ])
+
+            tree.chemistryTrees['H']    = subtree0
+            tree.chemistryTrees['He']   = subtree1
+
+            tree.updateSVNodes()
+
+            for struct in ['aaa', 'bbb', 'abb', 'bab', 'baa', 'aba']:
+                y = np.concatenate([wiggly() for _ in range(18)])
+
+                fcs = tree.directEvaluation(
+                    y,
+                    _all_test_structs[struct+'_asym'],
+                    evalType='forces',
+                    bc_type='fixed',
+                    cutoffs=self.cutoffs,
+                )
+
+                np.testing.assert_allclose(np.sum(fcs, axis=0), 0.0, atol=atol)
+         
 
 if __name__ == '__main__':
     unittest.main()

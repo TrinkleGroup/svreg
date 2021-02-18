@@ -4,7 +4,7 @@ import numpy as np
 from copy import deepcopy
 
 import cma
-from svreg.optimizers import GAWrapper, SofomoreWrapper
+from svreg.optimizers import GAWrapper#, SofomoreWrapper
 from svreg.nodes import SVNode
 from svreg.tree import SVTree
 from svreg.tree import MultiComponentTree as MCTree
@@ -85,16 +85,16 @@ class SVRegressor:
                     'tolfunrel': 1e-8,
                 }
             ]
-        elif settings['optimizer'] == 'Sofomore':
-            self.optimizer = SofomoreWrapper
-            self.optimizerArgs = {
-                'numStructs': numStructs,
-                'paretoDimensionality': 2,
-                'CMApopSize': settings['optimizerPopSize'],
-                'SofomorePopSize': settings['numberOfTrees'],  # Placeholder
-                # 'threads_per_node': settings['PROCS_PER_PHYS_NODE'],
-                'threads_per_node': None,
-            }
+        # elif settings['optimizer'] == 'Sofomore':
+            # self.optimizer = SofomoreWrapper
+            # self.optimizerArgs = {
+                # 'numStructs': numStructs,
+                # 'paretoDimensionality': 2,
+                # 'CMApopSize': settings['optimizerPopSize'],
+                # 'SofomorePopSize': settings['numberOfTrees'],  # Placeholder
+                'threads_per_node': settings['PROCS_PER_PHYS_NODE'],
+                # 'threads_per_node': None,
+            # }
         else:
             raise NotImplementedError(
                 'Must be one of `GA`, `CMA`, or `Sofomore`.'
@@ -136,7 +136,7 @@ class SVRegressor:
             self.trees = treesToAdd
 
 
-    def evaluateTrees(self, svEng, svFcs, N):
+    def evaluateTrees(self, svEng, svFcs, P, useDask=True):
         """
         Updates the SVNode objects in the trees with the given values, then
         evaluate the trees
@@ -148,7 +148,7 @@ class SVRegressor:
             svFcs (dict):
                 svFcs[structName][svName][elem] = computed values for given node
 
-            N (int):
+            P (int):
                 The number of parameter sets for each node. Used for splitting
                 the population of results.
 
@@ -159,6 +159,16 @@ class SVRegressor:
 
         energies = {struct: [] for struct in svEng.keys()}
         forces   = {struct: [] for struct in svFcs.keys()}
+
+        def reshapeFcs(fcs, numNodes, P):
+            nelem = fcs.shape[0]
+            natom = fcs.shape[1]
+
+            fcs = fcs.reshape((nelem, natom, 3, P, numNodes))
+            fcs = np.moveaxis(fcs, -1, 0)
+            fcs = np.moveaxis(fcs, -1, 1)
+
+            return fcs
 
         for structName in energies:
             for svName in svEng[structName]:
@@ -171,24 +181,40 @@ class SVRegressor:
                     if stackedEng is None: continue
 
                     # Un-stack values for each element, and append to list
-                    # numNodes = stackedEng.shape[0]//N
+                    # numNodes = stackedEng.shape[0]//P
                     numNodes = self.numNodes[svName][elem]
 
-                    nodeEng = stackedEng.reshape((numNodes, N))
-                    nodeFcs = stackedFcs.reshape(
-                        (numNodes, N, stackedFcs.shape[1], stackedFcs.shape[2])
-                    )
+                    # stackedEng will have the shape (N3, P*Nn) and will need to
+                    # be reshaped to separate out the per-node contributions,
+                    # but can't be summed until after full tree evaluation
+
+                    nelem = stackedEng.shape[0]
+
+                    nodeEng = stackedEng.reshape((nelem, numNodes, P))
+                    nodeEng = np.moveaxis(nodeEng, 1, 0)
+                    nodeEng = np.moveaxis(nodeEng, -1, 1)
+
+                    # stackedFcs has the shape (Ne, N, 3, P*Nn), where Ne is the
+                    # number of atoms of the current element type and Nn is the
+                    # number of  nodes of the given node type. Note that
+                    # this needs to be reshaped to separate out the per-node
+                    # contributions, but cannot be summed over until after full
+                    # tree evaluation.
+                    # nodeFcs = (numNodes, P, nelem, natom, 3)
+
+                    if useDask:
+                        nodeFcs = dask.delayed(reshapeFcs, nout=numNodes)(
+                            stackedFcs, numNodes, P
+                        )
+                    else:
+                        nodeFcs = reshapeFcs(stackedFcs, numNodes, P)
 
                     unstackedValues = []
                     # for val1, val2 in zip(nodeEng, nodeFcs):
                     for valIdx in range(numNodes):
                         val1 = nodeEng[valIdx]
                         val2 = nodeFcs[valIdx]
-
                         unstackedValues.append((val1, val2))
-
-                    # # # TODO: don't need to reverse here?
-                    # unstackedValues = unstackedValues[::-1]
 
                     # Loop backwards over the list of values
                     for tree in self.trees[::-1]:
@@ -202,12 +228,23 @@ class SVRegressor:
                     if leftovers > 0:
                         raise RuntimeError('Found leftover results.')
 
+            def getEng(fut):
+                return sum(fut[0])
+
+            def sumFcs(fut):
+                return sum(fut[1])
+
             # If here, all of the nodes have been updated with their values
             for tree in self.trees:
-                # eng, fcs = tree.eval()
-                future = tree.eval()
+                future = tree.eval(
+                    useDask=useDask,
+                    allSums=self.settings['allSums']
+                )
 
-                energies[structName].append(future[0])
+                # future[0] = (P,)
+                # future[1] = (P, N, 3)
+
+                energies[structName].append(sum(future[0]))
                 forces[structName].append(future[1])
 
         return energies, forces
@@ -385,32 +422,9 @@ class SVRegressor:
         # Stack each group
         for svName in populationDict:
             for elem, popList in populationDict[svName].items():
-                # TODO: convert this to Dask array?
                 dat = np.concatenate(popList, axis=0).T
 
-                # if self.populationDict is None:
-                #     populationDict[svName][elem] = dask.array.from_array(
-                #         dat,
-                #         chunks=dat.shape
-                #     ).persist()
-                #     futures.append(populationDict[svName][elem])
-                # else:
-                #     populationDict[svName][elem][:] = dat
-
                 populationDict[svName][elem] = dat
-
-                # populationDict[svName][elem] = dask.array.from_array(
-                #     dat,
-                #     chunks=dat.shape,
-                #     # chunks=(100, popList[0].shape[1]),
-                # ).persist()
-                # futures.append(populationDict[svName][elem])
-
-        # from dask.distributed import wait
-        # wait(futures)
-
-        # if self.populationDict is None:
-        #     self.populationDict = populationDict
 
         return populationDict, rawPopulations
 

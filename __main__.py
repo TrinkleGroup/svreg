@@ -12,22 +12,23 @@ import numpy as np
 
 from dask_mpi import initialize
 initialize(
-    nthreads=2,
-    memory_limit='4 GB',
+    nthreads=6,
+    memory_limit='12 GB',
     # interface='ipogif0',
-    # local_directory='/u/sciteam/vita/scratch/svreg/hyojung/hj_dask_prof_int',
+    local_directory=os.getcwd(),
 )
 
 import dask
 import dask.array
 from dask.distributed import Client, wait
 
-from svreg.archive import Archive
+from svreg.archive import Archive, md5Hash
 from svreg.settings import Settings
 from svreg.database import SVDatabase
 from svreg.regressor import SVRegressor
 from svreg.evaluator import SVEvaluator
 from svreg.population import Population
+from svreg.functions import _function_map
 
 ################################################################################
 # Parse all command-line arguments
@@ -54,7 +55,7 @@ def main(client, settings):
     # Setup
     with h5py.File(settings['databasePath'], 'r') as h5pyFile:
         database = SVDatabase(h5pyFile)
-        wait(database.load(h5pyFile))
+        wait(database.load(h5pyFile, settings['allSums']))
 
         evaluator = SVEvaluator(database, settings)
 
@@ -136,7 +137,7 @@ def main(client, settings):
             # Replace completed tree with new tree
 
             # Make sure new tree isn't already in archive or active population
-            currentRegNames = [str(t) for t in regressor.trees]
+            currentRegNames = [md5Hash(t) for t in regressor.trees]
 
             newTree, parent1, parent2 = population.newIndividual()
 
@@ -145,8 +146,8 @@ def main(client, settings):
 
                 treeName = str(newTree)
 
-                inArchive   = treeName in archive
-                inReg       = treeName in currentRegNames
+                inArchive   = md5Hash(treeName) in archive
+                inReg       = md5Hash(treeName) in currentRegNames
 
                 if inArchive:
                     print("Already in archive:", newTree)
@@ -206,21 +207,13 @@ def main(client, settings):
         # Continue optimization of currently active trees
         populationDict, rawPopulations = regressor.generatePopulationDict(N)
 
-        svEng = evaluator.evaluate(populationDict, 'energy')
+        svEng = evaluator.evaluate(populationDict, 'energy', useDask=False)
 
-        # futures = []
         for svName in populationDict:
             for el, pop in populationDict[svName].items():
                 populationDict[svName][el] = client.scatter(pop, broadcast=True)
-                # futures.append(populationDict[svName][el])
-
-        # futures = client.gather(futures)
-
-        # print('futures', futures)
 
         svFcs = evaluator.evaluate(populationDict, 'forces')
-        svFcs = client.compute(svFcs)
-        svFcs = client.gather(svFcs)
 
         energies, forces = regressor.evaluateTrees(svEng, svFcs, N)
 
@@ -259,7 +252,7 @@ def polish(client, settings):
     # Setup
     with h5py.File(settings['databasePath'], 'r') as h5pyFile:
         database = SVDatabase(h5pyFile)
-        wait(database.load(h5pyFile))
+        wait(database.load(h5pyFile, settings['allSums']))
 
         evaluator = SVEvaluator(database, settings)
 
@@ -269,48 +262,42 @@ def polish(client, settings):
     from svreg.nodes import FunctionNode
     from svreg.tree import MultiComponentTree as MCTree
 
-    # tree = MCTree(['Mo', 'Ti'])
-    tree1 = MCTree(['Mo'])
-    tree2 = MCTree(['Mo'])
+    tree = MCTree(['Mo', 'Ti'])
 
     from copy import deepcopy
 
-    treeMo1 = SVTree()
-    treeMo1.nodes = [
-        FunctionNode('add'),
-        deepcopy(regressor.svNodePool[0]),
-        deepcopy(regressor.svNodePool[0]),
-    ]
-
-    treeMo2 = SVTree()
-    treeMo2.nodes = [
+    treeMo = SVTree()
+    treeMo.nodes = [
         FunctionNode('add'),
         deepcopy(regressor.svNodePool[0]),
         FunctionNode('add'),
-        deepcopy(regressor.svNodePool[0]),
         deepcopy(regressor.svNodePool[1]),
+        FunctionNode('add'),
+        deepcopy(regressor.svNodePool[2]),
+        FunctionNode('add'),
+        deepcopy(regressor.svNodePool[3]),
+        deepcopy(regressor.svNodePool[4]),
     ]
 
-    # treeTi = SVTree()
-    # treeTi.nodes = [
-    #     FunctionNode('add'),
-    #     deepcopy(regressor.svNodePool[0]),
-    #     FunctionNode('add'),
-    #     deepcopy(regressor.svNodePool[1]),
-    #     FunctionNode('add'),
-    #     deepcopy(regressor.svNodePool[2]),
-    #     FunctionNode('add'),
-    #     deepcopy(regressor.svNodePool[3]),
-    #     deepcopy(regressor.svNodePool[4]),
-    # ]
+    treeTi = SVTree()
+    treeTi.nodes = [
+        FunctionNode('add'),
+        deepcopy(regressor.svNodePool[0]),
+        FunctionNode('add'),
+        deepcopy(regressor.svNodePool[1]),
+        FunctionNode('add'),
+        deepcopy(regressor.svNodePool[2]),
+        FunctionNode('add'),
+        deepcopy(regressor.svNodePool[3]),
+        deepcopy(regressor.svNodePool[4]),
+    ]
 
-    tree1.chemistryTrees['Mo'] = treeMo1
-    tree2.chemistryTrees['Mo'] = treeMo2
+    tree.chemistryTrees['Mo'] = treeMo
+    tree.chemistryTrees['Ti'] = treeTi
     
-    tree1.updateSVNodes()
-    tree2.updateSVNodes()
+    tree.updateSVNodes()
 
-    regressor.trees = [tree1, tree2]
+    regressor.trees = [tree]
     regressor.initializeOptimizers()
 
     savePath = os.path.join(settings['outputPath'], 'polished')
@@ -330,8 +317,8 @@ def polish(client, settings):
 
     from svreg.archive import Entry
 
-    entries = {str(t): Entry(t, savePath) for t in regressor.trees}
-    prevBestCosts = {str(t): np.inf for t in regressor.trees}
+    entries = {md5Hash(t): Entry(t, savePath) for t in regressor.trees}
+    prevBestCosts = {md5Hash(t): np.inf for t in regressor.trees}
 
     import pickle
 
@@ -340,15 +327,13 @@ def polish(client, settings):
 
         populationDict, rawPopulations = regressor.generatePopulationDict(N)
 
-        svEng = evaluator.evaluate(populationDict, 'energy')
+        svEng = evaluator.evaluate(populationDict, 'energy', useDask=False)
 
         for svName in populationDict:
             for el, pop in populationDict[svName].items():
-                populationDict[svName][el] = client.scatter(pop)
+                populationDict[svName][el] = client.scatter(pop, broadcast=True)
 
         svFcs = evaluator.evaluate(populationDict, 'forces')
-        svFcs = client.compute(svFcs)
-        svFcs = client.gather(svFcs)
 
         energies, forces = regressor.evaluateTrees(svEng, svFcs, N)
 
@@ -377,7 +362,7 @@ def polish(client, settings):
 
         for treeNum, tree in enumerate(regressor.trees):
             opt = regressor.optimizers[treeNum]
-            treeName = str(tree)
+            treeName = md5Hash(tree)
 
             entry = entries[treeName]
 
@@ -396,7 +381,6 @@ def polish(client, settings):
                         'wb'
                     )
                 )
-
 
 ################################################################################
 # Helper functions
@@ -443,7 +427,6 @@ def buildCostFunction(settings, numStructs):
     def delayedMAE(err):
         return np.average(np.multiply(err, scaler), axis=1)
 
-    # @profile
     def mae(errors):
 
         costs = []
@@ -471,8 +454,7 @@ def buildCostFunction(settings, numStructs):
         raise RuntimeError("costFxn must be 'MAE' or 'RMSE'.")
 
 
-# @profile
-def computeErrors(refStruct, energies, forces, database):
+def computeErrors(refStruct, energies, forces, database, useDask=True):
     """
     Takes in dictionaries of energies and forces and returns the energy/force
     errors for each structure for each tree. Sorts structure names first.
@@ -491,53 +473,59 @@ def computeErrors(refStruct, energies, forces, database):
 
     Returns:
         costs (list):
-            A list of the total costs for the populations of each tree. Eeach
+            A list of the total costs for the populations of each tree. Each
             entry will have a shape of (P, 2*S) where P is the population size
             and S is the number of structures being evaluated.
     """
 
-    global start
-
     trueValues = database.trueValues
     natoms = database.attrs['natoms']
-    elements = database.attrs['elements']
 
     keys = list(energies.keys())
     numTrees   = len(energies[keys[0]])
 
     keys = list(energies.keys())
 
+    def fcsErr(fcs, tv):
+        return np.average(abs(sum(fcs) - tv), axis=(1,2))
+
     errors = []
     for treeNum in range(numTrees):
-        treeErrors = []
         for structName in sorted(keys):
 
-            structEng  = np.sum(energies[structName][treeNum], axis=0)
+            structEng  = energies[structName][treeNum]
             structEng /= natoms[structName]
 
-            refEng  = np.sum(energies[refStruct][treeNum], axis=0)
+            refEng  = energies[refStruct][treeNum]
             refEng /= natoms[refStruct]
 
             ediff = structEng - refEng
 
-            engErrors = abs(ediff - trueValues[structName]['energy'])
+            # Stored true values should already be per-atom energies
+            # Note that if the database alreayd did subtract off a reference
+            # energy, this won't cause any issues since it will be 0
+            trueEdiff = trueValues[structName]['energy']
+            trueEdiff -= trueValues[refStruct]['energy']
 
-            fcs =   forces[structName][treeNum]
+            engErrors = abs(ediff - trueEdiff)
 
-            fcsErrors = [
-                fcs[ii] - trueValues[structName]['forces_'+el]
-                for ii, el in enumerate(elements)
-            ]
+            fcs = forces[structName][treeNum]
 
-            fcsErrors = [abs(err) for err in fcsErrors]
-            fcsErrors = [np.average(err, axis=(1, 2)) for err in fcsErrors]
+            fcsErrors = dask.delayed(fcsErr)(
+                fcs, trueValues[structName]['forces']
+            )
 
-            treeErrors.append(engErrors)
-            treeErrors.append(sum(fcsErrors))
+            errors.append(engErrors)
+            errors.append(fcsErrors)
 
-        errors.append(np.stack(treeErrors))
+    if useDask:
+        from dask.distributed import get_client
+        client = get_client()
 
-    errors = [np.stack(err).T for err in errors]
+        errors = client.gather(client.compute(errors))
+
+    errors = np.stack(errors).T
+    errors = np.split(errors, numTrees, axis=1)
 
     return errors
 
@@ -559,6 +547,13 @@ if __name__ == '__main__':
 
     print("Current settings:\n")
     settings.printSettings()
+
+    if settings['allSums']:
+        for key in _function_map:
+            if key != 'add':
+                raise RuntimeError(
+                    "allSums == True, but function map includes other functions"
+                )
 
     # Prepare save directories
     if os.path.isdir(settings['outputPath']):

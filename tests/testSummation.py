@@ -3,7 +3,7 @@ import numpy as np
 
 from svreg.summation import Rho, FFG
 
-from tests._testStructs import _all_test_structs
+from tests._testStructs import _all_test_structs, r0
 
 
 class Test_Summation(unittest.TestCase):
@@ -43,7 +43,7 @@ class Test_Summation(unittest.TestCase):
                 'ffg_BB': ['f_B', 'f_B', 'g_BB'],
             },
             bondMapping="lambda i,j: 'ffg_AA' if i+j==0 else ('ffg_AB' if i+j==1 else 'ffg_BB')",
-            cutoffs=[1.0, 3.0],
+            cutoffs=[1.0, 30.0],
             numElements=2,
             bc_type='fixed',
         )
@@ -62,7 +62,7 @@ class Test_Summation(unittest.TestCase):
                 'rho_B': ['rho_B'],
             },
             bondMapping="lambda i: 'rho_A' if i == 0 else 'rho_B'",
-            cutoffs=[1.0, 3.0],
+            cutoffs=[1.0, 3.1],
             numElements=2,
             bc_type='fixed',
         )
@@ -236,14 +236,109 @@ class Test_Summation(unittest.TestCase):
                     sum(res), expected[struct][bondType]
                 )
 
-    """
-    TODO:
-    Even after these bug fixes, it seems like the GA stuff isn't working
-    properly. I need to brainstorm what to do next.
 
-    - Confirm that the GA-reported errors match the directEvaluation errors
-    - Figure out what's going wrong with the E vs. a curves for Mo, since that
-      might be relevant.
-    - Add unittests directly comparing SV results with directEvaluation results.
-    """
+    def test_sv_ffg_trimers_asymmetric(self):
+        lineParams = np.concatenate([np.linspace(1.0, 30.0, 7), [1, 1]])
 
+        params = {
+            'ffg_AA': np.vstack([
+                lineParams,
+                np.array([1, 1, 1, 1, 1, 1, 1, 0, 0]),
+            ]),
+            'ffg_AB': np.vstack([
+                lineParams,
+                lineParams*3,
+                np.array([1, 1, 1, 1, 1, 1, 1, 0, 0]),
+            ]),
+            'ffg_BB': np.vstack([
+                lineParams,
+                np.array([1, 1, 1, 1, 1, 1, 1, 0, 0]),
+            ]),
+        }
+
+        params['ffg_AA'] = np.outer(
+            np.outer(
+                params['ffg_AA'][0], params['ffg_AA'][0]
+            ).ravel(),
+            params['ffg_AA'][1]
+        ).ravel()
+
+        params['ffg_AB'] = np.outer(
+            np.outer(
+                params['ffg_AB'][0], params['ffg_AB'][1]
+            ).ravel(),
+            params['ffg_AB'][2]
+        ).ravel()
+
+        params['ffg_BB'] = np.outer(
+            np.outer(
+                params['ffg_BB'][0], params['ffg_BB'][0]
+            ).ravel(),
+            params['ffg_BB'][1]
+        ).ravel()
+
+        # r1*r2 for ffg_AA and ffg_BB
+        # rA*(3*rB) for ffg_AB, to help detect incorrect j,k ordering
+
+        """
+        TODO: this still isn't testing what I want. Any test that uses a
+        potential whose splines only scale their inputs will fail to detect the
+        bug that you want since it will scale the wrong input, but they're all
+        being multiplied together anyways.
+        """
+
+        expected = {
+            'aaa': {
+                'ffg_AA': 14*r0*13*r0+14*r0*9*r0+9*r0*13*r0,
+                'ffg_AB': 0.0,
+                'ffg_BB': 0.0
+            },
+            'bbb': {
+                'ffg_AA': 0.0,
+                'ffg_AB': 0.0,
+                'ffg_BB': 14*r0*13*r0+14*r0*9*r0+9*r0*13*r0,
+            },
+            'abb': {
+                'ffg_AA': 0.0,
+                # 'ffg_AB': 14*r0*3*9*r0+13*r0*3*9*r0,
+                'ffg_AB': 3*14*r0*9*r0+3*13*r0*9*r0,
+                'ffg_BB': 14*r0*13*r0,
+            },
+            'bab': {
+                'ffg_AA': 0.0,
+                'ffg_AB': 14*r0*3*13*r0+3*13*r0*9*r0,
+                'ffg_BB': 14*r0*9*r0
+            },
+            'baa': {
+                'ffg_AA': 14*r0*13*r0,
+                'ffg_AB': 3*14*r0*9*r0+3*13*r0*9*r0,
+                'ffg_BB': 0.0
+            },
+            'aba': {
+                'ffg_AA': 14*r0*9*r0,
+                'ffg_AB': 13*r0*3*14*r0+3*9*r0*13*r0,
+                'ffg_BB': 0.0
+            },
+        }
+
+        for struct in ['aaa', 'bbb', 'abb', 'bab', 'baa', 'aba']:
+            atoms = _all_test_structs[struct+'_asym']
+
+            engSV, _ = self.ffg.loop(atoms, evalType='vector')
+
+            for bondType in ['ffg_AA', 'ffg_AB', 'ffg_BB']:
+                res = engSV[bondType].dot(params[bondType])
+
+                np.testing.assert_almost_equal(
+                    sum(res), expected[struct][bondType]
+                )
+
+
+    def test_sv_ffg_quad(self):
+        """
+        The purpose is this function is to test a very specific bug that can
+        occur when a B*A triplet (which is correctly mapped into the A*B bond)
+        is evaluated incorrectly because rB is incorrectly dotted with the f_A
+        parameters.
+        """
+        pass
