@@ -15,7 +15,7 @@ initialize(
     nthreads=6,
     memory_limit='12 GB',
     # interface='ipogif0',
-    # local_directory='/u/sciteam/vita/scratch/svreg/hyojung/hj_dask_prof_int',
+    local_directory=os.getcwd(),
 )
 
 import dask
@@ -76,8 +76,6 @@ def main(client, settings):
 
     print()
     print()
-
-    return
 
     N = settings['optimizerPopSize']
 

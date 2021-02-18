@@ -4,7 +4,7 @@ import numpy as np
 from copy import deepcopy
 
 import cma
-from svreg.optimizers import GAWrapper, SofomoreWrapper
+from svreg.optimizers import GAWrapper#, SofomoreWrapper
 from svreg.nodes import SVNode
 from svreg.tree import SVTree
 from svreg.tree import MultiComponentTree as MCTree
@@ -85,16 +85,16 @@ class SVRegressor:
                     'tolfunrel': 1e-8,
                 }
             ]
-        elif settings['optimizer'] == 'Sofomore':
-            self.optimizer = SofomoreWrapper
-            self.optimizerArgs = {
-                'numStructs': numStructs,
-                'paretoDimensionality': 2,
-                'CMApopSize': settings['optimizerPopSize'],
-                'SofomorePopSize': settings['numberOfTrees'],  # Placeholder
-                # 'threads_per_node': settings['PROCS_PER_PHYS_NODE'],
-                'threads_per_node': None,
-            }
+        # elif settings['optimizer'] == 'Sofomore':
+            # self.optimizer = SofomoreWrapper
+            # self.optimizerArgs = {
+                # 'numStructs': numStructs,
+                # 'paretoDimensionality': 2,
+                # 'CMApopSize': settings['optimizerPopSize'],
+                # 'SofomorePopSize': settings['numberOfTrees'],  # Placeholder
+                'threads_per_node': settings['PROCS_PER_PHYS_NODE'],
+                # 'threads_per_node': None,
+            # }
         else:
             raise NotImplementedError(
                 'Must be one of `GA`, `CMA`, or `Sofomore`.'

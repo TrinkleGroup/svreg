@@ -977,9 +977,9 @@ class MultiComponentTree(SVTree):
         return tree
 
     
-    def eval(self, useDask=True):
+    def eval(self, useDask=True, allSums=False):
         vals = [
-            self.chemistryTrees[el].eval(useDask=useDask)
+            self.chemistryTrees[el].eval(useDask=useDask, allSums=allSums)
             for el in self.elements
         ]
 
