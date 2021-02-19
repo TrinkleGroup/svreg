@@ -12,10 +12,10 @@ import numpy as np
 
 from dask_mpi import initialize
 initialize(
-    nthreads=6,
-    memory_limit='12 GB',
-    # interface='ipogif0',
-    local_directory=os.getcwd(),
+    nthreads=16,
+    memory_limit='16 GB',
+    interface='ipogif0',
+    local_directory=os.getcwd()
 )
 
 import dask
@@ -55,7 +55,7 @@ def main(client, settings):
     # Setup
     with h5py.File(settings['databasePath'], 'r') as h5pyFile:
         database = SVDatabase(h5pyFile)
-        wait(database.load(h5pyFile, settings['allSums']))
+        wait(database.load(h5pyFile, allSums=settings['allSums']))
 
         evaluator = SVEvaluator(database, settings)
 
@@ -94,7 +94,8 @@ def main(client, settings):
 
     start = time.time()
     fxnEvals = 1
-    while numCompletedTrees < maxNumTrees:
+    # while numCompletedTrees < maxNumTrees:
+    while fxnEvals < 4:
 
         # Remove any converged trees, update population, and print new results
         staleIndices, messages = regressor.checkStale()
@@ -208,19 +209,29 @@ def main(client, settings):
         populationDict, rawPopulations = regressor.generatePopulationDict(N)
 
         svEng = evaluator.evaluate(populationDict, 'energy', useDask=False)
+        
+        print('Evaluated energies locally', time.time() - start, flush=True)
 
-        for svName in populationDict:
-            for el, pop in populationDict[svName].items():
-                populationDict[svName][el] = client.scatter(pop, broadcast=True)
+        # for svName in populationDict:
+        #     for el, pop in populationDict[svName].items():
+        #         populationDict[svName][el] = client.scatter(pop)#, broadcast=True)
+
+        # print('Scattered population', time.time() - start, flush=True)
 
         svFcs = evaluator.evaluate(populationDict, 'forces')
 
+        print('Finished setting up forces', time.time() - start, flush=True)
+
         energies, forces = regressor.evaluateTrees(svEng, svFcs, N)
+
+        print('Finished evaluating trees', time.time() - start, flush=True)
 
         # Save the (per-struct) errors and the single-value costs
         errors = computeErrors(
             settings['refStruct'], energies, forces, database
         )
+
+        print('Finished computing errors', time.time() - start, flush=True)
 
         costs = costFxn(errors)
 
@@ -252,7 +263,7 @@ def polish(client, settings):
     # Setup
     with h5py.File(settings['databasePath'], 'r') as h5pyFile:
         database = SVDatabase(h5pyFile)
-        wait(database.load(h5pyFile, settings['allSums']))
+        wait(database.load(h5pyFile, allSums=settings['allSums']))
 
         evaluator = SVEvaluator(database, settings)
 
@@ -489,8 +500,13 @@ def computeErrors(refStruct, energies, forces, database, useDask=True):
     def fcsErr(fcs, tv):
         return np.average(abs(sum(fcs) - tv), axis=(1,2))
 
+    if useDask:
+        from dask.distributed import get_client
+        client = get_client()
+
     errors = []
     for treeNum in range(numTrees):
+        treeResults = []
         for structName in sorted(keys):
 
             structEng  = energies[structName][treeNum]
@@ -515,14 +531,20 @@ def computeErrors(refStruct, energies, forces, database, useDask=True):
                 fcs, trueValues[structName]['forces']
             )
 
+            # treeResults.append(engErrors)
+            # treeResults.append(fcsErrors)
+
             errors.append(engErrors)
             errors.append(fcsErrors)
+
+        # errors += client.compute(treeResults)
 
     if useDask:
         from dask.distributed import get_client
         client = get_client()
 
         errors = client.gather(client.compute(errors))
+        # errors = client.gather(errors)
 
     errors = np.stack(errors).T
     errors = np.split(errors, numTrees, axis=1)
