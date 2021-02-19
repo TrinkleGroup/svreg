@@ -203,9 +203,20 @@ class SVRegressor:
                     # nodeFcs = (numNodes, P, nelem, natom, 3)
 
                     if useDask:
-                        nodeFcs = dask.delayed(reshapeFcs, nout=numNodes)(
-                            stackedFcs, numNodes, P
+                        # nodeFcs = dask.delayed(reshapeFcs, nout=numNodes)(
+                        #     stackedFcs, numNodes, P
+                        # )
+
+                        nelem = stackedFcs.shape[0]
+                        natom = stackedFcs.shape[1]
+
+                        nodeFcs = stackedFcs.reshape(
+                            nelem, natom, 3, P, numNodes
                         )
+
+                        nodeFcs = np.moveaxis(nodeFcs, -1, 0)
+                        nodeFcs = np.moveaxis(nodeFcs, -1, 1)
+
                     else:
                         nodeFcs = reshapeFcs(stackedFcs, numNodes, P)
 

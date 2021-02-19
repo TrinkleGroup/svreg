@@ -12,9 +12,9 @@ import numpy as np
 
 from dask_mpi import initialize
 initialize(
-    nthreads=16,
-    memory_limit='16 GB',
-    interface='ipogif0',
+    nthreads=6,
+    memory_limit='4 GB',
+    # interface='ipogif0',
     local_directory=os.getcwd()
 )
 

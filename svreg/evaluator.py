@@ -4,19 +4,6 @@ from dask.distributed import get_client
 
 import numpy as np
 
-from numba import jit
-
-@dask.delayed
-@jit(nopython=True)
-def jitDot(sv, pop):
-    return sv @ pop
-
-def futureEval(sv, pop):
-    return sv.dot(pop)
-
-@dask.delayed
-def delayedEval(sv, pop):
-    return sv.dot(pop)
 
 class SVEvaluator:
 
@@ -61,11 +48,11 @@ class SVEvaluator:
             return tup[0].dot(tup[1])
 
         if useDask:
-            results = [dask.delayed(dot)(t) for t in tasks]
-            # results = [t[0].dot(t[1]) for t in tasks]
+            # results = [dask.delayed(dot)(t) for t in tasks]
+            results = [t[0].dot(t[1]) for t in tasks]
 
-            client = get_client()
-            results = client.compute(results)
+            # client = get_client()
+            # results = client.compute(results)
         else:
             results = [dot((np.array(t[0]), t[1])) for t in tasks]
 
