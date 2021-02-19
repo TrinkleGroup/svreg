@@ -1,12 +1,14 @@
 import dask
 import dask.array
+from dask.distributed import get_client
+
 import numpy as np
 
 from numba import jit
 
 @dask.delayed
 @jit(nopython=True)
-def jitEval(sv, pop):
+def jitDot(sv, pop):
     return sv @ pop
 
 def futureEval(sv, pop):
@@ -41,8 +43,8 @@ class SVEvaluator:
         structNames = list(self.database.attrs['structNames'])
         allSVnames  = list(self.database.attrs['svNames'])
         elements    = list(self.database.attrs['elements'])
-
-        results = []
+        
+        tasks = []
         for struct in structNames:
             for svName in allSVnames:
                 if svName not in populationDict: continue
@@ -53,15 +55,20 @@ class SVEvaluator:
                     sv = self.database[struct][svName][elem][evalType]
                     pop = populationDict[svName][elem]
 
-                    if useDask:
-                        if evalType == 'energy':
-                            results.append(sv.dot(pop))
-                        else:
-                            results.append(delayedEval(sv, pop))
-                    else:
-                        results.append(np.array(sv).dot(pop))
+                    tasks.append((sv, pop))
 
-        # Now sum by chunks before computing to avoid extra communication
+        def dot(tup):
+            return tup[0].dot(tup[1])
+
+        if useDask:
+            results = [dask.delayed(dot)(t) for t in tasks]
+            # results = [t[0].dot(t[1]) for t in tasks]
+
+            client = get_client()
+            results = client.compute(results)
+        else:
+            results = [dot((np.array(t[0]), t[1])) for t in tasks]
+
         summedResults = {
             structName: {
                 svName: {
@@ -72,16 +79,6 @@ class SVEvaluator:
             for structName in structNames
         }
 
-        @dask.delayed
-        def delayedReshape(val, n):
-            nhost = val.shape[0]//3//n
-            return val.T.reshape(val.shape[1], 3, nhost, n)
-        
-        @dask.delayed
-        def delayedSum(val):
-            return val.sum(axis=-1).swapaxes(1, 2)
-
-        # TODO: consider converting results to a dask bag?
         for struct in structNames[::-1]:
             for svName in allSVnames[::-1]:
                 if svName not in populationDict: continue
@@ -89,26 +86,6 @@ class SVEvaluator:
                 for elem in elements[::-1]:
                     if elem not in populationDict[svName]: continue
 
-                    res = results.pop()
-
-                    # Parse the per-structure results
-                    val = None
-                    if evalType == 'energy':
-                        val = res.sum(axis=0)
-                    elif evalType == 'forces':
-                        val = res
-
-                        n = self.database.attrs['natoms'][struct]
-
-                        if useDask:
-                            val = delayedReshape(val, n)
-                            val = delayedSum(val)
-                        else:
-                            nhost = val.shape[0]//3//n
-
-                            val = val.T.reshape(res.shape[1], 3, nhost, n)
-                            val = val.sum(axis=-1).swapaxes(1, 2)
-
-                    summedResults[struct][svName][elem] = val
+                    summedResults[struct][svName][elem] = results.pop()
                 
         return summedResults

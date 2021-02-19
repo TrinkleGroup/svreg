@@ -1,8 +1,12 @@
 import os
 import pickle
 import shutil
+import hashlib
 import numpy as np
 from scipy.special import erf
+
+def md5Hash(tree):
+    return hashlib.md5(str(tree).encode()).hexdigest()
 
 
 class Entry:
@@ -11,7 +15,7 @@ class Entry:
     def __init__(self, tree, savePath):
         self.savePath   = savePath
 
-        self._tree      = str(tree)
+        self._tree      = md5Hash(tree)
         self.tree       = tree
 
         self.cost       = np.inf
@@ -32,7 +36,7 @@ class Entry:
     
     @tree.setter
     def tree(self, tree):
-        self._tree = str(tree)
+        self._tree = md5Hash(tree)
 
         os.mkdir(os.path.join(self.savePath, self._tree))
 
@@ -66,7 +70,6 @@ class Entry:
 
         return self_dict
 
-# TODO: this could probably be merged with regressor somehow
 
 class Archive(dict):
     """
@@ -84,11 +87,13 @@ class Archive(dict):
 
         os.mkdir(self.savePath)
 
+        self.hashLog = {}
+
 
     def update(self, tree, cost, errors, params, optimizer):
     # def update(self, tree, cost, params, optimizer):
         # Check if tree in archive, otherwise create a new entry for it
-        key = str(tree)
+        key = md5Hash(tree)
         # entry = self.get(key, Entry(tree, self.savePath))
         if key in self:
             raise RuntimeError("How did you re-run an existing tree? {}".format(key))
@@ -112,6 +117,8 @@ class Archive(dict):
             # entry.bestErrors = errors[bestIdx]
 
         self[key] = entry
+
+        self.hashLog[key] = str(tree)
 
     # @property
     # def convergences(self):
@@ -156,6 +163,7 @@ class Archive(dict):
         with open(os.path.join(self.savePath, 'archive.pkl'), 'wb') as outfile:
             pickle.dump(self, outfile)
 
+
     def printStatus(self, regressorNames):
         print()
         printNames = list(self.keys())
@@ -174,12 +182,12 @@ class Archive(dict):
 
 
     def pruneAndLoad(self, sampledTrees, newTrees, opts, regressor):
-        currentTreeNames = [str(t) for t in sampledTrees]
+        currentTreeNames = [md5Hash(t) for t in sampledTrees]
 
         uniqueTrees = sampledTrees
         uniqueOptimizers = opts
         for tree in newTrees:
-            treeName = str(tree)
+            treeName = md5Hash(tree)
             if treeName not in currentTreeNames:
                 # Not a duplicate
                 uniqueTrees.append(tree)

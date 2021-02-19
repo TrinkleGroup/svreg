@@ -50,9 +50,12 @@ class SVDatabase(dict):
                 'energy': h5pyFile[struct].attrs['energy'],
             }
 
-            for el in elements:
-                fname = 'forces_' + el
-                self.trueValues[struct][fname] = h5pyFile[struct].attrs[fname]
+            # for el in elements:
+            #     fname = 'forces_' + el
+            #     self.trueValues[struct][fname] = h5pyFile[struct].attrs[fname]
+
+            self.trueValues[struct]['forces'] = h5pyFile[struct].attrs['forces']
+
 
         self.attrs = {
             'structNames': structNames,
@@ -61,11 +64,8 @@ class SVDatabase(dict):
             'natoms': {s: h5pyFile[s].attrs['natoms'] for s in structNames},
         }
 
-        # self.attrs['structNames'] = np.char.decode(
-        #     self.attrs['structNames'].astype(np.bytes_)
-        # )
 
-    def load(self, h5pyFile, useDask=True):
+    def load(self, h5pyFile, useDask=True, allSums=False):
 
         structNames = self.attrs['structNames']
         svNames = self.attrs['svNames']
@@ -91,6 +91,9 @@ class SVDatabase(dict):
 
                     self[struct][sv][elem]['energy'] = group['energy'][()]
 
+                    if allSums:
+                        forceData = np.einsum('ijkl->jkl', forceData)
+
                     if useDask:
                         self[struct][sv][elem]['forces'] = da.from_array(
                             forceData,
@@ -103,5 +106,6 @@ class SVDatabase(dict):
 
                     futures.append(self[struct][sv][elem]['energy'])
                     futures.append(self[struct][sv][elem]['forces'])
+                    # futures += self[struct][sv][elem]['forces']
 
         return futures

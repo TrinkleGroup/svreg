@@ -1,7 +1,6 @@
 import itertools
 import numpy as np
 from numba import jit
-from copy import deepcopy
 from scipy.sparse import diags
 from scipy.interpolate import CubicSpline
 from ase.neighborlist import NeighborList
@@ -149,10 +148,15 @@ class Summation:
                 hostType is None then it loops over all atoms.
 
         Returns:
-            Depends upon specified `evalType`. If `energy`, returns a single
-            float corresponding to the total energy of the system. If `forces`,
-            returns an (N, 3) array of forces on each atom. If `vector`, returns
-            a dictionary of the form {bondType: {energy/forces: vector}}.
+            Depends upon specified `evalType`. If `energy`, returns a (1, N)
+            array corresponding to the per-atom energies of the system. If
+            `forces`, returns an (1, N, N, 3) array of forces on each atom. If
+            `vector`, returns a dictionary of the form
+            {bondType: {energy/forces: vector}}.
+
+            Note that the specific shapes of the energies and forces matrices is
+            so that the derivatives can be computed properly for the embedding
+            functions.
         """
 
 
@@ -168,16 +172,6 @@ class FFG(Summation):
         self.gSplines = {}
 
         for el1 in kwargs['neighborElements']:
-            # TODO: if numParams or knot positions are ever not the same for all
-            # splines, then this section is going to need to change
-
-            # TODO: currently assumes components is only [f_A, g_AA]; won't be
-            # true for multi-component
-
-            # TODO: I think this code is only working right now because all of
-            # the splines of a given type (F or G) have the same number of
-            # parameters and the same restrictions
-
             self.fSplines[el1] = Spline(
                 knots=np.linspace(
                     self.cutoffs[0], self.cutoffs[1],
@@ -225,12 +219,9 @@ class FFG(Summation):
         iForces = None
         forces = None
 
-        types = sorted(list(set(atoms.get_chemical_symbols())))
-
         atomTypesStrings = atoms.get_chemical_symbols()
         atomTypes = np.array(
             list(map(lambda s: self.allElements.index(s), atomTypesStrings))
-            # list(map(lambda s: types.index(s), atomTypesStrings))
         )
 
         N = len(atoms)
@@ -249,9 +240,9 @@ class FFG(Summation):
                 forcesSV[bondType] = np.zeros((3*N*N, cartsize))
 
         elif evalType == 'energy':
-            totalEnergy = 0.0
+            totalEnergy = np.zeros((1, N))
         elif evalType == 'forces':
-            forces = np.zeros((N, 3))
+            forces = np.zeros((1, N, N, 3))
 
         # Allows double counting bonds; needed for embedding energy calculations
         nl = NeighborList(
@@ -330,17 +321,60 @@ class FFG(Summation):
 
                     cosTheta = np.dot(jvec, kvec)#/rij/rik
 
-                    d0 = jvec
-                    d1 = -cosTheta * jvec / rij
-                    d2 = kvec / rij
-                    d3 = kvec
-                    d4 = -cosTheta * kvec / rik
-                    d5 = jvec / rik
+                    d0 = jvec                       # on i due to j
+                    d1 = -cosTheta * jvec / rij     # on j due to i?
+                    d2 = kvec / rij                 # on i and j due to k?
+                    d3 = kvec                       # on i due to k
+                    d4 = -cosTheta * kvec / rik     # on k due to i?
+                    d5 = jvec / rik                 # on i and k due to j?
 
                     dirs = np.vstack([d0, d1, d2, d3, d4, d5])
 
                     if evalType == 'vector':
                         bondType = self.bondMapping(jtype, ktype)
+
+                        oldJ = j
+                        oldRij = rij
+                        oldFjSpline = self.fjSpline
+
+                        if jtype != ktype:  # Then this is a cross-term
+                            """
+                            Since there is only one bond type for cross-terms
+                            (e.g. AB, not AB and BA), we need to flip the
+                            ordering of triplets that aren't in the correct
+                            order. For example, we must flip a BA term so that
+                            is in AB ordering.
+
+                            In the case of forces, we must also flip the atom
+                            tags and the direction vectors to make sure that the
+                            results get added to the proper indices in the force
+                            SV.
+                            """
+
+                            # Figure out expected order of bondType
+
+                            # e.g. ['f_A', 'f_B', 'g_AB']
+                            bondComponents = self.bonds[bondType]
+                            bondInputs = None
+                            for bc in bondComponents:
+                                # The G spline will have the expected order
+                                if 'g' in bc:
+                                    # TODO: this currently assumes that the
+                                    # component names are given as 'g_**'
+                                    bondInputs = self.inputTypes[bc]
+
+                            # If neighbors aren't in the correct order, swap
+                            if [jtypeStr, ktypeStr] != bondInputs:
+                                j = k
+                                k = oldJ
+
+                                rij = rik
+                                rik = oldRij
+
+                                dirs = np.vstack([d3, d4, d5, d0, d1, d2])
+
+                                self.fjSpline = self.fkSpline
+                                self.fkSpline = oldFjSpline 
 
                         # Update structure vectors (in-place)
                         self.add_to_energy_sv(
@@ -351,6 +385,10 @@ class FFG(Summation):
                             forcesSV[bondType],
                             rij, rik, cosTheta, dirs, i, j, k
                         )
+
+                        j = oldJ
+                        rij = oldRij
+                        self.fjSpline = oldFjSpline
                     elif (evalType == 'energy') or (evalType == 'forces'):
                         fkVal = self.fkSpline(rik)
                         gVal = self.gSpline(cosTheta)
@@ -378,18 +416,18 @@ class FFG(Summation):
                         jForces += fj
                         iForces -= fk
 
-                        forces[k] += fk
+                        forces[:, i, k, :] += fk
                 # end triplet loop
 
                 if evalType == 'energy':
-                    totalEnergy += fjVal*partialsum
+                    totalEnergy[:, i] += fjVal*partialsum
                 elif evalType == 'forces':
-                    forces[i] -= jForces
-                    forces[j] += jForces
+                    forces[:, i, i, :] -= jForces
+                    forces[:, i, j, :] += jForces
             # end neighbor loop
 
             if evalType == 'forces':
-                forces[i] += iForces
+                forces[:, i, i, :] += iForces
         # end atom loop
 
         if evalType == 'vector':
@@ -434,17 +472,18 @@ class FFG(Summation):
             fj_1, fk_1, g_1, fj_2, fk_2, g_2, fj_3, fk_3, g_3, dirs
         )
 
-        # TODO: add documentation about why the SV has this 3*N*N shape
+        """
+        SV[i, i] is the sum of the forces on atom i due to its neighbors
+        SV[i, j] is the forces on neighbor j due to atom i
+        """
 
-        # forcesSV = np.zeros((3*N*N, int((self.numParams+2)**3)))
         N = int(np.sqrt(sv.shape[0]//3))
-        N2 = N*N
         for a in range(3):
-            sv[N2*a + N*i + i, :] += fj[:, a]
-            sv[N2*a + N*j + i, :] -= fj[:, a]
+            sv[3*N*i + 3*i + a, :] += fj[:, a]
+            sv[3*N*i + 3*j + a, :] -= fj[:, a]
 
-            sv[N2*a + N*i + i, :] += fk[:, a]
-            sv[N2*a + N*k + i, :] -= fk[:, a]
+            sv[3*N*i + 3*i + a, :] += fk[:, a]
+            sv[3*N*i + 3*k + a, :] -= fk[:, a]
 
 
     @staticmethod
@@ -456,6 +495,18 @@ class FFG(Summation):
         v1 = np.outer(np.outer(fj_1, fk_1), g_1).ravel()
         v2 = np.outer(np.outer(fj_2, fk_2), g_2).ravel()
         v3 = np.outer(np.outer(fj_3, fk_3), g_3).ravel()
+
+        """
+        When computing the derivatives of the 3-body term, the derivative must
+        be taken with respect to rij _and_ rik. The forces parallel to the ij
+        bond will 
+
+        When computing forces, the following terms must be computed:
+        dE/d_xi | xj and dE\d_xi | xk
+
+        Using the chain and product rules, these derivatives result in 6 total
+        terms, 3 for the ij bond and 3 for the ik bond.
+        """
 
         # all 6 terms to be added
         t0 = dirs[0]*v1.reshape((-1, 1))
@@ -537,14 +588,6 @@ class Rho(Summation):
         # Note: a Rho Summation will only ever have one spline since it's based
         # on the neighbor type
 
-        """
-        TODO: the problem is that Summation is being used to construct the
-        database AND to evaluate a tree. In the first case, 'elements' will be
-        the elements in the system so that it builds the Rho SV for all
-        elements, but in the second case 'elements' is only the elements being
-        used for the given neighbor types.
-        """
-
         for el in kwargs['neighborElements']:
             self.splines[el] = Spline(
                 knots=np.linspace(
@@ -568,7 +611,6 @@ class Rho(Summation):
         forcesSV = None
         forces = None
 
-        types = sorted(list(set(atoms.get_chemical_symbols())))
         atomTypesStrings = atoms.get_chemical_symbols()
         atomTypes = np.array(
             list(map(lambda s: self.allElements.index(s), atomTypesStrings))
@@ -577,8 +619,6 @@ class Rho(Summation):
 
         N = len(atoms)
         if evalType == 'vector':
-            # if bondType is None:
-            #     raise RuntimeError('Must specify bondType.')
 
             energySV = {bondType: None for bondType in self.bonds}
             forcesSV = {bondType: None for bondType in self.bonds}
@@ -591,12 +631,13 @@ class Rho(Summation):
                 ])
 
                 energySV[bondType] = np.zeros((N, totalNumParams))
+                # forcesSV[bondType] = np.zeros((3*N*N, totalNumParams))
                 forcesSV[bondType] = np.zeros((3*N*N, totalNumParams))
 
         elif evalType == 'energy':
-            totalEnergy = 0.0
+            totalEnergy = np.zeros((1, N))
         elif evalType == 'forces':
-            forces = np.zeros((N, 3))
+            forces = np.zeros((1, N, N, 3))
 
         # Note that double counting is always allowed, but it must be done
         # manually (rather than directly multiplying each bond by 2)
@@ -611,10 +652,10 @@ class Rho(Summation):
         cell = atoms.get_cell()
 
         for i, atom in enumerate(atoms):
-            itype = atomTypes[i]
+            itypeStr = atomTypesStrings[i]
 
             if hostType is not None:
-                if atomTypesStrings[i] != hostType:
+                if itypeStr != hostType:
                     continue
 
             ipos = atom.position
@@ -640,33 +681,49 @@ class Rho(Summation):
                 jvec /= rij
 
                 if evalType == 'vector':
+
                     bondType = self.bondMapping(jtype)
 
                     self.add_to_energy_sv(energySV[bondType], rij, i)
                     # self.add_to_energy_sv(energySV[bondType], rij, j)
 
+                    # TODO: it's inefficient to call add_to_forces twice since
+                    # it builds the same coefficients; just add to both indices
+                    # at once, like in FFG
+
                     # Forces acting on i
                     self.add_to_forces_sv(forcesSV[bondType], rij,  jvec, i, i)
-                    self.add_to_forces_sv(forcesSV[bondType], rij,  jvec, i, j)
+                    self.add_to_forces_sv(forcesSV[bondType], rij,  -jvec, i, j)
+                    
+                    """
+                    SV[bondType][i, i] is the forces on atom i due to all
+                    neighbors that form the correct bondType
+
+                    SV[bondType][i, j] is the forces on atom j due to the bond
+                    of bondType with atom i
+                    """
+
 
                     # # Forces acting on j
                     # self.add_to_forces_sv(forcesSV[bondType], rij, -jvec, j, i)
                     # self.add_to_forces_sv(forcesSV[bondType], rij, -jvec, j, j)
+
                 elif evalType == 'energy':
                     # Note: i->j == i<-j iff i and j are the same element
                     # type. If they are different types, then they need to be
                     # evaluated with different Rho splines, which is why you
                     # can't simply multiply by 2 here
 
-                    totalEnergy += self.rho(rij)
+                    totalEnergy[:, i] += self.rho(rij)
                 elif evalType == 'forces':
-                    rhoPrimeI = self.splines[itype](rij, 1)
-                    rhoPrimeJ = self.splines[jtype](rij, 1)
+                    # rhoPrimeI = self.splines[itypeStr](rij, 1)
+                    rhoPrimeJ = self.splines[jtypeStr](rij, 1)
 
-                    fcs = jvec*(rhoPrimeI + rhoPrimeJ)
+                    # fcs = jvec*(rhoPrimeI + rhoPrimeJ)
+                    fcs = jvec*rhoPrimeJ
 
-                    forces[i] += fcs
-                    forces[j] -= fcs
+                    forces[:, i, i, :] += fcs
+                    forces[:, i, j, :] -= fcs
 
         if evalType == 'vector':
             return energySV, forcesSV
@@ -684,9 +741,11 @@ class Rho(Summation):
         coeffs = np.einsum('i,j->ij', coeffs, direction)
 
         N = int(np.sqrt(sv.shape[0]//3))
-        N2 = N*N
         for a in range(3):
-            sv[N2*a + N*i + j, :] += coeffs[:, a]
+            # sv[N2*a + N*i + j, :] += coeffs[:, a]
+            sv[3*N*i + 3*j + a, :] += coeffs[:, a]
+            # sv[N*a + i, :] += coeffs[:, a]
+            # sv[3*i + a, :] += coeffs[:, a]
 
 
     def setParams(self, params):
@@ -704,7 +763,7 @@ class Rho(Summation):
 class Spline:
     """
     A helper class for embedding spline input values into vectors of spline
-    coefficients.
+    coefficients and for performing the corresponding direct spline evaluations.
     """
 
     def __init__(self, knots, bc_type=None):

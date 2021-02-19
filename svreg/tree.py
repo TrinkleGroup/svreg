@@ -39,8 +39,56 @@ class SVTree(list):
         self.cost = np.inf
 
 
+    def __eq__(self, other):
+        """
+        Logic to check for equality of two chemistry trees:
+
+        Inequal if:
+            - different number of nodes
+            - different frequency count of each node type
+            - they don't evaluate to the same thing with dummy values
+        """
+
+        n = len(self.nodes)
+
+        # Check incorrect length
+        if len(other.nodes) != n:
+            return False
+
+        # Check mis-matched nodes
+        selfCounts = {}
+        otherCounts = {}
+
+        for node in self.nodes:
+            name = node.description
+            selfCounts[name] = selfCounts.get(name, 0) + 1
+
+        for node in other.nodes:
+            name = node.description
+            otherCounts[name] = otherCounts.get(name, 0) + 1
+
+        for name in selfCounts:
+            if selfCounts[name] != otherCounts[name]:
+                return False
+
+        # Check dummy evaluation
+        nsv = len(self.svNodes)
+
+        dummyEnergies = np.random.random((nsv, 1, 1))
+        dummyForces   = np.random.random((nsv, 1, 1, 1, 1))
+
+        for i in range(nsv):
+            self.svNodes[i].values = (dummyEnergies[i], dummyForces[i])
+            other.svNodes[i].values = (dummyEnergies[i], dummyForces[i])
+
+        if self.eval(useDask=False) != other.eval(useDask=False):
+            return False
+        
+        return True
+
+
     @classmethod
-    def random(cls, svNodePool, maxDepth=1, method='full'):
+    def random(cls, svNodePool, maxDepth=1, method='grow', maxNumSVs=1):
         """
         Generates a random tree with a maximum depth of maxDepth by randomly
         adding nodes from a pool of function nodes and the given svNodes list.
@@ -95,22 +143,32 @@ class SVTree(list):
         # is complete once this list is empty
         nodesToAdd = [tree.nodes[0].function.arity]
 
+        numNestedFunctions = int(tree.nodes[0].description != 'add')
+        numSVs = 0
+
         while nodesToAdd:
-            depth = len(nodesToAdd)
+            # depth = len(nodesToAdd)
 
             choice = random.randint(0, numNodeChoices)
 
-            if (depth < maxDepth) and (
-                (choice <= numFuncs) or (method == 'full')):
+            if (numNestedFunctions < maxDepth) and (
+                (choice <= numFuncs) or (method == 'full')) and (
+                    numSVs < maxNumSVs
+                ):
 
                 # Chose to add a FunctionNode
                 tree.nodes.append(FunctionNode.random())
                 nodesToAdd.append(tree.nodes[-1].function.arity)
+
+                # Only count embedding functions (or *) when considering depth
+                numNestedFunctions += int(tree.nodes[-1].description != 'add')
             else:
                 # Add an SVNode
                 sv = random.choice(deepcopy(svNodePool))
                 tree.nodes.append(sv)
                 tree.svNodes.append(sv)
+
+                numSVs += 1
 
                 # See if you need to add any more nodes to the sub-tree
                 nodesToAdd[-1] -= 1
@@ -135,7 +193,7 @@ class SVTree(list):
         raise RuntimeError("Something went wrong in tree construction")
 
 
-    def eval(self):
+    def eval(self, useDask=True, allSums=False):
         """
         Evaluates the tree. Assumes that each SVNode has already been updated to
         contain the SV of the desired structure.
@@ -149,14 +207,36 @@ class SVTree(list):
                 where N is the number of atoms in the current structure.
         """
 
+        import dask
+
         # Check for single-node tree
         if isinstance(self.nodes[0], SVNode):
-            return self.nodes[0].values
+
+            # eng = self.nodes[0].values[0].sum(axis=1)
+            # fcs = self.nodes[0].values[0]
+            # fcs = np.einsum('ijkl->ikl', fcs)
+
+            # eng = client.submit(np.sum, self.nodes[0].values[0], axis=1)
+            # fcs = client.submit(np.einsum, 'ijkl->ikl', self.nodes[0].values[0])
+
+            values = self.nodes[0].values
+
+            # eng = dask.delayed(np.sum)(values[0], axis=1)
+            eng = np.sum(values[0], axis=1)
+
+            if allSums:
+                fcs = values[1]
+            else:
+                if useDask:
+                    fcs = dask.delayed(np.einsum)('ijkl->ikl', values[1])
+                else:
+                    fcs = np.einsum('ijkl->ikl', values[1])
+
+            return eng, fcs
 
         # Constructs a list-of-lists where each sub-list is a sub-tree for a
         # function at a given recursion depth. The first node of a sub-tree
         # should always be a FunctionNode
-
         subTrees = []
 
         for node in self.nodes:
@@ -175,8 +255,21 @@ class SVTree(list):
                     for n in subTrees[-1][1:]
                 ]
 
+                # intermediateEng = subTrees[-1][0].function(*args)
+                # intermediateFcs = subTrees[-1][0].function.derivative(*args)
+
+                # intermediateEng = dask.delayed(subTrees[-1][0].function)(*args)
+                # intermediateFcs = dask.delayed(subTrees[-1][0].function.derivative)(*args)
+                # intermediateEng = client.submit(subTrees[-1][0].function, *args)
+                # intermediateFcs = client.submit(subTrees[-1][0].function.derivative, *args)
+
+                # intermediateEng = dask.delayed(subTrees[-1][0].function)(*args)
                 intermediateEng = subTrees[-1][0].function(*args)
-                intermediateFcs = subTrees[-1][0].function.derivative(*args)
+
+                if useDask:
+                    intermediateFcs = dask.delayed(subTrees[-1][0].function.derivative)(*args)
+                else:
+                    intermediateFcs = subTrees[-1][0].function.derivative(*args)
 
                 if len(subTrees) != 1:  # Still some left to evaluate
                     subTrees.pop()
@@ -185,6 +278,28 @@ class SVTree(list):
                     )
                 else:  # Done evaluating all sub-trees
 
+                    # Ne = num atoms of given element type; N = total num atoms
+                    # intermediateEng = (P, Ne)
+                    # intermediateFcs = (P, Ne, N, 3)
+
+                    # intermediateEng = intermediateEng.sum(axis=1)
+                    # intermediateEng = dask.delayed(np.sum)(intermediateEng, axis=1)
+                    # intermediateFcs = dask.delayed(np.einsum)('ijkl->ikl', intermediateFcs)
+
+                    # intermediateEng = client.submit(np.sum, intermediateEng, axis=1)
+                    # intermediateFcs = client.submit(np.einsum, 'ijkl->ikl', intermediateFcs)
+
+                    # intermediateEng = dask.delayed(np.sum)(intermediateEng, axis=1)
+                    intermediateEng = np.sum(intermediateEng, axis=1)
+
+                    if not allSums:
+                        if useDask:
+                            intermediateFcs = dask.delayed(np.einsum)('ijkl->ikl', intermediateFcs)
+                        else:
+                            # intermediateFcs = np.einsum('ijkl->ikl', intermediateFcs)
+                            import dask.array as da
+                            intermediateFcs = da.einsum('ijkl->ikl', intermediateFcs)
+                    
                     return intermediateEng, intermediateFcs
 
         raise RuntimeError("Something went wrong in tree evaluation")
@@ -520,6 +635,10 @@ class SVTree(list):
         return output
 
 
+    def __repr__(self):
+        return str(self)
+
+
     def getSubtree(self):
         """
         Get a random sub-tree. As in gplearn, uses Koza's (1992) approach.
@@ -725,7 +844,17 @@ class SVTree(list):
 
         # Check for single-node tree
         if isinstance(nodes[0], Summation):
-            return nodes[0].loop(atoms, evalType, hostType)
+            if len(nodes) > 1:
+                raise RuntimeError(
+                    "First node isn't a funciton, but there is more than one\
+                    node."
+                )
+            res = nodes[0].loop(atoms, evalType, hostType)
+
+            if evalType == 'energy':
+                return np.sum(res)
+            elif evalType == 'forces':
+                return np.einsum('ijkl->kl', res)
 
         # Constructs a list-of-lists where each sub-list is a sub-tree for a
         # function at a given recursion depth. The first node of a sub-tree
@@ -747,10 +876,12 @@ class SVTree(list):
                 args = []
                 for n in subTrees[-1][1:]:
                     if isinstance(n, Summation):
-                        eng = np.array([n.loop(atoms, 'energy', hostType)])
+                        # eng = np.array([n.loop(atoms, 'energy', hostType)])
+                        eng = n.loop(atoms, 'energy', hostType)
 
                         if evalType == 'forces':
-                            fcs = np.array([n.loop(atoms, evalType, hostType)])
+                            # fcs = np.array([n.loop(atoms, evalType, hostType)])
+                            fcs = n.loop(atoms, evalType, hostType)
                         else:
                             fcs = None
 
@@ -773,9 +904,16 @@ class SVTree(list):
                         (intermediateEng, intermediateFcs)
                     )
                 else:  # Done evaluating all sub-trees
+
+                    # Ne = num atoms of given element type; N = total num atoms
+                    # intermediateEng = (1, Ne)
+                    # intermediateFcs = (1, Ne, N, 3)
+
                     if evalType == 'energy':
+                        intermediateEng = np.sum(intermediateEng)
                         return intermediateEng
                     else:
+                        intermediateFcs = np.einsum('ijkl->kl', intermediateFcs)
                         return intermediateFcs
 
         raise RuntimeError("Something went wrong in tree evaluation")
@@ -840,14 +978,18 @@ class MultiComponentTree(SVTree):
         return tree
 
     
-    def eval(self):
-        vals = [self.chemistryTrees[el].eval() for el in self.elements]
+    def eval(self, useDask=True, allSums=False):
+        vals = [
+            self.chemistryTrees[el].eval(useDask=useDask, allSums=allSums)
+            for el in self.elements
+        ]
 
         eng, fcs = zip(*vals)
 
-        # eng/fcs = [val for val in element_vals]
+        # eng = [(P,) for _ in chemistryTrees]
+        # fcs = [(P, N, 3) for _ in chemistryTrees]
+
         return eng, fcs
-        # return sum(eng), np.concatenate(fcs, axis=1)
 
 
     def populate(self, N):
@@ -887,8 +1029,9 @@ class MultiComponentTree(SVTree):
             splitPop.append(rawPopulation[:, start:stop])
 
         subDicts = {
-            el: self.chemistryTrees[el].parseArr2Dict(splitPop[i])
-            for i,el in enumerate(self.elements)
+            el: self.chemistryTrees[el].parseArr2Dict(
+                splitPop[i], fillFixedKnots
+            ) for i,el in enumerate(self.elements)
         }
 
         return subDicts
@@ -953,13 +1096,15 @@ class MultiComponentTree(SVTree):
 
         splitPop = np.array_split(y, splits)
 
-        return sum([
+        res = [
             self.chemistryTrees[el].directEvaluation(
                 splitPop[ii], atoms, self.elements, evalType, bc_type, cutoffs,
                 hostType=el
             )
             for ii, el in enumerate(self.elements)
-        ])
+        ]
+
+        return sum(res)
 
 
     def __str__(self):
