@@ -228,10 +228,6 @@ class SVRegressor:
                     if leftovers > 0:
                         raise RuntimeError('Found leftover results.')
 
-            @dask.delayed
-            def sumEng(fut):
-                return sum(fut)
-
             # If here, all of the nodes have been updated with their values
             for tree in self.trees:
                 # future = dask.delayed(tree.eval, nout=2)(
