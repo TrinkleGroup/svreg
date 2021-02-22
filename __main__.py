@@ -212,11 +212,11 @@ def main(client, settings):
         
         print('Evaluated energies locally', time.time() - start, flush=True)
 
-        # for svName in populationDict:
-        #     for el, pop in populationDict[svName].items():
-        #         populationDict[svName][el] = client.scatter(pop)#, broadcast=True)
+        for svName in populationDict:
+            for el, pop in populationDict[svName].items():
+                populationDict[svName][el] = client.scatter(pop)#, broadcast=True)
 
-        # print('Scattered population', time.time() - start, flush=True)
+        print('Scattered population', time.time() - start, flush=True)
 
         svFcs = evaluator.evaluate(populationDict, 'forces')
 

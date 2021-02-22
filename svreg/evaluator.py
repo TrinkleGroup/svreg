@@ -51,8 +51,8 @@ class SVEvaluator:
             results = [dask.delayed(dot)(t) for t in tasks]
             # results = [t[0].dot(t[1]) for t in tasks]
 
-            # client = get_client()
-            # results = client.compute(results)
+            client = get_client()
+            results = client.compute(results)
         else:
             results = [dot((np.array(t[0]), t[1])) for t in tasks]
 
