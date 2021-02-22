@@ -94,8 +94,8 @@ def main(client, settings):
 
     start = time.time()
     fxnEvals = 1
-    # while numCompletedTrees < maxNumTrees:
-    while fxnEvals < 4:
+    while numCompletedTrees < maxNumTrees:
+    # while fxnEvals < 4:
 
         # Remove any converged trees, update population, and print new results
         staleIndices, messages = regressor.checkStale()
@@ -530,6 +530,10 @@ def computeErrors(refStruct, energies, forces, database, useDask=True):
             fcsErrors = dask.delayed(fcsErr)(
                 fcs, trueValues[structName]['forces']
             )
+
+            # fcsErrors = np.average(
+            #     abs(sum(fcs) - trueValues[structName]['forces']), axis=(1,2)
+            # )
 
             # treeResults.append(engErrors)
             # treeResults.append(fcsErrors)

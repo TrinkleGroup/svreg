@@ -170,89 +170,166 @@ class SVRegressor:
 
             return fcs
 
+        # indexers[sv][el][i] = list of indices for svEng[*][sv][el] for tree i
+        indexers = {}
+
+        struct0 = list(svEng.keys())[0]
+        # Build dictionary of indexers for each SV
+        for svName in svEng[struct0]:
+            indexers[svName] = {}
+            for elem in svEng[struct0][svName]:
+                indexers[svName][elem]  = []
+
+                counter = 0
+
+                # Loop backwards over the list of values
+                for tree in self.trees:
+                    treeIndices = []
+                    # for svNode in tree.chemistryTrees[elem].svNodes:
+                    for svNode in tree.chemistryTrees[elem].svNodes:
+                        # Only update the SVNode objects of the current type
+                        if svNode.description == svName:
+                            treeIndices.append(counter)
+                            counter += 1
+
+                    indexers[svName][elem].append(treeIndices[::-1])
+
+        taskArgs = []
         for structName in energies:
-            for svName in svEng[structName]:
+            indexCopy = deepcopy(indexers)
+
+            for ii, tree in enumerate(self.trees):
+                treeArgs = []
                 for elem in svEng[structName][svName]:
-                    # The list of stacked values for each tree for a given SV type
-                    stackedEng = svEng[structName][svName][elem]
-                    stackedFcs = svFcs[structName][svName][elem]
+                    for svNode in tree.chemistryTrees[elem].svNodes:
+                        svName = svNode.description
 
-                    # Possible if svName wasn't use in any trees of elem
-                    if stackedEng is None: continue
+                        engDot = svEng[structName][svName][elem]
+                        fcsDot = svFcs[structName][svName][elem]
 
-                    # Un-stack values for each element, and append to list
-                    # numNodes = stackedEng.shape[0]//P
-                    numNodes = self.numNodes[svName][elem]
-
-                    # stackedEng will have the shape (Ne, P*Nn) and will need to
-                    # be reshaped to separate out the per-node contributions,
-                    # but can't be summed until after full tree evaluation
-
-                    nelem = stackedEng.shape[0]
-
-                    nodeEng = stackedEng.reshape((nelem, numNodes, P))
-                    nodeEng = np.moveaxis(nodeEng, 1, 0)
-                    nodeEng = np.moveaxis(nodeEng, -1, 1)
-
-                    # stackedFcs has the shape (Ne, N, 3, P*Nn), where Ne is the
-                    # number of atoms of the current element type and Nn is the
-                    # number of  nodes of the given node type. Note that
-                    # this needs to be reshaped to separate out the per-node
-                    # contributions, but cannot be summed over until after full
-                    # tree evaluation.
-                    # nodeFcs = (numNodes, P, nelem, natom, 3)
-
-                    if useDask:
-                        # nodeFcs = dask.delayed(reshapeFcs, nout=numNodes)(
-                        #     stackedFcs, numNodes, P
-                        # )
-
-                        nelem = stackedFcs.shape[0]
-                        natom = stackedFcs.shape[1]
-
-                        nodeFcs = stackedFcs.reshape(
-                            nelem, natom, 3, P, numNodes
+                        treeArgs.append(
+                            (engDot, fcsDot, indexCopy[svName][elem][ii].pop())
                         )
 
-                        nodeFcs = np.moveaxis(nodeFcs, -1, 0)
-                        nodeFcs = np.moveaxis(nodeFcs, -1, 1)
+                taskArgs.append(treeArgs)
 
-                    else:
-                        nodeFcs = reshapeFcs(stackedFcs, numNodes, P)
+        import pickle
 
-                    unstackedValues = []
-                    # for val1, val2 in zip(nodeEng, nodeFcs):
-                    for valIdx in range(numNodes):
-                        val1 = nodeEng[valIdx]
-                        val2 = nodeFcs[valIdx]
-                        unstackedValues.append((val1, val2))
+        taskArgs = taskArgs[::-1]
 
-                    # Loop backwards over the list of values
-                    for tree in self.trees[::-1]:
-                        for svNode in tree.chemistryTrees[elem].svNodes[::-1]:
-                            # Only update the SVNode objects of the current type
-                            if svNode.description == svName:
-                                svNode.values = unstackedValues.pop()
+        perTreeResults = []
+        for structName in energies:
+            for ii, t in enumerate(self.trees):
+                args = taskArgs.pop()
 
-                    # Error check to see if there are leftovers
-                    leftovers = len(unstackedValues)
-                    if leftovers > 0:
-                        raise RuntimeError('Found leftover results.')
-
-            # If here, all of the nodes have been updated with their values
-            for tree in self.trees:
-                # future = dask.delayed(tree.eval, nout=2)(
-                future = tree.eval(
-                    useDask=useDask,
-                    # useDask=False,
-                    allSums=self.settings['allSums']
+                # perTreeResults.append(dask.delayed(parseAndEval, pure=True, nout=2)(t, args, P))
+                perTreeResults.append(
+                    dask.delayed(parseAndEval, pure=True, nout=2)(
+                        pickle.dumps(t), args, P
+                    )
                 )
 
-                # future[0] = (P,)
-                # future[1] = (P, N, 3)
+        # for structName in energies:
+        #     for svName in svEng[structName]:
+        #         for elem in svEng[structName][svName]:
+        #             # The list of stacked values for each tree for a given SV type
+        #             stackedEng = svEng[structName][svName][elem]
+        #             stackedFcs = svFcs[structName][svName][elem]
 
-                energies[structName].append(sum(future[0]))
-                forces[structName].append(future[1])
+        #             # Possible if svName wasn't used in any trees of elem
+        #             if stackedEng is None: continue
+
+        #             # Un-stack values for each element, and append to list
+        #             # numNodes = stackedEng.shape[0]//P
+        #             numNodes = self.numNodes[svName][elem]
+
+        #             # stackedEng will have the shape (Ne, P*Nn) and will need to
+        #             # be reshaped to separate out the per-node contributions,
+        #             # but can't be summed until after full tree evaluation
+
+        #             nelem = stackedEng.shape[0]
+
+        #             nodeEng = stackedEng.reshape((nelem, numNodes, P))
+        #             nodeEng = np.moveaxis(nodeEng, 1, 0)
+        #             nodeEng = np.moveaxis(nodeEng, -1, 1)
+
+        #             # stackedFcs has the shape (Ne, N, 3, P*Nn), where Ne is the
+        #             # number of atoms of the current element type and Nn is the
+        #             # number of  nodes of the given node type. Note that
+        #             # this needs to be reshaped to separate out the per-node
+        #             # contributions, but cannot be summed over until after full
+        #             # tree evaluation.
+        #             # nodeFcs = (numNodes, P, nelem, natom, 3)
+
+        #             if useDask:
+        #                 # nodeFcs = dask.delayed(reshapeFcs, nout=numNodes)(
+        #                 #     stackedFcs, numNodes, P
+        #                 # )
+
+        #                 nelem = stackedFcs.shape[0]
+        #                 natom = stackedFcs.shape[1]
+
+        #                 nodeFcs = stackedFcs.reshape(
+        #                     nelem, natom, 3, P, numNodes
+        #                 )
+
+        #                 nodeFcs = np.moveaxis(nodeFcs, -1, 0)
+        #                 nodeFcs = np.moveaxis(nodeFcs, -1, 1)
+
+        #             else:
+        #                 nodeFcs = reshapeFcs(stackedFcs, numNodes, P)
+
+        #             unstackedValues = []
+        #             # for val1, val2 in zip(nodeEng, nodeFcs):
+        #             for valIdx in range(numNodes):
+        #                 val1 = nodeEng[valIdx]
+        #                 val2 = nodeFcs[valIdx]
+        #                 unstackedValues.append((val1, val2))
+
+        #             # Loop backwards over the list of values
+        #             for tree in self.trees[::-1]:
+        #                 for svNode in tree.chemistryTrees[elem].svNodes[::-1]:
+        #                     # Only update the SVNode objects of the current type
+        #                     if svNode.description == svName:
+        #                         svNode.values = unstackedValues.pop()
+
+        #             # Error check to see if there are leftovers
+        #             leftovers = len(unstackedValues)
+        #             if leftovers > 0:
+        #                 raise RuntimeError('Found leftover results.')
+
+        #     # If here, all of the nodes have been updated with their values
+        #     for tree in self.trees:
+        #         # future = dask.delayed(tree.eval, nout=2)(
+        #         future = tree.eval(
+        #             useDask=useDask,
+        #             # useDask=False,
+        #             allSums=self.settings['allSums']
+        #         )
+
+        #         # future[0] = (P,)
+        #         # future[1] = (P, N, 3)
+
+        #         energies[structName].append(sum(future[0]))
+        #         forces[structName].append(future[1])
+
+        from dask.distributed import get_client
+        client = get_client()
+
+        perTreeResults = client.gather(client.compute(perTreeResults))
+
+        structNames = list(energies.keys())
+
+        for structName in structNames[::-1]:
+            for _ in range(len(self.trees)):
+                res = perTreeResults.pop()
+
+                energies[structName].append(sum(res[0]))
+                forces[structName].append(res[1])
+
+        for structName in structNames:
+            energies[structName] = energies[structName][::-1]
+            forces[structName] = forces[structName][::-1]
 
         return energies, forces
 
@@ -518,3 +595,34 @@ def buildSVNodePool(database):
         )
 
     return svNodePool
+    
+def parseAndEval(tree, listOfArgs, P):
+
+    import pickle
+    tree = pickle.loads(tree)
+
+    # indexers[sv][el][i] = list of indices for svEng[*][sv][el] for tree i
+
+    for svNode, argTup in zip(tree.svNodes, listOfArgs):
+        eng = argTup[0]
+        fcs = argTup[1]
+        idx = argTup[2]
+
+        Ne = eng.shape[0]
+        Nn = eng.shape[1] // P
+
+        eng = eng.reshape((Ne, Nn, P))
+        eng = np.moveaxis(eng, 1, 0)
+        eng = np.moveaxis(eng, -1, 1)
+
+        Na = fcs.shape[1]
+
+        fcs = fcs.reshape(Ne, Na, 3, P, Nn)
+        fcs = np.moveaxis(fcs, -1, 0)
+        fcs = np.moveaxis(fcs, -1, 1)
+
+        svNode.values = (eng[idx], fcs[idx])
+
+    result = tree.eval(useDask=False, allSums=False)
+
+    return result
