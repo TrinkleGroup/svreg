@@ -222,7 +222,9 @@ def main(client, settings):
 
         print('Finished setting up forces', time.time() - start, flush=True)
 
-        energies, forces = regressor.evaluateTrees(svEng, svFcs, N)
+        energies, forces = regressor.evaluateTrees(
+            svEng, svFcs, N, database.trueValues
+        )
 
         print('Finished evaluating trees', time.time() - start, flush=True)
 
@@ -497,13 +499,6 @@ def computeErrors(refStruct, energies, forces, database, useDask=True):
 
     keys = list(energies.keys())
 
-    def fcsErr(fcs, tv):
-        # return np.average(abs(sum(fcs) - tv), axis=(1,2))
-        return np.average(abs(fcs - tv), axis=(1,2))
-
-    def engErr(engS, engR, nS, nR, tv):
-        return abs((engS/nS - engR/nR) - tv)
-
     def engFcsErr(engS, engR, nS, nR, tvE, fcs, tvF):
         eErr = abs((engS/nS - engR/nR) - tvE)
         fErr = np.average(abs(fcs - tvF), axis=(1,2))
@@ -516,16 +511,15 @@ def computeErrors(refStruct, energies, forces, database, useDask=True):
 
     errors = []
     for treeNum in range(numTrees):
-        treeResults = []
         for structName in sorted(keys):
 
-            # structEng  = energies[structName][treeNum]
-            # structEng /= natoms[structName]
+            structEng  = energies[structName][treeNum]
+            structEng /= natoms[structName]
 
-            # refEng  = energies[refStruct][treeNum]
-            # refEng /= natoms[refStruct]
+            refEng  = energies[refStruct][treeNum]
+            refEng /= natoms[refStruct]
 
-            # ediff = structEng - refEng
+            ediff = structEng - refEng
 
             # Stored true values should already be per-atom energies
             # Note that if the database alreayd did subtract off a reference
@@ -533,7 +527,7 @@ def computeErrors(refStruct, energies, forces, database, useDask=True):
             trueEdiff = trueValues[structName]['energy']
             trueEdiff -= trueValues[refStruct]['energy']
 
-            # engErrors = abs(ediff - trueEdiff)
+            engErrors = abs(ediff - trueEdiff)
 
             # engErrors = engErr(
             #     energies[structName][treeNum], natoms[structName],
@@ -541,19 +535,20 @@ def computeErrors(refStruct, energies, forces, database, useDask=True):
             #     trueEdiff
             # )
 
-            fcs = forces[structName][treeNum]
+            # fcs = forces[structName][treeNum]
+            fcsErrors = forces[structName][treeNum]
 
             # fcsErrors = dask.delayed(fcsErr)(
             #     fcs, trueValues[structName]['forces']
             # )
 
-            engErrors, fcsErrors = dask.delayed(engFcsErr, nout=2)(
-                energies[structName][treeNum], natoms[structName],
-                energies[refStruct][treeNum], natoms[refStruct],
-                trueEdiff,
-                fcs,
-                trueValues[structName]['forces']
-            )
+            # engErrors, fcsErrors = dask.delayed(engFcsErr, nout=2)(
+            #     energies[structName][treeNum], natoms[structName],
+            #     energies[refStruct][treeNum], natoms[refStruct],
+            #     trueEdiff,
+            #     fcs,
+            #     trueValues[structName]['forces']
+            # )
 
             # fcsErrors = np.average(
             #     abs(sum(fcs) - trueValues[structName]['forces']), axis=(1,2)
