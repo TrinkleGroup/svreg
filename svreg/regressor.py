@@ -609,6 +609,7 @@ def parseAndEval(tree, listOfArgs, P):
         idx = argTup[2]
 
         # TODO: I could probably do the reshapes before passing to workers
+        # TODO: should I convert to a numpy array here?
 
         Ne = eng.shape[0]
         Nn = eng.shape[1] // P

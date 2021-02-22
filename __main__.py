@@ -501,6 +501,15 @@ def computeErrors(refStruct, energies, forces, database, useDask=True):
         # return np.average(abs(sum(fcs) - tv), axis=(1,2))
         return np.average(abs(fcs - tv), axis=(1,2))
 
+    def engErr(engS, engR, nS, nR, tv):
+        return abs((engS/nS - engR/nR) - tv)
+
+    def engFcsErr(engS, engR, nS, nR, tvE, fcs, tvF):
+        eErr = abs((engS/nS - engR/nR) - tvE)
+        fErr = np.average(abs(fcs - tvF), axis=(1,2))
+
+        return eErr, fErr
+
     if useDask:
         from dask.distributed import get_client
         client = get_client()
@@ -510,13 +519,13 @@ def computeErrors(refStruct, energies, forces, database, useDask=True):
         treeResults = []
         for structName in sorted(keys):
 
-            structEng  = energies[structName][treeNum]
-            structEng /= natoms[structName]
+            # structEng  = energies[structName][treeNum]
+            # structEng /= natoms[structName]
 
-            refEng  = energies[refStruct][treeNum]
-            refEng /= natoms[refStruct]
+            # refEng  = energies[refStruct][treeNum]
+            # refEng /= natoms[refStruct]
 
-            ediff = structEng - refEng
+            # ediff = structEng - refEng
 
             # Stored true values should already be per-atom energies
             # Note that if the database alreayd did subtract off a reference
@@ -524,12 +533,26 @@ def computeErrors(refStruct, energies, forces, database, useDask=True):
             trueEdiff = trueValues[structName]['energy']
             trueEdiff -= trueValues[refStruct]['energy']
 
-            engErrors = abs(ediff - trueEdiff)
+            # engErrors = abs(ediff - trueEdiff)
+
+            # engErrors = engErr(
+            #     energies[structName][treeNum], natoms[structName],
+            #     energies[refStruct][treeNum], natoms[refStruct],
+            #     trueEdiff
+            # )
 
             fcs = forces[structName][treeNum]
 
-            fcsErrors = dask.delayed(fcsErr)(
-                fcs, trueValues[structName]['forces']
+            # fcsErrors = dask.delayed(fcsErr)(
+            #     fcs, trueValues[structName]['forces']
+            # )
+
+            engErrors, fcsErrors = dask.delayed(engFcsErr, nout=2)(
+                energies[structName][treeNum], natoms[structName],
+                energies[refStruct][treeNum], natoms[refStruct],
+                trueEdiff,
+                fcs,
+                trueValues[structName]['forces']
             )
 
             # fcsErrors = np.average(

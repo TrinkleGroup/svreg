@@ -48,8 +48,8 @@ class SVEvaluator:
             return tup[0].dot(tup[1])
 
         if useDask:
-            # results = [dask.delayed(dot)(t) for t in tasks]
-            results = [t[0].dot(t[1]) for t in tasks]
+            results = [dask.delayed(dot)(t) for t in tasks]
+            # results = [t[0].dot(t[1]) for t in tasks]
 
             # client = get_client()
             # results = client.compute(results)
