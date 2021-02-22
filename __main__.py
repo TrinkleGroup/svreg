@@ -498,7 +498,8 @@ def computeErrors(refStruct, energies, forces, database, useDask=True):
     keys = list(energies.keys())
 
     def fcsErr(fcs, tv):
-        return np.average(abs(sum(fcs) - tv), axis=(1,2))
+        # return np.average(abs(sum(fcs) - tv), axis=(1,2))
+        return np.average(abs(fcs - tv), axis=(1,2))
 
     if useDask:
         from dask.distributed import get_client

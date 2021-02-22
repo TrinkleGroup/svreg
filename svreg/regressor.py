@@ -313,10 +313,10 @@ class SVRegressor:
         #         energies[structName].append(sum(future[0]))
         #         forces[structName].append(future[1])
 
-        from dask.distributed import get_client
-        client = get_client()
+        # from dask.distributed import get_client
+        # client = get_client()
 
-        perTreeResults = client.gather(client.compute(perTreeResults))
+        # perTreeResults = client.gather(client.compute(perTreeResults))
 
         structNames = list(energies.keys())
 
@@ -324,7 +324,7 @@ class SVRegressor:
             for _ in range(len(self.trees)):
                 res = perTreeResults.pop()
 
-                energies[structName].append(sum(res[0]))
+                energies[structName].append(res[0])
                 forces[structName].append(res[1])
 
         for structName in structNames:
@@ -608,6 +608,8 @@ def parseAndEval(tree, listOfArgs, P):
         fcs = argTup[1]
         idx = argTup[2]
 
+        # TODO: I could probably do the reshapes before passing to workers
+
         Ne = eng.shape[0]
         Nn = eng.shape[1] // P
 
@@ -623,6 +625,6 @@ def parseAndEval(tree, listOfArgs, P):
 
         svNode.values = (eng[idx], fcs[idx])
 
-    result = tree.eval(useDask=False, allSums=False)
+    engResult, fcsResult = tree.eval(useDask=False, allSums=False)
 
-    return result
+    return sum(engResult), sum(fcsResult)
