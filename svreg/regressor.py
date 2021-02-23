@@ -222,11 +222,11 @@ class SVRegressor:
             for ii, t in enumerate(self.trees):
                 args = taskArgs.pop()
 
+                # perTreeResults.append(dask.delayed(parseAndEval, pure=True, nout=2)(t, args, P))
                 perTreeResults.append(
                     dask.delayed(parseAndEval, pure=True, nout=2)(
                         pickle.dumps(t), args, P,
-                        trueValues[structName]['forces'],
-                        allSums=self.settings['allSums']
+                        trueValues[structName]['forces']
                     )
                 )
 
@@ -236,7 +236,7 @@ class SVRegressor:
         from dask.distributed import get_client
         client = get_client()
 
-        perTreeResults = client.gather(client.compute(perTreeResults))
+        perTreeResults = client.gather(client.compute(perTreeResults, priority=-100))
 
         structNames = list(energies.keys())
 
@@ -516,7 +516,7 @@ def buildSVNodePool(database):
 
     return svNodePool
     
-def parseAndEval(tree, listOfArgs, P, tvF, allSums=False):
+def parseAndEval(tree, listOfArgs, P, tvF):
 
     import pickle
     tree = pickle.loads(tree)
@@ -538,24 +538,16 @@ def parseAndEval(tree, listOfArgs, P, tvF, allSums=False):
         eng = np.moveaxis(eng, 1, 0)
         eng = np.moveaxis(eng, -1, 1)
 
+        Na = fcs.shape[1]
 
-        if allSums:
-            Na = fcs.shape[0]
-            fcs = fcs.reshape(Na, 3, P, Nn)
-        else:
-            Na = fcs.shape[1]
-            fcs = fcs.reshape(Ne, Na, 3, P, Nn)
-
+        fcs = fcs.reshape(Ne, Na, 3, P, Nn)
         fcs = np.moveaxis(fcs, -1, 0)
         fcs = np.moveaxis(fcs, -1, 1)
 
         svNode.values = (eng[idx], fcs[idx])
 
-    engResult, fcsResult = tree.eval(useDask=False, allSums=allSums)
+    engResult, fcsResult = tree.eval(useDask=False, allSums=False)
 
-    if allSums:
-        fcsErrors = np.average(abs(sum(fcsResult) - tvF), axis=(1,2))
-    else:
-        fcsErrors = np.average(abs(sum(fcsResult) - tvF), axis=(1,2))
+    fcsErrors = np.average(abs(sum(fcsResult) - tvF), axis=(1,2))
 
     return sum(engResult), fcsErrors

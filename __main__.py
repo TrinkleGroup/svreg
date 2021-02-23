@@ -12,9 +12,9 @@ import numpy as np
 
 from dask_mpi import initialize
 initialize(
-    nthreads=6,
-    memory_limit='4 GB',
-    # interface='ipogif0',
+    nthreads=16,
+    memory_limit='16 GB',
+    interface='ipogif0',
     local_directory=os.getcwd()
 )
 
@@ -208,7 +208,7 @@ def main(client, settings):
         # Continue optimization of currently active trees
         populationDict, rawPopulations = regressor.generatePopulationDict(N)
 
-        svEng = evaluator.evaluate(populationDict, 'energy', useDask=False)
+        svEng = evaluator.evaluate(populationDict, 'energy', regressor.numNodes, useDask=False)
         
         print('Evaluated energies locally', time.time() - start, flush=True)
 
@@ -218,7 +218,7 @@ def main(client, settings):
 
         print('Scattered population', time.time() - start, flush=True)
 
-        svFcs = evaluator.evaluate(populationDict, 'forces')
+        svFcs = evaluator.evaluate(populationDict, 'forces', regressor.numNodes)
 
         print('Finished setting up forces', time.time() - start, flush=True)
 
