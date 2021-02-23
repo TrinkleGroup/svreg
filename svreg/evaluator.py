@@ -46,7 +46,13 @@ class SVEvaluator:
                     pop = populationDict[svName][elem]
 
 
-                    tasks.append((sv, pop))
+                    if useDask:
+                        if 'ffg' in svName:
+                            ffgTasks.append((sv, pop))
+                        else:
+                            rhoTasks.append((sv, pop))
+                    else:
+                        tasks.append((sv, pop))
 
         def dot(tup):
             return tup[0].dot(tup[1])

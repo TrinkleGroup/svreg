@@ -226,7 +226,8 @@ class SVRegressor:
                 perTreeResults.append(
                     dask.delayed(parseAndEval, pure=True, nout=2)(
                         pickle.dumps(t), args, P,
-                        trueValues[structName]['forces']
+                        trueValues[structName]['forces'],
+                        allSums=self.settings['allSums']
                     )
                 )
 
@@ -516,7 +517,7 @@ def buildSVNodePool(database):
 
     return svNodePool
     
-def parseAndEval(tree, listOfArgs, P, tvF):
+def parseAndEval(tree, listOfArgs, P, tvF, allSums=False):
 
     import pickle
     tree = pickle.loads(tree)
@@ -538,15 +539,19 @@ def parseAndEval(tree, listOfArgs, P, tvF):
         eng = np.moveaxis(eng, 1, 0)
         eng = np.moveaxis(eng, -1, 1)
 
-        Na = fcs.shape[1]
+        if allSums:
+            Na = fcs.shape[0]
+            fcs = fcs.reshape(Na, 3, P, Nn)
+        else:
+            Na = fcs.shape[1]
+            fcs = fcs.reshape(Ne, Na, 3, P, Nn)
 
-        fcs = fcs.reshape(Ne, Na, 3, P, Nn)
         fcs = np.moveaxis(fcs, -1, 0)
         fcs = np.moveaxis(fcs, -1, 1)
 
         svNode.values = (eng[idx], fcs[idx])
 
-    engResult, fcsResult = tree.eval(useDask=False, allSums=False)
+    engResult, fcsResult = tree.eval(useDask=False, allSums=allSums)
 
     fcsErrors = np.average(abs(sum(fcsResult) - tvF), axis=(1,2))
 
