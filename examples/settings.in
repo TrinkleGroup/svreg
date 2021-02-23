@@ -28,7 +28,7 @@ overwrite           True
 #  Regressor settings
 ################################################################################
 
-allSums                 False
+allSums                 True
 costFxn                 MAE
 
 optimizer               CMA
