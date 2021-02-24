@@ -372,6 +372,16 @@ def polish(client, settings):
         energies = {struct: [] for struct in database.attrs['structNames']}
         forces   = {struct: [] for struct in database.attrs['structNames']}
 
+        for structName in database.attrs['structNames'][::-1]:
+            for _ in range(len(regressor.trees)):
+                res = perTreeResults.pop()
+
+                energies[structName].append(res[0])
+                forces[structName].append(res[1])
+
+            energies[structName] = energies[structName][::-1]
+            forces[structName] = forces[structName][::-1]
+
         # Save the (per-struct) errors and the single-value costs
         errors = computeErrors(
             settings['refStruct'], energies, forces, database
