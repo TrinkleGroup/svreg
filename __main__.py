@@ -363,9 +363,14 @@ def polish(client, settings):
 
         svFcs = evaluator.evaluate(populationDict, 'forces')
 
-        energies, forces = regressor.evaluateTrees(
+        perTreeResults = regressor.evaluateTrees(
             svEng, svFcs, N, database.trueValues
         )
+
+        perTreeResults = client.gather(client.compute(perTreeResults))
+
+        energies = {struct: [] for struct in database.attrs['structNames']}
+        forces   = {struct: [] for struct in database.attrs['structNames']}
 
         # Save the (per-struct) errors and the single-value costs
         errors = computeErrors(
