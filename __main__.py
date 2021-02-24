@@ -222,9 +222,24 @@ def main(client, settings):
 
         print('Finished setting up forces', time.time() - start, flush=True)
 
-        energies, forces = regressor.evaluateTrees(
+        perTreeResults = regressor.evaluateTrees(
             svEng, svFcs, N, database.trueValues
         )
+
+        perTreeResults = client.gather(client.compute(perTreeResults))
+
+        energies = {struct: [] for struct in database.attrs['structNames']}
+        forces   = {struct: [] for struct in database.attrs['structNames']}
+
+        for structName in database.attrs['structNames'][::-1]:
+            for _ in range(len(regressor.trees)):
+                res = perTreeResults.pop()
+
+                energies[structName].append(res[0])
+                forces[structName].append(res[1])
+
+            energies[structName] = energies[structName][::-1]
+            forces[structName] = forces[structName][::-1]
 
         print('Finished evaluating trees', time.time() - start, flush=True)
 
@@ -348,7 +363,9 @@ def polish(client, settings):
 
         svFcs = evaluator.evaluate(populationDict, 'forces')
 
-        energies, forces = regressor.evaluateTrees(svEng, svFcs, N)
+        energies, forces = regressor.evaluateTrees(
+            svEng, svFcs, N, database.trueValues
+        )
 
         # Save the (per-struct) errors and the single-value costs
         errors = computeErrors(
@@ -384,7 +401,7 @@ def polish(client, settings):
 
                 entry.cost = opt.result.fbest
                 entry.bestParams = opt.result.xbest
-                entry.bestErrors = errors
+                entry.bestErrors = errors[0]
 
             if (optStep % 10) == 0:
                 pickle.dump(
@@ -499,16 +516,6 @@ def computeErrors(refStruct, energies, forces, database, useDask=True):
 
     keys = list(energies.keys())
 
-    def engFcsErr(engS, engR, nS, nR, tvE, fcs, tvF):
-        eErr = abs((engS/nS - engR/nR) - tvE)
-        fErr = np.average(abs(fcs - tvF), axis=(1,2))
-
-        return eErr, fErr
-
-    if useDask:
-        from dask.distributed import get_client
-        client = get_client()
-
     errors = []
     for treeNum in range(numTrees):
         for structName in sorted(keys):
@@ -529,45 +536,10 @@ def computeErrors(refStruct, energies, forces, database, useDask=True):
 
             engErrors = abs(ediff - trueEdiff)
 
-            # engErrors = engErr(
-            #     energies[structName][treeNum], natoms[structName],
-            #     energies[refStruct][treeNum], natoms[refStruct],
-            #     trueEdiff
-            # )
-
-            # fcs = forces[structName][treeNum]
             fcsErrors = forces[structName][treeNum]
-
-            # fcsErrors = dask.delayed(fcsErr)(
-            #     fcs, trueValues[structName]['forces']
-            # )
-
-            # engErrors, fcsErrors = dask.delayed(engFcsErr, nout=2)(
-            #     energies[structName][treeNum], natoms[structName],
-            #     energies[refStruct][treeNum], natoms[refStruct],
-            #     trueEdiff,
-            #     fcs,
-            #     trueValues[structName]['forces']
-            # )
-
-            # fcsErrors = np.average(
-            #     abs(sum(fcs) - trueValues[structName]['forces']), axis=(1,2)
-            # )
-
-            # treeResults.append(engErrors)
-            # treeResults.append(fcsErrors)
 
             errors.append(engErrors)
             errors.append(fcsErrors)
-
-        # errors += client.compute(treeResults)
-
-    if useDask:
-        from dask.distributed import get_client
-        client = get_client()
-
-        errors = client.gather(client.compute(errors))
-        # errors = client.gather(errors)
 
     errors = np.stack(errors).T
     errors = np.split(errors, numTrees, axis=1)

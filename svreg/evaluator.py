@@ -45,7 +45,6 @@ class SVEvaluator:
                     sv = self.database[struct][svName][elem][evalType]
                     pop = populationDict[svName][elem]
 
-
                     if useDask:
                         if 'ffg' in svName:
                             ffgTasks.append((sv, pop))

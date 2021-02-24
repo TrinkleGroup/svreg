@@ -153,59 +153,52 @@ class SVRegressor:
                 the population of results.
 
         Return:
-            energies, forces(dict):
+            energies, forces (dict):
                 {structName: [tree.eval() for tree in self.trees]}
         """
 
-        energies = {struct: [] for struct in svEng.keys()}
-        forces   = {struct: [] for struct in svFcs.keys()}
-
-        def reshapeFcs(fcs, numNodes, P):
-            nelem = fcs.shape[0]
-            natom = fcs.shape[1]
-
-            fcs = fcs.reshape((nelem, natom, 3, P, numNodes))
-            fcs = np.moveaxis(fcs, -1, 0)
-            fcs = np.moveaxis(fcs, -1, 1)
-
-            return fcs
+        structNames = list(svEng.keys())
+        svNames     = list(svEng[structNames[0]].keys())
+        
+        # NOTE: elements must be sorted here to match assumed ordering of
+        # tree.svNodes
+        elements = sorted(list(svEng[structNames[0]][svNames[0]].keys()))
 
         # indexers[sv][el][i] = list of indices for svEng[*][sv][el] for tree i
         indexers = {}
 
-        struct0 = list(svEng.keys())[0]
+        struct0 = structNames[0]
         # Build dictionary of indexers for each SV
         for svName in svEng[struct0]:
             indexers[svName] = {}
-            for elem in svEng[struct0][svName]:
+            for elem in elements:
                 indexers[svName][elem]  = []
 
                 counter = 0
 
-                # Loop backwards over the list of values
                 for tree in self.trees:
                     treeIndices = []
-                    # for svNode in tree.chemistryTrees[elem].svNodes:
                     for svNode in tree.chemistryTrees[elem].svNodes:
                         # Only update the SVNode objects of the current type
                         if svNode.description == svName:
                             treeIndices.append(counter)
                             counter += 1
 
+                    # Reverse list here since we'll be popping from it later
                     indexers[svName][elem].append(treeIndices[::-1])
 
         taskArgs = []
-        for structName in energies:
+        for struct in structNames:
             indexCopy = deepcopy(indexers)
 
             for ii, tree in enumerate(self.trees):
                 treeArgs = []
-                for elem in svEng[structName][svName]:
+                for elem in elements:
                     for svNode in tree.chemistryTrees[elem].svNodes:
                         svName = svNode.description
 
-                        engDot = svEng[structName][svName][elem]
-                        fcsDot = svFcs[structName][svName][elem]
+                        engDot = svEng[struct][svName][elem]
+                        fcsDot = svFcs[struct][svName][elem]
 
                         treeArgs.append(
                             (engDot, fcsDot, indexCopy[svName][elem][ii].pop())
@@ -215,44 +208,34 @@ class SVRegressor:
 
         import pickle
 
+        # TODO: it would be a lot less error prone if I just used a 1D dict
+        # the key was a concatenated string of struct_tree or something
+
         taskArgs = taskArgs[::-1]
 
         perTreeResults = []
-        for structName in energies:
-            for ii, t in enumerate(self.trees):
+        for structName in structNames:
+            for t in self.trees:
                 args = taskArgs.pop()
 
-                # perTreeResults.append(dask.delayed(parseAndEval, pure=True, nout=2)(t, args, P))
-                perTreeResults.append(
-                    dask.delayed(parseAndEval, pure=True, nout=2)(
-                        pickle.dumps(t), args, P,
-                        trueValues[structName]['forces'],
-                        allSums=self.settings['allSums']
+                if useDask:
+                    perTreeResults.append(
+                        dask.delayed(parseAndEval, pure=True, nout=2)(
+                            pickle.dumps(t), args, P,
+                            trueValues[structName]['forces'],
+                            allSums=self.settings['allSums']
+                        )
                     )
-                )
+                else:
+                    perTreeResults.append(
+                        parseAndEval(
+                            pickle.dumps(t), args, P,
+                            trueValues[structName]['forces'],
+                            allSums=self.settings['allSums']
+                        )
+                    )
 
-        # TODO: convert to force errors before sending back?
-        # TODO: compute energy errors locally
-
-        from dask.distributed import get_client
-        client = get_client()
-
-        perTreeResults = client.gather(client.compute(perTreeResults, priority=-100))
-
-        structNames = list(energies.keys())
-
-        for structName in structNames[::-1]:
-            for _ in range(len(self.trees)):
-                res = perTreeResults.pop()
-
-                energies[structName].append(res[0])
-                forces[structName].append(res[1])
-
-        for structName in structNames:
-            energies[structName] = energies[structName][::-1]
-            forces[structName] = forces[structName][::-1]
-
-        return energies, forces
+        return perTreeResults 
 
 
     def initializeOptimizers(self):
@@ -423,7 +406,6 @@ class SVRegressor:
 
                     self.numNodes[svName][elem] += 1
 
-        futures = []
         # Stack each group
         for svName in populationDict:
             for elem, popList in populationDict[svName].items():
@@ -524,6 +506,9 @@ def parseAndEval(tree, listOfArgs, P, tvF, allSums=False):
 
     # indexers[sv][el][i] = list of indices for svEng[*][sv][el] for tree i
 
+    # TODO: tree.svNodes is orderd by element type, so if listOfArgs isn't in
+    # the same order I think this would be a bug. But if it were a bug, it would
+    # also affect the single-tree polishes
     for svNode, argTup in zip(tree.svNodes, listOfArgs):
         eng = argTup[0]
         fcs = argTup[1]
