@@ -298,24 +298,14 @@ def polish(client, settings):
     treeMo.nodes = [
         FunctionNode('add'),
         deepcopy(regressor.svNodePool[0]),
-        FunctionNode('add'),
         deepcopy(regressor.svNodePool[1]),
-        FunctionNode('add'),
-        deepcopy(regressor.svNodePool[2]),
-        FunctionNode('add'),
-        deepcopy(regressor.svNodePool[3]),
-        deepcopy(regressor.svNodePool[4]),
     ]
 
     treeTi = SVTree()
     treeTi.nodes = [
         FunctionNode('add'),
-        deepcopy(regressor.svNodePool[0]),
         FunctionNode('add'),
-        deepcopy(regressor.svNodePool[1]),
-        FunctionNode('add'),
-        deepcopy(regressor.svNodePool[2]),
-        FunctionNode('add'),
+        deepcopy(regressor.svNodePool[3]),
         deepcopy(regressor.svNodePool[3]),
         deepcopy(regressor.svNodePool[4]),
     ]

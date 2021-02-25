@@ -204,6 +204,10 @@ class SVRegressor:
                             (engDot, fcsDot, indexCopy[svName][elem][ii].pop())
                         )
 
+                        # TODO: I think there's a bug here. Even though the
+                        # correct index is used, it's going to go to the wrong
+                        # node
+
                 taskArgs.append(treeArgs)
 
         import pickle
@@ -503,19 +507,13 @@ def parseAndEval(tree, listOfArgs, P, tvF, allSums=False):
 
     import pickle
     tree = pickle.loads(tree)
-
     # indexers[sv][el][i] = list of indices for svEng[*][sv][el] for tree i
 
-    # TODO: tree.svNodes is orderd by element type, so if listOfArgs isn't in
-    # the same order I think this would be a bug. But if it were a bug, it would
-    # also affect the single-tree polishes
+    print([(n.description, t[2]) for (n, t) in zip(tree.svNodes, listOfArgs)])
     for svNode, argTup in zip(tree.svNodes, listOfArgs):
         eng = argTup[0]
         fcs = argTup[1]
         idx = argTup[2]
-
-        # TODO: I could probably do the reshapes before passing to workers
-        # TODO: should I convert to a numpy array here?
 
         Ne = eng.shape[0]
         Nn = eng.shape[1] // P
