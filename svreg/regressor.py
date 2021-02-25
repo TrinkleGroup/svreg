@@ -509,7 +509,6 @@ def parseAndEval(tree, listOfArgs, P, tvF, allSums=False):
     tree = pickle.loads(tree)
     # indexers[sv][el][i] = list of indices for svEng[*][sv][el] for tree i
 
-    print([(n.description, t[2]) for (n, t) in zip(tree.svNodes, listOfArgs)])
     for svNode, argTup in zip(tree.svNodes, listOfArgs):
         eng = argTup[0]
         fcs = argTup[1]
@@ -522,15 +521,19 @@ def parseAndEval(tree, listOfArgs, P, tvF, allSums=False):
         eng = np.moveaxis(eng, 1, 0)
         eng = np.moveaxis(eng, -1, 1)
 
+        # fcs shape: (Ne, Na, 3, P*Nn)
+
         if allSums:
             Na = fcs.shape[0]
-            fcs = fcs.reshape(Na, 3, P, Nn)
+            fcs = fcs.reshape(Na, 3, Nn, P)
         else:
             Na = fcs.shape[1]
-            fcs = fcs.reshape(Ne, Na, 3, P, Nn)
+            fcs = fcs.reshape(Ne, Na, 3, Nn, P)
 
-        fcs = np.moveaxis(fcs, -1, 0)
+        fcs = np.moveaxis(fcs, -2, 0)
         fcs = np.moveaxis(fcs, -1, 1)
+
+        # fcs shape: (Nn, P, Ne, Na, 3)
 
         svNode.values = (eng[idx], fcs[idx])
 
