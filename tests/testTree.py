@@ -104,11 +104,19 @@ class Test_SVTree(unittest.TestCase):
             ]
         )
 
+        tree5 = SVTree(
+            nodes=[
+                deepcopy(self.svNodePool[0]),
+            ]
+        )
+
+
         self.assertTrue(self.tree == tree1)
 
         self.assertFalse(self.tree == tree2)
         self.assertFalse(self.tree == tree3)
         self.assertFalse(self.tree == tree4)
+        self.assertFalse(self.tree == tree5)
 
 
 

@@ -68,6 +68,9 @@ class SVTree(list):
             otherCounts[name] = otherCounts.get(name, 0) + 1
 
         for name in selfCounts:
+            if name not in otherCounts:
+                return False
+
             if selfCounts[name] != otherCounts[name]:
                 return False
 
