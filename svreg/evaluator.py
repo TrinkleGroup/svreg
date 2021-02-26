@@ -12,7 +12,6 @@ class SVEvaluator:
         self.settings   = settings
 
   
-    # @profile
     def evaluate(self, populationDict, evalType, useDask=True):
         """
         Evaluates all of the populations on all of their corresponding structure
@@ -30,7 +29,7 @@ class SVEvaluator:
         structNames = list(self.database.attrs['structNames'])
         allSVnames  = list(self.database.attrs['svNames'])
         elements    = list(self.database.attrs['elements'])
-        
+
         tasks = []
 
         ffgTasks = []

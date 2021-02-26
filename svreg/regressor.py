@@ -1,5 +1,6 @@
 import json
 import random
+import pickle
 import numpy as np
 from copy import deepcopy
 
@@ -10,9 +11,6 @@ from svreg.tree import SVTree
 from svreg.tree import MultiComponentTree as MCTree
 
 import dask
-
-# TODO: may be able to merge this into ga.py, it really only initializes
-# trees/optimizers and evaluates the trees.
 
 class SVRegressor:
     """
@@ -204,16 +202,7 @@ class SVRegressor:
                             (engDot, fcsDot, indexCopy[svName][elem][ii].pop())
                         )
 
-                        # TODO: I think there's a bug here. Even though the
-                        # correct index is used, it's going to go to the wrong
-                        # node
-
                 taskArgs.append(treeArgs)
-
-        import pickle
-
-        # TODO: it would be a lot less error prone if I just used a 1D dict
-        # the key was a concatenated string of struct_tree or something
 
         taskArgs = taskArgs[::-1]
 
@@ -251,23 +240,6 @@ class SVRegressor:
             )
             for tree in self.trees
         ]
-
-
-    # def tournament(self):
-    #     """
-    #     Finds the lowest cost individual from the current set of trees
-
-    #     Return:
-    #         A deep copy (to avoid multiple trees pointing to the same nodes) of
-    #         the best individual.
-    #     """
-
-    #     # contenders = random.sample(range(len(self.trees)), len(self.trees))
-    #     contenders = [random.choice(range(len(self.trees)))]
-
-    #     costs = [self.trees[idx].cost for idx in contenders]
-
-    #     return deepcopy(self.trees[np.argmin(costs)])
 
 
     def tournament(self, topN):
@@ -494,7 +466,6 @@ def buildSVNodePool(database):
                 numParams=numParams,
                 restrictions=restr,
                 paramRanges=pRanges,
-                # inputTypes=database.attrs[svName]['inputTypes']
                 inputTypes=json.loads(
                     database.attrs[svName]['inputTypes'].decode('utf-8').replace("'", '"')
                 )
@@ -507,7 +478,6 @@ def parseAndEval(tree, listOfArgs, P, tvF, allSums=False):
 
     import pickle
     tree = pickle.loads(tree)
-    # indexers[sv][el][i] = list of indices for svEng[*][sv][el] for tree i
 
     for svNode, argTup in zip(tree.svNodes, listOfArgs):
         eng = argTup[0]

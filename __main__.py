@@ -95,7 +95,6 @@ def main(client, settings):
     start = time.time()
     fxnEvals = 1
     while numCompletedTrees < maxNumTrees:
-    # while fxnEvals < 4:
 
         # Remove any converged trees, update population, and print new results
         staleIndices, messages = regressor.checkStale()
@@ -325,11 +324,6 @@ def polish(client, settings):
 
     for tree in regressor.trees:
         print(tree)
-
-        # treePath = os.path.join(savePath, str(tree))
-
-        # if not os.path.isdir(treePath):
-        #     os.mkdir(treePath)
 
     N = settings['optimizerPopSize']
 
@@ -561,8 +555,6 @@ if __name__ == '__main__':
 
     # Load settings
     settings = Settings.from_file(args.settings)
-    # settings['PROCS_PER_PHYS_NODE'] = args.procs_per_node
-    # settings['PROCS_PER_MANAGER'] = args.procs_per_manager
 
     random.seed(settings['seed'])
     np.random.seed(settings['seed'])
