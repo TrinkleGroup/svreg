@@ -12,7 +12,7 @@ import numpy as np
 
 from dask_mpi import initialize
 initialize(
-    nthreads=6,
+    nthreads=2,
     memory_limit='4 GB',
     # interface='ipogif0',
     local_directory=os.getcwd()
@@ -29,6 +29,7 @@ from svreg.regressor import SVRegressor
 from svreg.evaluator import SVEvaluator
 from svreg.population import Population
 from svreg.functions import _function_map
+from svreg.tree import MultiComponentTree as MCTree
 
 ################################################################################
 # Parse all command-line arguments
@@ -36,6 +37,10 @@ parser = argparse.ArgumentParser()
 parser.add_argument(
     '-s', '--settings', type=str,
     help='The path to the settings file.'
+)
+parser.add_argument(
+    '-t', '--trees', type=str,
+    help='The path to a file containing the names of the trees to use.',
 )
 parser.add_argument(
     '-n', '--names', type=str,
@@ -65,6 +70,15 @@ def main(client, settings):
     costFxn = buildCostFunction(settings, len(database.attrs['natoms']))
 
     # Begin symbolic regression
+    if args.trees is not None:
+        with open(args.trees, 'r') as f:
+            treeNames = [s.strip() for s in f.readlines()]
+
+        regressor.trees = [
+            MCTree.from_str(t, database.attrs['elements'], regressor.svNodePool)
+            for t in treeNames
+        ]
+
     regressor.initializeTrees(elements=database.attrs['elements'])
     regressor.initializeOptimizers()
 
@@ -146,8 +160,21 @@ def main(client, settings):
 
                 treeName = str(newTree)
 
-                inArchive   = md5Hash(treeName) in archive
-                inReg       = md5Hash(treeName) in currentRegNames
+                inArchive = False
+                inReg = False
+
+                for t in regressor.trees:
+                    if newTree == t:
+                        inReg = True
+
+                for tname in archive:
+                    t = archive[tname].tree
+
+                    if newTree == t:
+                        inArchive = True
+
+                # inArchive   = md5Hash(treeName) in archive
+                # inReg       = md5Hash(treeName) in currentRegNames
 
                 if inArchive:
                     print("Already in archive:", newTree)
@@ -261,6 +288,9 @@ def main(client, settings):
         regressor.updateOptimizers(
             rawPopulations, costs, penalties
         )
+
+        # TODO: maybe this should log to a file instead of just printing; I'm
+        # not sure why BW seems to be dying sometimes
 
         printTreeCosts(
             fxnEvals,
