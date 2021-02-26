@@ -4,19 +4,6 @@ from dask.distributed import get_client
 
 import numpy as np
 
-from numba import jit
-
-@dask.delayed
-@jit(nopython=True)
-def jitDot(sv, pop):
-    return sv @ pop
-
-def futureEval(sv, pop):
-    return sv.dot(pop)
-
-@dask.delayed
-def delayedEval(sv, pop):
-    return sv.dot(pop)
 
 class SVEvaluator:
 
@@ -25,7 +12,6 @@ class SVEvaluator:
         self.settings   = settings
 
   
-    # @profile
     def evaluate(self, populationDict, evalType, useDask=True):
         """
         Evaluates all of the populations on all of their corresponding structure
@@ -43,8 +29,11 @@ class SVEvaluator:
         structNames = list(self.database.attrs['structNames'])
         allSVnames  = list(self.database.attrs['svNames'])
         elements    = list(self.database.attrs['elements'])
-        
+
         tasks = []
+
+        ffgTasks = []
+        rhoTasks = []
         for struct in structNames:
             for svName in allSVnames:
                 if svName not in populationDict: continue
@@ -55,17 +44,47 @@ class SVEvaluator:
                     sv = self.database[struct][svName][elem][evalType]
                     pop = populationDict[svName][elem]
 
-                    tasks.append((sv, pop))
+                    if useDask:
+                        if 'ffg' in svName:
+                            ffgTasks.append((sv, pop))
+                        else:
+                            rhoTasks.append((sv, pop))
+                    else:
+                        tasks.append((sv, pop))
 
         def dot(tup):
             return tup[0].dot(tup[1])
 
+        @dask.delayed
+        def ffgDot(tup):
+            return tup[0].dot(tup[1])
+
+        @dask.delayed
+        def rhoDot(tup):
+            return tup[0].dot(tup[1])
+
         if useDask:
-            results = [dask.delayed(dot)(t) for t in tasks]
-            # results = [t[0].dot(t[1]) for t in tasks]
+            ffgResults = [ffgDot(t) for t in ffgTasks]
+            rhoResults = [rhoDot(t) for t in rhoTasks]
 
             client = get_client()
-            results = client.compute(results)
+
+            ffgResults = client.compute(ffgResults, priority=100)
+
+            results = []
+            for struct in structNames[::-1]:
+                for svName in allSVnames[::-1]:
+                    if svName not in populationDict: continue
+
+                    for elem in elements[::-1]:
+                        if elem not in populationDict[svName]: continue
+
+                        if 'ffg' in svName:
+                            results.append(ffgResults.pop())
+                        else:
+                            results.append(rhoResults.pop())
+
+            results = results[::-1]
         else:
             results = [dot((np.array(t[0]), t[1])) for t in tasks]
 

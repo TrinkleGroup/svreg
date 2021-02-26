@@ -5,6 +5,8 @@ from gplearn.functions import _Function as _gp_Function
 
 import dask
 
+_trunc_thresh = 1e6
+
 _protected_sqrt = _gp_function_map['sqrt'].function
 _protected_log  = _gp_function_map['log'].function
 _protected_inverse = _gp_function_map['inv'].function
@@ -86,12 +88,17 @@ def _derivative_mul(a, b):
 #@dask.delayed
 def _derivative_exp(x):
     """Chain rule on exp(x) = exp(x)*(dx/dr)"""
-    return np.exp(x[0])[:, :, np.newaxis, np.newaxis]*x[1]
+    res = np.exp(x[0])[:, :, np.newaxis, np.newaxis]*x[1]
+    res[res > _trunc_thresh] = _trunc_thresh
+    return res
 
 
 #@dask.delayed
 def sigmoid(x):
-    return 1/(1+np.exp(-x))
+    denom = (1+np.exp(-x))
+    denom[denom > _trunc_thresh] = _trunc_thresh
+
+    return 1/denom
 
 
 #@dask.delayed
@@ -103,10 +110,13 @@ def _derivative_sigmoid(x):
 #@dask.delayed
 def splus(x):
     # Truncated softplus function
-    res = np.log(1+np.exp(x))
+    inner = 1+np.exp(x)
+    inner[inner > _trunc_thresh] = _trunc_thresh
 
-    badIndices = np.where(x > 1e6)
-    res[badIndices] = x[badIndices]
+    res = np.log(inner)
+
+    # badIndices = np.where(x > 1e6)
+    # res[badIndices] = x[badIndices]
 
     return res
 
@@ -116,10 +126,14 @@ def _derivative_splus(x):
     """
     Chain rule on splus() = splus'()*(dx/dr), where splus'() = exp(x)/(1+exp(x))
     """
-    res = np.exp(x[0])/(1+np.exp(x[0]))
 
-    badIndices = np.where(x[0] > 1e6)
-    res[badIndices] = 1
+    ex = np.exp(x[0])
+    ex[ex > _trunc_thresh] = _trunc_thresh
+
+    res = ex/(1+ex)
+
+    # badIndices = np.where(x[0] > 1e6)
+    # res[badIndices] = 1
 
     return res[:, :, np.newaxis, np.newaxis]*x[1]
 

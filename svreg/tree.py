@@ -208,6 +208,7 @@ class SVTree(list):
         """
 
         import dask
+        import dask.array as da
 
         # Check for single-node tree
         if isinstance(self.nodes[0], SVNode):
@@ -228,7 +229,8 @@ class SVTree(list):
                 fcs = values[1]
             else:
                 if useDask:
-                    fcs = dask.delayed(np.einsum)('ijkl->ikl', values[1])
+                    # fcs = dask.delayed(np.einsum)('ijkl->ikl', values[1])
+                    fcs = da.einsum('ijkl->ikl', values[1])
                 else:
                     fcs = np.einsum('ijkl->ikl', values[1])
 
@@ -267,7 +269,8 @@ class SVTree(list):
                 intermediateEng = subTrees[-1][0].function(*args)
 
                 if useDask:
-                    intermediateFcs = dask.delayed(subTrees[-1][0].function.derivative)(*args)
+                    # intermediateFcs = dask.delayed(subTrees[-1][0].function.derivative)(*args)
+                    intermediateFcs = subTrees[-1][0].function.derivative(*args)
                 else:
                     intermediateFcs = subTrees[-1][0].function.derivative(*args)
 
@@ -294,11 +297,10 @@ class SVTree(list):
 
                     if not allSums:
                         if useDask:
-                            intermediateFcs = dask.delayed(np.einsum)('ijkl->ikl', intermediateFcs)
-                        else:
-                            # intermediateFcs = np.einsum('ijkl->ikl', intermediateFcs)
-                            import dask.array as da
+                            # intermediateFcs = dask.delayed(np.einsum)('ijkl->ikl', intermediateFcs)
                             intermediateFcs = da.einsum('ijkl->ikl', intermediateFcs)
+                        else:
+                            intermediateFcs = np.einsum('ijkl->ikl', intermediateFcs)
                     
                     return intermediateEng, intermediateFcs
 

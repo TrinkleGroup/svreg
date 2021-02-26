@@ -40,7 +40,7 @@ class SVDatabase(dict):
         self['energy'] = {}
         self['forces'] = {}
 
-        structNames = list(h5pyFile.keys())[:4]
+        structNames = list(h5pyFile.keys())
         svNames =  list(h5pyFile[structNames[0]].keys())
         elements = sorted(list(h5pyFile[structNames[0]][svNames[0]].keys()))
 
@@ -49,10 +49,6 @@ class SVDatabase(dict):
             self.trueValues[struct] = {
                 'energy': h5pyFile[struct].attrs['energy'],
             }
-
-            # for el in elements:
-            #     fname = 'forces_' + el
-            #     self.trueValues[struct][fname] = h5pyFile[struct].attrs[fname]
 
             self.trueValues[struct]['forces'] = h5pyFile[struct].attrs['forces']
 
@@ -101,11 +97,9 @@ class SVDatabase(dict):
                             chunks=forceData.shape
                         ).persist()
                     else:
-                        # self[struct][sv][elem]['forces'] = np.array(forceData)
                         self[struct][sv][elem]['forces'] = forceData
 
                     futures.append(self[struct][sv][elem]['energy'])
                     futures.append(self[struct][sv][elem]['forces'])
-                    # futures += self[struct][sv][elem]['forces']
 
         return futures
