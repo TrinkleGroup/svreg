@@ -95,7 +95,7 @@ class SVDatabase(dict):
                             forceData,
                             # chunks=(5000, forceData.shape[1]),
                             chunks=forceData.shape
-                        ).persist()
+                        ).astype('float32').persist()
                     else:
                         self[struct][sv][elem]['forces'] = forceData
 

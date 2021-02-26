@@ -387,7 +387,7 @@ class SVRegressor:
             for elem, popList in populationDict[svName].items():
                 dat = np.concatenate(popList, axis=0).T
 
-                populationDict[svName][elem] = dat
+                populationDict[svName][elem] = dat.astype('float32')
 
         return populationDict, rawPopulations
 

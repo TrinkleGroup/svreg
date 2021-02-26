@@ -120,6 +120,13 @@ class Test_SVTree(unittest.TestCase):
     def test_tree_print(self):
         self.assertEqual(str(self.tree), 'add(sv0, add(sv1, sv2))')
 
+    
+    def test_from_tree(self):
+        treeStr = str(self.tree)
+        newTree = SVTree.from_str(treeStr, self.svNodePool)
+
+        self.assertTrue(self.tree == newTree)
+
 
     def test_1d_eval(self):
         for node in self.tree.svNodes:
@@ -540,6 +547,87 @@ class Test_MCTree_Real(unittest.TestCase):
         )
 
         self.cutoffs = [1.0, 3.0]
+
+
+    def test_equality_element_mismatch(self):
+
+        tree1 = MCTree(['H', 'He'])
+        tree2 = MCTree(['H', 'Li'])
+
+        self.assertFalse(tree1 == tree2)
+
+    
+    def test_equality(self):
+
+        tree1 = MCTree(['H', 'He'])
+
+        subtree1 = SVTree(nodes=[deepcopy(self.rho_A)])
+        subtree2 = SVTree(nodes=[deepcopy(self.rho_A)])
+
+        tree1.chemistryTrees['H']    = subtree1
+        tree1.chemistryTrees['He']   = subtree2
+
+        tree1.updateSVNodes()
+
+        tree2 = deepcopy(tree1)
+
+        self.assertTrue(tree1 == tree2)
+
+        tree3 = MCTree(['H', 'He'])
+
+        subtree1 = SVTree(nodes=[deepcopy(self.rho_A)])
+        subtree2 = SVTree(
+            nodes=[
+                FunctionNode('add'), deepcopy(self.rho_A), deepcopy(self.ffg_AB)
+            ]
+        )
+
+        tree3.chemistryTrees['H']    = subtree1
+        tree3.chemistryTrees['He']   = subtree2
+
+        tree3.updateSVNodes()
+
+        self.assertFalse(tree1 == tree3)
+
+        tree4 = MCTree(['H', 'He'])
+
+        subtree1 = SVTree(nodes=[deepcopy(self.rho_A)])
+        subtree2 = SVTree(
+            nodes=[
+                FunctionNode('add'), deepcopy(self.ffg_AB), deepcopy(self.rho_A)
+            ]
+        )
+
+        tree4.chemistryTrees['H']    = subtree1
+        tree4.chemistryTrees['He']   = subtree2
+
+        tree4.updateSVNodes()
+
+        self.assertTrue(tree3 == tree4)
+
+
+    def test_from_str(self):
+
+        tree = MCTree(['H', 'He'])
+
+        subtree1 = SVTree(nodes=[deepcopy(self.rho_A)])
+        subtree2 = SVTree(
+            nodes=[
+                FunctionNode('add'), deepcopy(self.ffg_AB), deepcopy(self.rho_A)
+            ]
+        )
+
+        tree.chemistryTrees['H']    = subtree1
+        tree.chemistryTrees['He']   = subtree2
+
+        tree.updateSVNodes()
+
+        treeStr = str(tree)
+        
+        svNodePool = [self.rho_A, self.rho_B, self.ffg_AA, self.ffg_AB, self.ffg_BB]
+        newTree = MCTree.from_str(treeStr, ['H', 'He'], svNodePool)
+
+        self.assertTrue(tree == newTree)
 
 
     def test_directEval_rho_a_rho_a_dimer_aa(self):

@@ -2,10 +2,10 @@ import random
 import itertools
 import numpy as np
 from copy import deepcopy
-from scipy.interpolate import CubicSpline
 
-from svreg.nodes import FunctionNode, SVNode, _node_types
+from svreg.nodes import FunctionNode, SVNode
 from svreg.summation import Summation, _implemented_sums
+from svreg.functions import _function_map
 
 
 class SVTree(list):
@@ -191,6 +191,89 @@ class SVTree(list):
 
         # Impossible to get here; should always return in while-loop
         raise RuntimeError("Something went wrong in tree construction")
+
+
+    @classmethod
+    def from_str(cls, treeStr, svNodePool):
+        """
+        Returns a tree object that matches the corresponding input string.
+
+        Args:
+            treeStr (str):
+
+            The string representation of a tree. Should match the format
+            used in SVTree.__str__, where chemistry trees are printed
+            alphabetically, each chemistry tree is prefixed by "<<element>>",
+            and multiple chemistry trees are separated by ",".
+
+            Examples:
+                'ffg_AB'
+                'softplus(rho_A)'
+                'add(softplus(rho_B), rho_A)'
+                'add(sv0, add(sv1, sv2))'
+        
+        Pseudocode:
+            Two cases:
+                1) The first node is a structure vector
+                2) The first node is a function
+
+            Note: mathematical symbols (+, -, *) should never be used here; all
+            functions should be specified by name.
+
+            Case 1:
+                - If there are no parentheses then this is a single-node tree
+                - Check if node exists in node pool; raise error if no
+                - Add node to tree and return
+
+            Case 2:
+                - If there is a parentheses then the first node must be a
+                function
+        """
+
+        tree = cls()
+
+        nodePoolNames = [n.description for n in svNodePool]
+
+        # Case 1: single-node tree
+        if '(' not in treeStr:
+            nodeName = treeStr.strip()
+            if nodeName not in nodePoolNames:
+                raise RuntimeError(
+                    "Node '{}' not found in node pool: {}".format(
+                        nodeName, nodePoolNames
+                    )
+                )
+            else:
+                tree.nodes.append(
+                    deepcopy(svNodePool[nodePoolNames.index(nodeName)])
+                )
+        else:  # Case 2: multi-node tree, where first node should be a function
+            cleanNames = treeStr.split('(')
+            cleanNames = [s.replace(')', '') for s in cleanNames]
+            cleanNames = [s.split(', ') for s in cleanNames]
+            cleanNames = list(itertools.chain.from_iterable(cleanNames))
+            cleanNames = [s.strip() for s in cleanNames]
+
+            if cleanNames[0] not in _function_map:
+                raise RuntimeError(
+                    "First node '{}' is not an allowed function".format(
+                        cleanNames[0]
+                    )
+                )
+
+            for s in cleanNames:
+                if s in _function_map:
+                    tree.nodes.append(FunctionNode(s))
+                elif s in nodePoolNames:
+                    tree.nodes.append(
+                        deepcopy(svNodePool[nodePoolNames.index(s)])
+                    )
+                else:
+                    raise RuntimeError("Node name '{}' is invalid".format(s))
+
+        tree.updateSVNodes()
+
+        return tree
 
 
     def eval(self, useDask=True, allSums=False):
@@ -980,6 +1063,45 @@ class MultiComponentTree(SVTree):
         return tree
 
     
+    @classmethod
+    def from_str(cls, treeStr, elements, svNodePool):
+        """
+        Generates a multi-component tree from a string representation.
+
+        Expected string format:
+        - SV node names match names in svNodePool
+        - Function names match names from svreg.functions._function_map
+        - Functions with 2 inputs have inputs separated by ','
+        - Strings for each chemistry tree are prefixed by '<(element)> '
+        - Strings for each chemistry tree are separated by ' | '
+
+        Example strings:
+            '<Mo> softplus(ffg_BB)'
+            '<Mo> softplus(ffg_BB) + <Ti> add(rho_A, rho_B)'
+        """
+
+        chemistryTreeStrings = treeStr.split(' | ')
+
+        tree = cls(elements)
+
+        for chemStr in chemistryTreeStrings:
+            tag = chemStr.find('>')
+
+            el = chemStr[:tag][1:]
+
+            if el not in elements:
+                raise RuntimeError(
+                    "Element '{}' not in elements list".format(el)
+                )
+
+            tree.chemistryTrees[el] = SVTree.from_str(
+                chemStr[tag+1:], svNodePool
+            )
+        
+        tree.updateSVNodes()
+        return tree
+
+    
     def eval(self, useDask=True, allSums=False):
         vals = [
             self.chemistryTrees[el].eval(useDask=useDask, allSums=allSums)
@@ -1110,7 +1232,7 @@ class MultiComponentTree(SVTree):
 
 
     def __str__(self):
-        return ' + '.join([
+        return ' | '.join([
             '<{}> {}'.format(
                 el, str(self.chemistryTrees[el])
             )
@@ -1120,6 +1242,16 @@ class MultiComponentTree(SVTree):
     
     def __repr__(self):
         return str(self)
+
+
+    def __eq__(self, other):
+        if sorted(self.elements) != sorted(other.elements):
+            return False
+
+        return all([
+            self.chemistryTrees[el] == other.chemistryTrees[el]
+            for el in self.elements
+        ])
 
 
     def latex(self):
