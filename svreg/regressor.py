@@ -110,28 +110,29 @@ class SVRegressor:
         if numElements < 1:
             raise RuntimeError("numElements must be >= 1 in initializeTrees()")
 
-        # if numElements == 1:
-        if False:
-            self.trees = [
-                SVTree.random(
-                    svNodePool=self.svNodePool,
-                    maxDepth=random.randint(1, self.settings['maxTreeDepth']),
-                ) for _ in range(self.settings['numberOfTrees'])
-            ]
-        else:
-            uniqueTreeNames = []
-            treesToAdd = []
-            while len(uniqueTreeNames) < self.settings['numberOfTrees']:
-                randTree = MCTree.random(
-                    svNodePool=self.svNodePool,
-                    maxDepth=random.randint(0, self.settings['maxTreeDepth']),
-                    elements=elements
-                )
+        uniqueTreeNames = []
 
-                if str(randTree) not in uniqueTreeNames:
-                    uniqueTreeNames.append(str(randTree))
-                    treesToAdd.append(randTree)
-            self.trees = treesToAdd
+        for ii, tree in enumerate(self.trees):
+            tn = str(tree)
+            if tn not in uniqueTreeNames:
+                uniqueTreeNames.append(tn)
+            else:
+                del self.trees[ii]
+                print("Removed duplicate tree: {}".format(tn))
+
+        treesToAdd = []
+        while len(uniqueTreeNames) < self.settings['numberOfTrees']:
+            randTree = MCTree.random(
+                svNodePool=self.svNodePool,
+                maxDepth=random.randint(0, self.settings['maxTreeDepth']),
+                elements=elements
+            )
+
+            if str(randTree) not in uniqueTreeNames:
+                uniqueTreeNames.append(str(randTree))
+                treesToAdd.append(randTree)
+
+        self.trees += treesToAdd
 
 
     def evaluateTrees(self, svEng, svFcs, P, trueValues, useDask=True):
