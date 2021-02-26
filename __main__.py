@@ -1,5 +1,6 @@
 # Imports
-from svreg.tree import SVTree  # Importing here helps avoid BW issues for some reason
+from scipy.interpolate import CubicSpline  # Importing here helps avoid BW issues for some reason
+from svreg.tree import SVTree
 import os
 import time
 import h5py
@@ -162,8 +163,6 @@ def main(client, settings):
             generatedNew = False
             while not generatedNew:
 
-                treeName = str(newTree)
-
                 inArchive = False
                 inReg = False
 
@@ -176,9 +175,6 @@ def main(client, settings):
 
                     if newTree == t:
                         inArchive = True
-
-                # inArchive   = md5Hash(treeName) in archive
-                # inReg       = md5Hash(treeName) in currentRegNames
 
                 if inArchive:
                     print("Already in archive:", newTree)
@@ -240,17 +236,11 @@ def main(client, settings):
 
         svEng = evaluator.evaluate(populationDict, 'energy', useDask=False)
         
-        print('Evaluated energies locally', time.time() - start, flush=True)
-
         for svName in populationDict:
             for el, pop in populationDict[svName].items():
                 populationDict[svName][el] = client.scatter(pop)#, broadcast=True)
 
-        print('Scattered population', time.time() - start, flush=True)
-
         svFcs = evaluator.evaluate(populationDict, 'forces')
-
-        print('Finished setting up forces', time.time() - start, flush=True)
 
         perTreeResults = regressor.evaluateTrees(
             svEng, svFcs, N, database.trueValues
@@ -271,14 +261,10 @@ def main(client, settings):
             energies[structName] = energies[structName][::-1]
             forces[structName] = forces[structName][::-1]
 
-        print('Finished evaluating trees', time.time() - start, flush=True)
-
         # Save the (per-struct) errors and the single-value costs
         errors = computeErrors(
             settings['refStruct'], energies, forces, database
         )
-
-        print('Finished computing errors', time.time() - start, flush=True)
 
         costs = costFxn(errors)
 
@@ -292,9 +278,6 @@ def main(client, settings):
         regressor.updateOptimizers(
             rawPopulations, costs, penalties
         )
-
-        # TODO: maybe this should log to a file instead of just printing; I'm
-        # not sure why BW seems to be dying sometimes
 
         printTreeCosts(
             fxnEvals,
