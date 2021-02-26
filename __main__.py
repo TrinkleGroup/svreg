@@ -46,6 +46,11 @@ parser.add_argument(
     '-n', '--names', type=str,
     help='The path to a file containing the names of the structures to use.',
 )
+parser.add_argument(
+    '-l', '--logfile', type=str,
+    help='The path to redirect stdout too. If unspecified, prints to stdout',
+)
+
 
 args = parser.parse_args()
 ################################################################################
@@ -82,7 +87,6 @@ def main(client, settings):
     regressor.initializeTrees(elements=database.attrs['elements'])
     regressor.initializeOptimizers()
 
-    print()
     print("Currently optimizing:")
 
     for pidx, t in enumerate(regressor.trees):
@@ -630,11 +634,28 @@ if __name__ == '__main__':
             "Waiting for at least {} workers to connect before starting...".format(num),
             flush=True
         )
+        print()
 
         client.wait_for_workers(n_workers=(size-2)//100*100)
 
-        # Begin run
-        if settings['runType'] == 'GA':
-            main(client, settings)
+        if args.logfile is not None:
+            # Redirects stdout to a logfile instead of 
+            from contextlib import redirect_stdout
+
+            logfile = os.path.join(settings['outputPath'], args.logfile)
+
+            print("Redirecting stdout to '{}'".format(logfile))
+
+            with open(logfile, 'w') as f:
+                with redirect_stdout(f):
+                    # Begin run
+                    if settings['runType'] == 'GA':
+                                main(client, settings)
+                    else:
+                        polish(client, settings)
         else:
-            polish(client, settings)
+            # Begin run
+            if settings['runType'] == 'GA':
+                        main(client, settings)
+            else:
+                polish(client, settings)
