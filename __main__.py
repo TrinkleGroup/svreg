@@ -319,7 +319,6 @@ def polish(client, settings):
 
     else:
         from svreg.nodes import FunctionNode
-        from svreg.tree import MultiComponentTree as MCTree
 
         tree = MCTree(['Mo', 'Ti'])
 
@@ -444,8 +443,6 @@ def polish(client, settings):
             if opt.result.fbest < prevBestCosts[treeName]:
                 prevBestCosts[treeName] = opt.result.fbest
 
-                entry.tree = tree
-                entry.optimizer = opt
                 entry.cost = opt.result.fbest
                 entry.bestParams = opt.result.xbest
                 entry.bestErrors = errors[0]
@@ -458,6 +455,15 @@ def polish(client, settings):
                         'wb'
                     )
                 )
+
+                pickle.dump(
+                    opt,
+                    open(
+                        os.path.join(savePath, treeName, 'opt.pkl'),
+                        'wb'
+                    )
+                )
+
 
 ################################################################################
 # Helper functions
