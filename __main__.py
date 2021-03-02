@@ -107,8 +107,6 @@ def main(client, settings):
         settings, regressor.svNodePool, database.attrs['elements']
     )
 
-    archive = Archive(os.path.join(settings['outputPath'], 'archive'))
-
     numCompletedTrees = 0
     maxNumTrees = settings['numRegressorSteps']*settings['numberOfTrees']
 
@@ -446,6 +444,8 @@ def polish(client, settings):
             if opt.result.fbest < prevBestCosts[treeName]:
                 prevBestCosts[treeName] = opt.result.fbest
 
+                entry.tree = tree
+                entry.optimizer = opt
                 entry.cost = opt.result.fbest
                 entry.bestParams = opt.result.xbest
                 entry.bestErrors = errors[0]
