@@ -310,35 +310,46 @@ def polish(client, settings):
     regressor = SVRegressor(settings, database)
     costFxn = buildCostFunction(settings, len(database.attrs['natoms']))
 
-    from svreg.nodes import FunctionNode
-    from svreg.tree import MultiComponentTree as MCTree
+    if args.trees is not None:
+        with open(args.trees, 'r') as f:
+            treeNames = [s.strip() for s in f.readlines()]
 
-    tree = MCTree(['Mo', 'Ti'])
+        regressor.trees = [
+            MCTree.from_str(t, database.attrs['elements'], regressor.svNodePool)
+            for t in treeNames
+        ]
 
-    from copy import deepcopy
+    else:
+        from svreg.nodes import FunctionNode
+        from svreg.tree import MultiComponentTree as MCTree
 
-    treeMo = SVTree()
-    treeMo.nodes = [
-        FunctionNode('add'),
-        deepcopy(regressor.svNodePool[0]),
-        deepcopy(regressor.svNodePool[1]),
-    ]
+        tree = MCTree(['Mo', 'Ti'])
 
-    treeTi = SVTree()
-    treeTi.nodes = [
-        FunctionNode('add'),
-        FunctionNode('add'),
-        deepcopy(regressor.svNodePool[3]),
-        deepcopy(regressor.svNodePool[3]),
-        deepcopy(regressor.svNodePool[4]),
-    ]
+        from copy import deepcopy
 
-    tree.chemistryTrees['Mo'] = treeMo
-    tree.chemistryTrees['Ti'] = treeTi
-    
-    tree.updateSVNodes()
+        treeMo = SVTree()
+        treeMo.nodes = [
+            FunctionNode('add'),
+            deepcopy(regressor.svNodePool[0]),
+            deepcopy(regressor.svNodePool[1]),
+        ]
 
-    regressor.trees = [tree]
+        treeTi = SVTree()
+        treeTi.nodes = [
+            FunctionNode('add'),
+            FunctionNode('add'),
+            deepcopy(regressor.svNodePool[3]),
+            deepcopy(regressor.svNodePool[3]),
+            deepcopy(regressor.svNodePool[4]),
+        ]
+
+        tree.chemistryTrees['Mo'] = treeMo
+        tree.chemistryTrees['Ti'] = treeTi
+        
+        tree.updateSVNodes()
+
+        regressor.trees = [tree]
+
     regressor.initializeOptimizers()
 
     savePath = os.path.join(settings['outputPath'], 'polished')
@@ -360,6 +371,19 @@ def polish(client, settings):
 
     optStart = time.time()
     for optStep in range(1, settings['maxNumOptimizerSteps']+1):
+
+        staleIndices, messages = regressor.checkStale()
+        for staleIdx, staleMessage in zip(staleIndices, messages):
+            print('Completed tree {}:'.format(staleIdx))
+            print(
+                "\t",
+                regressor.optimizers[staleIdx].result.fbest,
+                regressor.trees[staleIdx]
+            )
+            print("Stopping criterion:", staleMessage)
+
+            del regressor.trees[staleIdx]
+            del regressor.optimizers[staleIdx]
 
         populationDict, rawPopulations = regressor.generatePopulationDict(N)
 
