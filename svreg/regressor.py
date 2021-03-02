@@ -1,3 +1,4 @@
+import os
 import json
 import random
 import pickle
@@ -223,7 +224,7 @@ class SVRegressor:
                 else:
                     perTreeResults.append(
                         parseAndEval(
-                            pickle.dumps(t), args, P,
+                            t, args, P,
                             trueValues[structName]['forces'],
                             allSums=self.settings['allSums']
                         )
@@ -233,14 +234,37 @@ class SVRegressor:
 
 
     def initializeOptimizers(self):
-        self.optimizers = [
-            self.optimizer(
-                tree.populate(N=1)[0],
-                *self.optimizerArgs
-                # self.optimizerArgs
+        import hashlib
+
+        h5Hash = lambda t: hashlib.md5(str(t).encode()).hexdigest()
+
+        path = os.path.join(self.settings['outputPath'], 'outcmaes', '{}/')
+
+        # self.optimizers = [
+        #     self.optimizer(
+        #         tree.populate(N=1)[0],
+        #         *.update(
+        #             self.optimizerArgs[-1]
+        #         )
+        #     )
+        #     for tree in self.trees
+        # ]
+
+        argsCopy = deepcopy(self.optimizerArgs)
+
+        self.optimizers = []
+        for tree in self.trees:
+            d = {'verb_filenameprefix': path.format(h5Hash(tree))}
+            d.update(self.optimizerArgs[-1])
+
+            argsCopy[-1] = d
+
+            self.optimizers.append(
+                self.optimizer(
+                    tree.populate(N=1)[0],
+                    *argsCopy
+                )
             )
-            for tree in self.trees
-        ]
 
 
     def tournament(self, topN):
@@ -399,6 +423,7 @@ class SVRegressor:
 
             opt = self.optimizers[treeIdx]
             opt.tell(rawPopulations[treeIdx], fullCost)
+            opt.logger.add()
 
 
     def checkStale(self):

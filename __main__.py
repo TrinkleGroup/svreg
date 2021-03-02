@@ -7,6 +7,7 @@ import h5py
 import shutil
 import argparse
 from mpi4py import MPI
+from copy import deepcopy
 
 import random
 import numpy as np
@@ -194,9 +195,15 @@ def main(client, settings):
             print('\t', newTree)
 
             # Insert new tree into list of trees being optimized
+            argsCopy = deepcopy(regressor.optimizerArgs)
+            path = os.path.join(settings['outputPath'], 'outcmaes', '{}/')
+            d = {'verb_filenameprefix': path.format(md5Hash(newTree))}
+            d.update(regressor.optimizerArgs[-1])
+            argsCopy[-1] = d
+
             newOpt = regressor.optimizer(
                 newTree.populate(N=1)[0],
-                *regressor.optimizerArgs
+                *argsCopy
             )
 
             regressor.trees[staleIdx]        = newTree
