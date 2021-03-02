@@ -12,7 +12,7 @@ class SVEvaluator:
         self.settings   = settings
 
   
-    def evaluate(self, populationDict, evalType, useDask=True):
+    def evaluate(self, populationDict, evalType, numChunks, useDask=True):
         """
         Evaluates all of the populations on all of their corresponding structure
         vectors in the database.
@@ -46,22 +46,33 @@ class SVEvaluator:
 
                     if useDask:
                         if 'ffg' in svName:
-                            ffgTasks.append((sv, pop))
+                            for chunk in pop:
+                                ffgTasks.append((sv, chunk))
                         else:
                             rhoTasks.append((sv, pop))
                     else:
-                        tasks.append((sv, pop))
+                        tasks.append((sv, np.concatenate(pop, axis=-1)))
 
         def dot(tup):
             return tup[0].dot(tup[1])
 
+        import time
+
         @dask.delayed
         def ffgDot(tup):
-            return tup[0].dot(tup[1])
+            start = time.time()
+            res = tup[0].dot(tup[1])
+            # print("ffgDot {}: {} (s)".format(tup[1].shape, time.time() - start), flush=True)
+            return res
 
         @dask.delayed
         def rhoDot(tup):
-            return tup[0].dot(tup[1])
+            pop = np.concatenate(tup[1], axis=-1)
+            return tup[0].dot(pop)
+
+        @dask.delayed
+        def stack(lst):
+            return np.concatenate(lst, axis=-1)
 
         if useDask:
             ffgResults = [ffgDot(t) for t in ffgTasks]
@@ -80,7 +91,10 @@ class SVEvaluator:
                         if elem not in populationDict[svName]: continue
 
                         if 'ffg' in svName:
-                            results.append(ffgResults.pop())
+                            tmp = []
+                            for _ in range(numChunks[svName][elem]):
+                                tmp.append(ffgResults.pop())
+                            results.append(stack(tmp[::-1]))
                         else:
                             results.append(rhoResults.pop())
 

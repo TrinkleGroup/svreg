@@ -239,13 +239,16 @@ def main(client, settings):
         # Continue optimization of currently active trees
         populationDict, rawPopulations = regressor.generatePopulationDict(N)
 
-        svEng = evaluator.evaluate(populationDict, 'energy', useDask=False)
+        svEng = evaluator.evaluate(
+            populationDict, 'energy', regressor.chunks, useDask=False
+        )
         
         for svName in populationDict:
             for el, pop in populationDict[svName].items():
-                populationDict[svName][el] = client.scatter(pop)#, broadcast=True)
+                for ii, chunk in enumerate(pop):
+                    populationDict[svName][el][ii] = client.scatter(chunk)
 
-        svFcs = evaluator.evaluate(populationDict, 'forces')
+        svFcs = evaluator.evaluate(populationDict, 'forces', regressor.chunks)
 
         perTreeResults = regressor.evaluateTrees(
             svEng, svFcs, N, database.trueValues
@@ -388,7 +391,7 @@ def polish(client, settings):
 
         for svName in populationDict:
             for el, pop in populationDict[svName].items():
-                populationDict[svName][el] = client.scatter(pop, broadcast=True)
+                populationDict[svName][el] = client.scatter(pop)#, broadcast=True)
 
         svFcs = evaluator.evaluate(populationDict, 'forces')
 
