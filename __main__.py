@@ -239,16 +239,14 @@ def main(client, settings):
         # Continue optimization of currently active trees
         populationDict, rawPopulations = regressor.generatePopulationDict(N)
 
-        svEng = evaluator.evaluate(
-            populationDict, 'energy', regressor.chunks, useDask=False
-        )
-        
         for svName in populationDict:
             for el, pop in populationDict[svName].items():
                 for ii, chunk in enumerate(pop):
                     populationDict[svName][el][ii] = client.scatter(chunk)
 
-        svFcs = evaluator.evaluate(populationDict, 'forces', regressor.chunks)
+        svResults = evaluator.evaluate(populationDict, regressor.chunks)
+        svEng = svResults['energy']
+        svFcs = svResults['forces']
 
         perTreeResults = regressor.evaluateTrees(
             svEng, svFcs, N, database.trueValues
