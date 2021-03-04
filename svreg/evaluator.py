@@ -70,9 +70,9 @@ class SVEvaluator:
             pop = np.concatenate(tup[1], axis=-1)
             return tup[0].dot(pop)
 
-        @dask.delayed
-        def stack(lst):
-            return np.concatenate(lst, axis=-1)
+        # @dask.delayed
+        # def stack(lst):
+        #     return np.concatenate(lst, axis=-1)
 
         if useDask:
             ffgResults = [ffgDot(t) for t in ffgTasks]
@@ -94,7 +94,8 @@ class SVEvaluator:
                             tmp = []
                             for _ in range(numChunks[svName][elem]):
                                 tmp.append(ffgResults.pop())
-                            results.append(stack(tmp[::-1]))
+                            # results.append(stack(tmp[::-1]))
+                            results.append(tmp[::-1])
                         else:
                             results.append(rhoResults.pop())
 

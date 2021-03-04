@@ -518,9 +518,13 @@ def parseAndEval(tree, listOfArgs, P, tvF, allSums=False):
     tree = pickle.loads(tree)
 
     for svNode, argTup in zip(tree.svNodes, listOfArgs):
+
         eng = argTup[0]
         fcs = argTup[1]
         idx = argTup[2]
+
+        if 'ffg' in svNode.description:
+            fcs = np.concatenate(fcs, axis=-1)
 
         Ne = eng.shape[0]
         Nn = eng.shape[1] // P
