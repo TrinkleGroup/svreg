@@ -525,6 +525,7 @@ def parseAndEval(tree, listOfArgs, P, tvF, allSums=False):
 
         if 'ffg' in svNode.description:
             fcs = np.concatenate(fcs, axis=-1)
+            eng = np.concatenate(eng, axis=-1)
 
         Ne = eng.shape[0]
         Nn = eng.shape[1] // P

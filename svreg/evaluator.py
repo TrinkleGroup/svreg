@@ -12,7 +12,7 @@ class SVEvaluator:
         self.settings   = settings
 
   
-    def evaluate(self, populationDict, evalType, numChunks, useDask=True):
+    def evaluate(self, populationDict, numChunks, useDask=True):
         """
         Evaluates all of the populations on all of their corresponding structure
         vectors in the database.
@@ -34,24 +34,25 @@ class SVEvaluator:
 
         ffgTasks = []
         rhoTasks = []
-        for struct in structNames:
-            for svName in allSVnames:
-                if svName not in populationDict: continue
+        for evalType in ['energy', 'forces']:
+            for struct in structNames:
+                for svName in allSVnames:
+                    if svName not in populationDict: continue
 
-                for elem in elements:
-                    if elem not in populationDict[svName]: continue
+                    for elem in elements:
+                        if elem not in populationDict[svName]: continue
 
-                    sv = self.database[struct][svName][elem][evalType]
-                    pop = populationDict[svName][elem]
+                        sv = self.database[struct][svName][elem][evalType]
+                        pop = populationDict[svName][elem]
 
-                    if useDask:
-                        if 'ffg' in svName:
-                            for chunk in pop:
-                                ffgTasks.append((sv, chunk))
+                        if useDask:
+                            if 'ffg' in svName:
+                                for chunk in pop:
+                                    ffgTasks.append((sv, chunk))
+                            else:
+                                rhoTasks.append((sv, pop))
                         else:
-                            rhoTasks.append((sv, pop))
-                    else:
-                        tasks.append((sv, np.concatenate(pop, axis=-1)))
+                            tasks.append((sv, np.concatenate(pop, axis=-1)))
 
         def dot(tup):
             return tup[0].dot(tup[1])
@@ -70,10 +71,6 @@ class SVEvaluator:
             pop = np.concatenate(tup[1], axis=-1)
             return tup[0].dot(pop)
 
-        # @dask.delayed
-        # def stack(lst):
-        #     return np.concatenate(lst, axis=-1)
-
         if useDask:
             ffgResults = [ffgDot(t) for t in ffgTasks]
             rhoResults = [rhoDot(t) for t in rhoTasks]
@@ -83,6 +80,40 @@ class SVEvaluator:
             ffgResults = client.compute(ffgResults, priority=100)
 
             results = []
+            for evalType in ['forces', 'energy']:
+                for struct in structNames[::-1]:
+                    for svName in allSVnames[::-1]:
+                        if svName not in populationDict: continue
+
+                        for elem in elements[::-1]:
+                            if elem not in populationDict[svName]: continue
+
+                            if 'ffg' in svName:
+                                tmp = []
+                                for _ in range(numChunks[svName][elem]):
+                                    tmp.append(ffgResults.pop())
+                                # results.append(stack(tmp[::-1]))
+                                results.append(tmp[::-1])
+                            else:
+                                results.append(rhoResults.pop())
+
+            results = results[::-1]
+        else:
+            results = [dot((np.array(t[0]), t[1])) for t in tasks]
+
+        summedResults = {
+            evalType: {
+                structName: {
+                    svName: {
+                        elem: None for elem in elements
+                    }
+                    for svName in allSVnames
+                }
+                for structName in structNames
+            } for evalType in ['energy', 'forces']
+        }
+
+        for evalType in ['forces', 'energy']:
             for struct in structNames[::-1]:
                 for svName in allSVnames[::-1]:
                     if svName not in populationDict: continue
@@ -90,36 +121,6 @@ class SVEvaluator:
                     for elem in elements[::-1]:
                         if elem not in populationDict[svName]: continue
 
-                        if 'ffg' in svName:
-                            tmp = []
-                            for _ in range(numChunks[svName][elem]):
-                                tmp.append(ffgResults.pop())
-                            # results.append(stack(tmp[::-1]))
-                            results.append(tmp[::-1])
-                        else:
-                            results.append(rhoResults.pop())
-
-            results = results[::-1]
-        else:
-            results = [dot((np.array(t[0]), t[1])) for t in tasks]
-
-        summedResults = {
-            structName: {
-                svName: {
-                    elem: None for elem in elements
-                }
-                for svName in allSVnames
-            }
-            for structName in structNames
-        }
-
-        for struct in structNames[::-1]:
-            for svName in allSVnames[::-1]:
-                if svName not in populationDict: continue
-
-                for elem in elements[::-1]:
-                    if elem not in populationDict[svName]: continue
-
-                    summedResults[struct][svName][elem] = results.pop()
+                        summedResults[evalType][struct][svName][elem] = results.pop()
                 
         return summedResults
