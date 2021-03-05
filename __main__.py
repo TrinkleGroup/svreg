@@ -397,20 +397,30 @@ def polish(client, settings):
 
         populationDict, rawPopulations = regressor.generatePopulationDict(N)
 
-        svEng = evaluator.evaluate(populationDict, 'energy', useDask=False)
+        # svEng = evaluator.evaluate(populationDict, 'energy', useDask=False)
 
         for svName in populationDict:
             for el, pop in populationDict[svName].items():
                 populationDict[svName][el] = client.scatter(pop)#, broadcast=True)
 
-        svFcs = evaluator.evaluate(populationDict, 'forces')
+        # svFcs = evaluator.evaluate(populationDict, 'forces')
 
-        perTreeResults = regressor.evaluateTrees(
-            svEng, svFcs, N, database.trueValues
-        )
+        # perTreeResults = regressor.evaluateTrees(
+        #     svEng, svFcs, N, database.trueValues
+        # )
 
-        perTreeResults = client.gather(client.compute(perTreeResults))
+        # perTreeResults = client.gather(client.compute(perTreeResults))
 
+        graph = evaluator.build_dot_graph(populationDict)
+        graph = regressor.build_evaltree_graph(graph, N, database.trueValues)
+
+        perTreeResults = []
+        for structNum in range(len(database.attrs['structNames'])):
+            for treeNum in range(len(regressor.trees)):
+                key = 'eval-struct_{}-tree_{}'.format(structNum, treeNum)
+                perTreeResults.append(key)
+
+        perTreeResults = client.get(graph, perTreeResults)
         energies = {struct: [] for struct in database.attrs['structNames']}
         forces   = {struct: [] for struct in database.attrs['structNames']}
 
