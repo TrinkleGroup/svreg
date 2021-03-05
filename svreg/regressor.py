@@ -176,7 +176,6 @@ class SVRegressor:
                         svName = svNode.description
 
                         # Key pointing to energies/forces of a given chunk
-                        chunkKeys = []
                         for ci in range(self.chunks[svName][elem]):
                             efKey = 'chunkDot-struct_{}-{}-{}-{}'.format(
                                 structNum, svName, elem, ci

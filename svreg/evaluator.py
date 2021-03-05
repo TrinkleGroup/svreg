@@ -131,15 +131,12 @@ class SVEvaluator:
         allSVnames  = list(self.database.attrs['svNames'])
         elements    = list(self.database.attrs['elements'])
 
-        @dask.delayed
+        # @dask.delayed
         def chunkDot(sve, svf, chunk):
             return sve.dot(chunk), svf.dot(chunk)
 
-        # TODO: define graph key for loading data from database, that way the
-        # graph knows which tasks use which data. Maybe don't need this yet?
-        # sve and svf are pointers to data, so I think this works already.
-
-        results = []
+        graph = {}
+        ordered_keys = []
 
         from dask.compatibility import apply
 
@@ -159,17 +156,15 @@ class SVEvaluator:
                         key = 'chunkDot-struct_{}-{}-{}-{}'.format(
                             structNum, svName, elem, ci
                         )
+                        ordered_keys.append(key)
                         
-                        # graph[key] = (chunkDot, sve, svf, chunk)
-                        results.append(chunkDot(sve, svf, chunk))
+                        graph[key] = (chunkDot, sve, svf, chunk)
 
-        graph = {}
 
         client = get_client()
+        results = client.get(graph, ordered_keys, sync=False)
 
-        results = client.compute(results, priority=100)
-        results = results[::-1]
-
+        counter = 0
         for structNum, struct in enumerate(structNames):
             for svName in allSVnames:
                 if svName not in populationDict: continue
@@ -187,7 +182,8 @@ class SVEvaluator:
                             structNum, svName, elem, ci
                         )
                         
-                        graph[key] = results.pop()
+                        graph[key] = results[counter]
+                        counter += 1
 
 
         # graph[key] = task to eval eng/fcs for 1 struct for 1 sv

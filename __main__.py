@@ -264,7 +264,9 @@ def main(client, settings):
                 perTreeResults.append(key)
 
         perTreeResults = client.get(graph, perTreeResults)
-        # perTreeResults = client.gather(client.compute(perTreeResults))
+
+        for key in graph:
+            client._release_key(key)
 
         energies = {struct: [] for struct in database.attrs['structNames']}
         forces   = {struct: [] for struct in database.attrs['structNames']}
@@ -421,6 +423,10 @@ def polish(client, settings):
                 perTreeResults.append(key)
 
         perTreeResults = client.get(graph, perTreeResults)
+
+        for key in graph:
+            client._release_key(key)
+
         energies = {struct: [] for struct in database.attrs['structNames']}
         forces   = {struct: [] for struct in database.attrs['structNames']}
 
