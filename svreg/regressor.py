@@ -157,19 +157,19 @@ class SVRegressor:
                 {structName: [tree.eval() for tree in self.trees]}
         """
 
-        structNames = list(svFcs.keys())
-        svNames     = list(svFcs[structNames[0]].keys())
+        structNames = list(svEng.keys())
+        svNames     = list(svEng[structNames[0]].keys())
         
         # NOTE: elements must be sorted here to match assumed ordering of
         # tree.svNodes
-        elements = sorted(list(svFcs[structNames[0]][svNames[0]].keys()))
+        elements = sorted(list(svEng[structNames[0]][svNames[0]].keys()))
 
         # indexers[sv][el][i] = list of indices for svEng[*][sv][el] for tree i
         indexers = {}
 
         struct0 = structNames[0]
         # Build dictionary of indexers for each SV
-        for svName in svFcs[struct0]:
+        for svName in svEng[struct0]:
             indexers[svName] = {}
             for elem in elements:
                 indexers[svName][elem]  = []
@@ -197,16 +197,11 @@ class SVRegressor:
                     for svNode in tree.chemistryTrees[elem].svNodes:
                         svName = svNode.description
 
-                        # engDot = svEng[struct][svName][elem]
+                        engDot = svEng[struct][svName][elem]
                         fcsDot = svFcs[struct][svName][elem]
 
                         treeArgs.append(
-                            (
-                                svEng,
-                                fcsDot,
-                                indexCopy[svName][elem][ii].pop(),
-                                (struct, svName, elem)
-                            )
+                            (engDot, fcsDot, indexCopy[svName][elem][ii].pop())
                         )
 
                 taskArgs.append(treeArgs)
@@ -524,18 +519,13 @@ def parseAndEval(tree, listOfArgs, P, tvF, allSums=False):
 
     for svNode, argTup in zip(tree.svNodes, listOfArgs):
 
-        svEng = argTup[0]
+        eng = argTup[0]
         fcs = argTup[1]
         idx = argTup[2]
 
-        struct, svName, elem = argTup[3]
-        eng = svEng[struct][svName][elem]
-
-        print('eng:', eng.shape)
-
         if 'ffg' in svNode.description:
             fcs = np.concatenate(fcs, axis=-1)
-            # eng = np.concatenate(eng, axis=-1)
+            eng = np.concatenate(eng, axis=-1)
 
         Ne = eng.shape[0]
         Nn = eng.shape[1] // P

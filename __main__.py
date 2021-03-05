@@ -244,11 +244,9 @@ def main(client, settings):
                 for ii, chunk in enumerate(pop):
                     populationDict[svName][el][ii] = client.scatter(chunk)
 
-        svEng = dask.delayed(evaluator.evaluate)(
-            populationDict, 'energy', regressor.chunks, useDask=False
-        )
-
-        svFcs = evaluator.evaluate(populationDict, 'forces', regressor.chunks)
+        svResults = evaluator.evaluate(populationDict, regressor.chunks)
+        svEng = svResults['energy']
+        svFcs = svResults['forces']
 
         perTreeResults = regressor.evaluateTrees(
             svEng, svFcs, N, database.trueValues
@@ -387,15 +385,13 @@ def polish(client, settings):
 
         populationDict, rawPopulations = regressor.generatePopulationDict(N)
 
+        svEng = evaluator.evaluate(populationDict, 'energy', useDask=False)
+
         for svName in populationDict:
             for el, pop in populationDict[svName].items():
                 populationDict[svName][el] = client.scatter(pop)#, broadcast=True)
 
-        svEng = dask.delayed(evaluator.evaluate)(
-            populationDict, 'energy', regressor.chunks, useDask=False
-        )
-
-        svFcs = evaluator.evaluate(populationDict, 'forces', regressor.chunks)
+        svFcs = evaluator.evaluate(populationDict, 'forces')
 
         perTreeResults = regressor.evaluateTrees(
             svEng, svFcs, N, database.trueValues
