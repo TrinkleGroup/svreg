@@ -395,8 +395,6 @@ def polish(client, settings):
             populationDict, 'energy', regressor.chunks, useDask=False
         )
 
-        svEng = client.compute(svEng)
-
         svFcs = evaluator.evaluate(populationDict, 'forces', regressor.chunks)
 
         perTreeResults = regressor.evaluateTrees(
