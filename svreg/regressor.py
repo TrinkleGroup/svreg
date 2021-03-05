@@ -55,7 +55,10 @@ class SVRegressor:
 
         self.settings = settings
         self.svNodePool = buildSVNodePool(database)
-        numStructs = len(database.attrs['structNames'])
+
+        self.structNames    = database.attrs['structNames']
+        self.svNames        = database.attrs['svNames']
+        self.elements       = database.attrs['elements']
 
         if settings['optimizer'] == 'CMA':
             self.optimizer = cma.CMAEvolutionStrategy
@@ -134,6 +137,83 @@ class SVRegressor:
                 treesToAdd.append(randTree)
 
         self.trees += treesToAdd
+
+    
+    def build_evaltree_graph(self, graph, P, trueValues):
+
+        # Build dictionary of indexers for parsing tasks
+        indexers = {}
+
+        for svName in self.svNames:
+            indexers[svName] = {}
+            for elem in self.elements:
+                indexers[svName][elem] = []
+
+                counter = 0
+
+                for tree in self.trees:
+                    treeIndices = []
+
+                    for svNode in tree.chemistryTrees[elem].svNodes:
+                        # Only update the SVNode objects of the current type
+                        if svNode.description == svName:
+                            treeIndices.append(counter)
+                            counter += 1
+
+                    # Reverse list here since we'll be popping from it later
+                    indexers[svName][elem].append(treeIndices[::-1])
+
+        from dask.compatibility import apply
+        
+        for structNum, struct in enumerate(self.structNames):
+            indexCopy = deepcopy(indexers)
+
+            for treeNum, tree in enumerate(self.trees):
+                treeArgs = []
+                treeIndices = []
+                for elem in self.elements:
+                    for svNode in tree.chemistryTrees[elem].svNodes:
+                        svName = svNode.description
+
+                        # Key pointing to energies/forces of a given chunk
+                        chunkKeys = []
+                        for ci in range(self.chunks[svName][elem]):
+                            efKey = 'chunkDot-struct_{}-{}-{}-{}'.format(
+                                structNum, svName, elem, ci
+                            )
+
+                            # chunkKeys.append(efKey)
+                            treeArgs.append(efKey)
+
+                        # chunkKeys = list of keys for relevant chunkDot tasks
+
+                        # treeArgs.append(chunkKeys)
+                        treeIndices.append(
+                            indexCopy[svName][elem][treeNum].pop()
+                        )
+
+                # treeArgs = keys for task for all chunks of all relevant SVs
+                key = 'eval-struct_{}-tree_{}'.format(structNum, treeNum)
+                graph[key] = (
+                    apply,
+                    parseAndEval,
+                    treeArgs,
+                    {
+                        'tree': pickle.dumps(tree),
+                        'listOfIndices': treeIndices,
+                        'P': P,
+                        'tvF': trueValues[struct],
+                        'numChunks': self.chunks,
+                        'allSums': self.settings['allSums']
+                    }
+                )
+
+                # graph[key] = task to evaluate tree for a given structure
+
+                # TODO: need to parse treeArgs in order to batch the chunks
+
+        return graph
+
 
 
     def evaluateTrees(self, svEng, svFcs, P, trueValues, useDask=True):
@@ -511,46 +591,86 @@ def buildSVNodePool(database):
         )
 
     return svNodePool
+
     
-def parseAndEval(tree, listOfArgs, P, tvF, allSums=False):
+def parseAndEval(
+    *args,
+    **kwargs,
+    # tree=None, listOfIndices=None,
+    # P=None, tvF=None, numChunks=None,
+    # allSums=False
+    ):
+
+    tree            = kwargs['tree']
+    listOfIndices   = kwargs['listOfIndices']
+    P               = kwargs['P']
+    tvF             = kwargs['tvF']
+    numChunks       = kwargs['numChunks']
+    allSums         = kwargs['allSums']
 
     import pickle
     tree = pickle.loads(tree)
 
-    for svNode, argTup in zip(tree.svNodes, listOfArgs):
+    # listOfArgs = [([key for each chunk of SV], idx) for each SV of tree]
 
-        eng = argTup[0]
-        fcs = argTup[1]
-        idx = argTup[2]
+    # listOfArgs = [key for each chunk for each SV} -- 1-D; need to parse
 
-        if 'ffg' in svNode.description:
-            fcs = np.concatenate(fcs, axis=-1)
+    # self.chunks[svName][elem] = int(np.ceil(dat.shape[1]/300))
 
-        Ne = eng.shape[0]
-        Nn = eng.shape[1] // P
+    nodeCounter     = 0
+    chunkCounter    = 0
+    for elem in tree.elements:
+        for svNode in tree.chemistryTrees[elem].svNodes:
+            svName = svNode.description
 
-        eng = eng.reshape((Ne, Nn, P))
-        eng = np.moveaxis(eng, 1, 0)
-        eng = np.moveaxis(eng, -1, 1)
+            chunkTup = []
+            for _ in range(numChunks[svName][elem]):
+                chunkTup.append(args[chunkCounter])
+                chunkCounter += 1
 
-        # fcs shape: (Ne, Na, 3, P*Nn)
+            idx = listOfIndices[nodeCounter]
+            nodeCounter += 1
 
-        if allSums:
-            Na = fcs.shape[0]
-            fcs = fcs.reshape(Na, 3, Nn, P)
-        else:
-            Na = fcs.shape[1]
-            fcs = fcs.reshape(Ne, Na, 3, Nn, P)
+    # for svNode, chunkTup, idx in zip(tree.svNodes, listOfArgs, listOfIndices):
 
-        fcs = np.moveaxis(fcs, -2, 0)
-        fcs = np.moveaxis(fcs, -1, 1)
+            eng = np.concatenate([c[0] for c in chunkTup], axis=-1)
+            fcs = np.concatenate([c[1] for c in chunkTup], axis=-1)
 
-        # fcs shape: (Nn, P, Ne, Na, 3)
+            # Note: stacking these chunks gives all evals for all populations, which
+            # then need to be indexed
 
-        svNode.values = (eng[idx], fcs[idx])
+            # eng = argTup[0]
+            # fcs = argTup[1]
+            # idx = argTup[2]
+
+            # if 'ffg' in svNode.description:
+            #     fcs = np.concatenate(fcs, axis=-1)
+
+            Ne = eng.shape[0]
+            Nn = eng.shape[1] // P
+
+            eng = eng.reshape((Ne, Nn, P))
+            eng = np.moveaxis(eng, 1, 0)
+            eng = np.moveaxis(eng, -1, 1)
+
+            # fcs shape: (Ne, Na, 3, P*Nn)
+
+            if allSums:
+                Na = fcs.shape[0]
+                fcs = fcs.reshape(Na, 3, Nn, P)
+            else:
+                Na = fcs.shape[1]
+                fcs = fcs.reshape(Ne, Na, 3, Nn, P)
+
+            fcs = np.moveaxis(fcs, -2, 0)
+            fcs = np.moveaxis(fcs, -1, 1)
+
+            # fcs shape: (Nn, P, Ne, Na, 3)
+
+            svNode.values = (eng[idx], fcs[idx])
 
     engResult, fcsResult = tree.eval(useDask=False, allSums=allSums)
 
-    fcsErrors = np.average(abs(sum(fcsResult) - tvF), axis=(1,2))
+    fcsErrors = np.average(abs(sum(fcsResult) - tvF['forces']), axis=(1,2))
 
     return sum(engResult), fcsErrors
