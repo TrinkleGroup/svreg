@@ -78,28 +78,28 @@ class SVDatabase(dict):
                 for k, v in h5pyFile[struct][sv].attrs.items():
                     self.attrs[sv][k] = v
 
-                for elem in elements:
+                # for elem in elements:
 
-                    self[struct][sv][elem] = {}
+                #     self[struct][sv][elem] = {}
 
-                    group = h5pyFile[struct][sv][elem]
-                    forceData = group['forces']
+                #     group = h5pyFile[struct][sv][elem]
+                #     forceData = group['forces']
 
-                    self[struct][sv][elem]['energy'] = group['energy'][()]
+                #     self[struct][sv][elem]['energy'] = group['energy'][()]
 
-                    if allSums:
-                        forceData = np.einsum('ijkl->jkl', forceData)
+                #     if allSums:
+                #         forceData = np.einsum('ijkl->jkl', forceData)
 
-                    if useDask:
-                        self[struct][sv][elem]['forces'] = da.from_array(
-                            forceData,
-                            # chunks=(5000, forceData.shape[1]),
-                            chunks=forceData.shape
-                        ).astype('float32').persist()
-                    else:
-                        self[struct][sv][elem]['forces'] = forceData
+                #     if useDask:
+                #         self[struct][sv][elem]['forces'] = da.from_array(
+                #             forceData,
+                #             # chunks=(5000, forceData.shape[1]),
+                #             chunks=forceData.shape
+                #         ).astype('float32').persist()
+                #     else:
+                #         self[struct][sv][elem]['forces'] = forceData
 
-                    futures.append(self[struct][sv][elem]['energy'])
-                    futures.append(self[struct][sv][elem]['forces'])
+                #     futures.append(self[struct][sv][elem]['energy'])
+                #     futures.append(self[struct][sv][elem]['forces'])
 
         return futures

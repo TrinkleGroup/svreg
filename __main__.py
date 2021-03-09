@@ -313,7 +313,8 @@ def polish(client, settings):
     # Setup
     with h5py.File(settings['databasePath'], 'r') as h5pyFile:
         database = SVDatabase(h5pyFile)
-        wait(database.load(h5pyFile, allSums=settings['allSums']))
+        # wait(database.load(h5pyFile, allSums=settings['allSums']))
+        database.load(h5pyFile, allSums=settings['allSums'])
 
         evaluator = SVEvaluator(database, settings)
 
@@ -424,7 +425,8 @@ def polish(client, settings):
         scatteredPop = client.scatter(rawPopulations)
 
         graph, keys = evaluator.build_dot_graph(
-            regressor.trees, scatteredPop, database.trueValues, N
+            regressor.trees, scatteredPop, database.trueValues, N,
+            settings['databasePath']
         )
 
         # keys = [tree.eval() for each tree for each struct]

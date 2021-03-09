@@ -125,7 +125,7 @@ class SVEvaluator:
         return summedResults
 
 
-    def build_dot_graph(self, trees, rawPopulations, trueValues, P):
+    def build_dot_graph(self, trees, rawPopulations, trueValues, P, h5pyFileName):
 
         structNames = list(self.database.attrs['structNames'])
         allSVnames  = list(self.database.attrs['svNames'])
@@ -160,40 +160,45 @@ class SVEvaluator:
 
         import pickle
 
-        def treeStructEval(entry, tree, rawPop, tvF, P):
+        def treeStructEval(structName, tree, rawPop, tvF, P, h5FileName):
             tree = pickle.loads(tree)
             
             # popDict= {el: {svName: population}}
             popDict = tree.parseArr2Dict(rawPop)
 
-            results = {}
-            for elem in popDict:
+            import h5py
+            with h5py.File(h5FileName, 'r') as h5File:
+                results = {}
+                for elem in popDict:
 
-                results[elem] = {}
+                    results[elem] = {}
 
-                for svName in popDict[elem]:
-                    results[elem][svName] = {}
+                    for svName in popDict[elem]:
+                        results[elem][svName] = {}
 
-                    sve = entry[svName][elem]['energy']
-                    svf = entry[svName][elem]['forces']
+                        # sve = entry[svName][elem]['energy']
+                        # svf = entry[svName][elem]['forces']
 
-                    eng = sve.dot(popDict[elem][svName].T)
-                    fcs = svf.dot(popDict[elem][svName].T)
+                        sve = h5File[structName][svName][elem]['energy'][()]
+                        svf = h5File[structName][svName][elem]['forces'][()]
 
-                    Ne = eng.shape[0]
-                    Nn = eng.shape[1] // P
-                    Na = fcs.shape[1]
+                        eng = sve.dot(popDict[elem][svName].T)
+                        fcs = svf.dot(popDict[elem][svName].T)
 
-                    eng = eng.reshape((Ne, Nn, P))
-                    eng = np.moveaxis(eng, 1, 0)
-                    eng = np.moveaxis(eng, -1, 1)
+                        Ne = eng.shape[0]
+                        Nn = eng.shape[1] // P
+                        Na = fcs.shape[1]
 
-                    fcs = fcs.reshape((Ne, Na, 3, Nn, P))
-                    fcs = np.moveaxis(fcs, -2, 0)
-                    fcs = np.moveaxis(fcs, -1, 1)
+                        eng = eng.reshape((Ne, Nn, P))
+                        eng = np.moveaxis(eng, 1, 0)
+                        eng = np.moveaxis(eng, -1, 1)
 
-                    results[elem][svName]['energy'] = eng
-                    results[elem][svName]['forces'] = fcs
+                        fcs = fcs.reshape((Ne, Na, 3, Nn, P))
+                        fcs = np.moveaxis(fcs, -2, 0)
+                        fcs = np.moveaxis(fcs, -1, 1)
+
+                        results[elem][svName]['energy'] = eng
+                        results[elem][svName]['forces'] = fcs
 
             counters = {
                 el: {
@@ -232,9 +237,11 @@ class SVEvaluator:
 
                 graph[key] = (
                     treeStructEval,
-                    self.database[struct], pickle.dumps(tree), rawPop,
+                    # self.database[struct], pickle.dumps(tree), rawPop,
+                    struct, pickle.dumps(tree), rawPop,
                     trueValues[struct]['forces'],
-                    P
+                    P,
+                    h5pyFileName
                 )
 
         return graph, keys
