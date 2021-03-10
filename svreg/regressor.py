@@ -496,14 +496,14 @@ class SVRegressor:
                 dat = np.concatenate(popList, axis=0).T
                 dat = dat.astype('float32')
 
-                # populationDict[svName][elem] = dat.astype('float32')
+                populationDict[svName][elem] = dat.astype('float32')
 
-                self.chunks[svName][elem] = int(np.ceil(dat.shape[1]/300))
-                # self.chunks[svName][elem] = 1
+                # self.chunks[svName][elem] = int(np.ceil(dat.shape[1]/300))
+                # # self.chunks[svName][elem] = 1
 
-                populationDict[svName][elem] = np.array_split(
-                    dat, self.chunks[svName][elem], axis=1
-                )
+                # populationDict[svName][elem] = np.array_split(
+                #     dat, self.chunks[svName][elem], axis=1
+                # )
 
         return populationDict, rawPopulations
 

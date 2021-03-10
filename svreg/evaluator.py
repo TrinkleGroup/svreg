@@ -125,124 +125,157 @@ class SVEvaluator:
         return summedResults
 
 
-    def build_dot_graph(self, trees, rawPopulations, trueValues, P, h5pyFileName):
+    def build_dot_graph(self, trees, fullPopDict, trueValues, P):
 
         structNames = list(self.database.attrs['structNames'])
         allSVnames  = list(self.database.attrs['svNames'])
         elements    = list(self.database.attrs['elements'])
 
-        """
-        TODO: make each task compute the energies/forces for a single tree.
-
-        Notes:
-            - This doesn't use batching logic; should just scatter raw
-            populations batched populations.
-
-            - You might be able to hold all intermediate results in GPU at the
-            same time (leave everything as cupy array), that way tree evals are
-            GPU-accelerated too
-
-            - This might enable larger CMA population sizes since the GPU would
-            be able to evaluate them trivially quickly.
-
-            - Is GPU communication going to make each of these tasks still take
-            awhile?
-
-
-        for struct in structNames:
-            for tree in trees:
-                - pickle tree and send to worker (or maybe scatter before?)
-                - send self.database[struct]
-                - parse raw population into SV dictionary (or just send as
-                dictionary).
-                - evaluate each of the SVs of the tree
-        """
-
         import pickle
+        import cupy as cp
 
-        def treeStructEval(structName, tree, rawPop, tvF, P, h5FileName):
-            tree = pickle.loads(tree)
+        def treeStructEval(entry, pickledTrees, popDict, tvF, P):
+            treeResults = []
+
+            # Evaluate all SVs for the structure
+            results = {}
+
+
+            # # Pack SVs and population for each SV type
+            # els = list(popDict[list(popDict.keys())[0]])
+
+            # packedSV    = {
+            #     'ffg': {el: {'energy': [], 'forces': []} for el in els},
+            #     'rho': {el: {'energy': [], 'forces': []} for el in els},
+            # }
+
+            # packedPop   = {
+            #     'ffg': {el: [] for el in els},
+            #     'rho': {el: [] for el in els},
+            # }
+
+            # for svName in popDict:
+            #     for elem in popDict[svName]:
+            #         svType  = 'ffg' if 'ffg' in svName else 'rho'
+
+            #         packedSV[svType][elem]['energy'].append(entry[svName][elem]['energy'])
+            #         packedSV[svType][elem]['forces'].append(entry[svName][elem]['forces'])
+
+            #         packedPop[svType][elem].append(popDict[svName][elem])
+
+            # # Now evaluate in batches
+            # resuls = {}
+            # for svType in packedSV:
+            #     for elem in packedSV[svType]:
+
+            #         pop = packedPop[svType][elem]
+            #         print('pop:', [el.shape for el in pop], flush=True)
+            #         pop = np.stack(pop)
+
+            #         pop = cp.asarray(pop)
+
+            #         for evalType in packedSV[svType][elem]:
+            #             sv = packedSV[svType][elem][evalType]
+            #             sv = np.stack(sv)
+            #             sv = cp.asarray(sv)
+
+            #             res = cp.tensordot(sv, pop, axes=-1)
+            #             print('res:', sv.shape, pop.shape, res.shape, flush=True)
+
+            # stream = cp.cuda.stream.Stream(non_blocking=True)
             
-            # popDict= {el: {svName: population}}
-            popDict = tree.parseArr2Dict(rawPop)
+            numStreams = 0
+            for svName in popDict:
+                for elem in popDict[svName]:
+                    numStreams += 0
 
-            import h5py
-            with h5py.File(h5FileName, 'r') as h5File:
-                results = {}
-                for elem in popDict:
+            for svName in popDict:
+                results[svName] = {}
 
-                    results[elem] = {}
+                for elem in popDict[svName]:
 
-                    for svName in popDict[elem]:
-                        results[elem][svName] = {}
+                    pop = cp.asarray(popDict[svName][elem])
 
-                        # sve = entry[svName][elem]['energy']
-                        # svf = entry[svName][elem]['forces']
+                    results[svName][elem] = {}
 
-                        sve = h5File[structName][svName][elem]['energy'][()]
-                        svf = h5File[structName][svName][elem]['forces'][()]
+                    sve = cp.asarray(entry[svName][elem]['energy'])
+                    svf = cp.asarray(entry[svName][elem]['forces'])
 
-                        eng = sve.dot(popDict[elem][svName].T)
-                        fcs = svf.dot(popDict[elem][svName].T)
+                    eng = sve.dot(pop)
+                    fcs = svf.dot(pop)
 
-                        Ne = eng.shape[0]
-                        Nn = eng.shape[1] // P
-                        Na = fcs.shape[1]
+                    eng = cp.asnumpy(eng)
+                    fcs = cp.asnumpy(fcs)
 
-                        eng = eng.reshape((Ne, Nn, P))
-                        eng = np.moveaxis(eng, 1, 0)
-                        eng = np.moveaxis(eng, -1, 1)
+                    Ne = eng.shape[0]
+                    Nn = eng.shape[1] // P
+                    Na = fcs.shape[1]
 
-                        fcs = fcs.reshape((Ne, Na, 3, Nn, P))
-                        fcs = np.moveaxis(fcs, -2, 0)
-                        fcs = np.moveaxis(fcs, -1, 1)
+                    eng = eng.reshape((Ne, Nn, P))
+                    eng = np.moveaxis(eng, 1, 0)
+                    eng = np.moveaxis(eng, -1, 1)
 
-                        results[elem][svName]['energy'] = eng
-                        results[elem][svName]['forces'] = fcs
+                    fcs = fcs.reshape((Ne, Na, 3, Nn, P))
+                    fcs = np.moveaxis(fcs, -2, 0)
+                    fcs = np.moveaxis(fcs, -1, 1)
 
+                    results[svName][elem]['energy'] = eng
+                    results[svName][elem]['forces'] = fcs
+
+                    del sve
+                    del svf
+                    cp._default_memory_pool.free_all_blocks()
+                    cp._default_pinned_memory_pool.free_all_blocks()
+
+            # Now parse the results
             counters = {
-                el: {
-                    svName: 0 for svName in popDict[el]
-                } for el in popDict
+                svName: {
+                    el: 0 for el in popDict[svName]
+                } for svName in popDict
             }
 
-            for elem in tree.chemistryTrees:
-                for svNode in tree.chemistryTrees[elem].svNodes:
-                    svName = svNode.description
+            treeResults = []
+            for tree in pickledTrees:
+                tree = pickle.loads(tree)
 
-                    idx = counters[elem][svName]
+                for elem in tree.chemistryTrees:
+                    for svNode in tree.chemistryTrees[elem].svNodes:
+                        svName = svNode.description
 
-                    eng = results[elem][svName]['energy'][idx]
-                    fcs = results[elem][svName]['forces'][idx]
+                        idx = counters[svName][elem]
 
-                    svNode.values = (eng, fcs)
+                        eng = results[svName][elem]['energy'][idx]
+                        fcs = results[svName][elem]['forces'][idx]
 
-                    counters[elem][svName] += 1
+                        svNode.values = (eng, fcs)
 
-            engResult, fcsResult = tree.eval(useDask=False)
+                        counters[svName][elem] += 1
 
-            fcsErrors = np.average(abs(sum(fcsResult) - tvF), axis=(1,2))
+                engResult, fcsResult = tree.eval(useDask=False)
 
-            return sum(engResult), fcsErrors
+                fcsErrors = np.average(abs(sum(fcsResult) - tvF), axis=(1,2))
+
+                treeResults.append((sum(engResult), fcsErrors))
+
+            return treeResults
 
         graph   = {}
         keys    = []
+
+        pickledTrees = [pickle.dumps(tree) for tree in trees]
         for structNum, struct in enumerate(structNames):
-            for treeNum, (tree, rawPop) in enumerate(zip(trees, rawPopulations)):
-                key = 'treeStructEval-struct_{}-tree_{}'.format(
-                    structNum, treeNum
-                )
+            key = 'treeStructEval-struct_{}'.format(
+                structNum
+            )
 
-                keys.append(key)
+            graph[key] = (
+                treeStructEval,
+                self.database[struct], pickledTrees, fullPopDict,
+                trueValues[struct]['forces'],
+                P
+            )
 
-                graph[key] = (
-                    treeStructEval,
-                    # self.database[struct], pickle.dumps(tree), rawPop,
-                    struct, pickle.dumps(tree), rawPop,
-                    trueValues[struct]['forces'],
-                    P,
-                    h5pyFileName
-                )
+            keys.append(key)
 
         return graph, keys
 

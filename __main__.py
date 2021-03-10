@@ -12,13 +12,15 @@ from copy import deepcopy
 import random
 import numpy as np
 
+import dask
 from dask_mpi import initialize
-initialize(
-    nthreads=2,
-    memory_limit='4 GB',
-    # interface='ipogif0',
-    local_directory=os.getcwd()
-)
+with dask.config.set({"distributed.worker.resources.GPU": 1}):
+    initialize(
+        nthreads=1,
+        memory_limit='32 GB',
+        interface='ipogif0',
+        local_directory=os.getcwd()
+    )
 
 import dask
 import dask.array
@@ -313,8 +315,7 @@ def polish(client, settings):
     # Setup
     with h5py.File(settings['databasePath'], 'r') as h5pyFile:
         database = SVDatabase(h5pyFile)
-        # wait(database.load(h5pyFile, allSums=settings['allSums']))
-        database.load(h5pyFile, allSums=settings['allSums'])
+        wait(database.load(h5pyFile, allSums=settings['allSums']))
 
         evaluator = SVEvaluator(database, settings)
 
@@ -397,63 +398,25 @@ def polish(client, settings):
 
         populationDict, rawPopulations = regressor.generatePopulationDict(N)
 
-        # svEng = evaluator.evaluate(populationDict, 'energy', useDask=False)
-
-        # for svName in populationDict:
-        #     for el, pop in populationDict[svName].items():
-        #         populationDict[svName][el] = client.scatter(pop)#, broadcast=True)
-
-        # svFcs = evaluator.evaluate(populationDict, 'forces')
-
-        # perTreeResults = regressor.evaluateTrees(
-        #     svEng, svFcs, N, database.trueValues
-        # )
-
-        # perTreeResults = client.gather(client.compute(perTreeResults))
-
-        # graph = evaluator.build_dot_graph(populationDict)
-        # graph = regressor.build_evaltree_graph(graph, N, database.trueValues)
-# 
-        # perTreeResults = []
-        # for structNum in range(len(database.attrs['structNames'])):
-            # for treeNum in range(len(regressor.trees)):
-                # key = 'eval-struct_{}-tree_{}'.format(structNum, treeNum)
-                # perTreeResults.append(key)
-# 
-        # perTreeResults = client.get(graph, perTreeResults)
-
-        scatteredPop = client.scatter(rawPopulations)
+        for svName in populationDict:
+            for el, pop in populationDict[svName].items():
+                populationDict[svName][el] = client.scatter(pop)
 
         graph, keys = evaluator.build_dot_graph(
-            regressor.trees, scatteredPop, database.trueValues, N,
-            settings['databasePath']
+            regressor.trees, populationDict, database.trueValues, N
         )
 
-        # keys = [tree.eval() for each tree for each struct]
-        perTreeResults = client.get(graph, keys)
+        perTreeResults = client.get(graph, keys, resources={'GPU': 1})
 
         energies = {struct: [] for struct in database.attrs['structNames']}
         forces   = {struct: [] for struct in database.attrs['structNames']}
 
         counter = 0
         for struct in database.attrs['structNames']:
-            for _ in range(len(regressor.trees)):
-                res = perTreeResults[counter]
-
-                energies[struct].append(res[0])
-                forces[struct].append(res[1])
-
-                counter += 1
-
-        # for structName in database.attrs['structNames'][::-1]:
-        #     for _ in range(len(regressor.trees)):
-        #         res = perTreeResults.pop()
-
-        #         energies[structName].append(res[0])
-        #         forces[structName].append(res[1])
-
-        #     energies[structName] = energies[structName][::-1]
-        #     forces[structName] = forces[structName][::-1]
+            res = perTreeResults[counter]
+            energies[struct]    = [s[0] for s in res]
+            forces[struct]      = [s[1] for s in res]
+            counter += 1
 
         # Save the (per-struct) errors and the single-value costs
         errors = computeErrors(
