@@ -138,82 +138,6 @@ class SVRegressor:
 
         self.trees += treesToAdd
 
-    
-    def build_evaltree_graph(self, graph, P, trueValues):
-
-        # Build dictionary of indexers for parsing tasks
-        indexers = {}
-
-        for svName in self.svNames:
-            indexers[svName] = {}
-            for elem in self.elements:
-                indexers[svName][elem] = []
-
-                counter = 0
-
-                for tree in self.trees:
-                    treeIndices = []
-
-                    for svNode in tree.chemistryTrees[elem].svNodes:
-                        # Only update the SVNode objects of the current type
-                        if svNode.description == svName:
-                            treeIndices.append(counter)
-                            counter += 1
-
-                    # Reverse list here since we'll be popping from it later
-                    indexers[svName][elem].append(treeIndices[::-1])
-
-        from dask.compatibility import apply
-        
-        for structNum, struct in enumerate(self.structNames):
-            indexCopy = deepcopy(indexers)
-
-            for treeNum, tree in enumerate(self.trees):
-                treeArgs = []
-                treeIndices = []
-                for elem in self.elements:
-                    for svNode in tree.chemistryTrees[elem].svNodes:
-                        svName = svNode.description
-
-                        # Key pointing to energies/forces of a given chunk
-                        for ci in range(self.chunks[svName][elem]):
-                            efKey = 'chunkDot-struct_{}-{}-{}-{}'.format(
-                                structNum, svName, elem, ci
-                            )
-
-                            # chunkKeys.append(efKey)
-                            treeArgs.append(efKey)
-
-                        # chunkKeys = list of keys for relevant chunkDot tasks
-
-                        # treeArgs.append(chunkKeys)
-                        treeIndices.append(
-                            indexCopy[svName][elem][treeNum].pop()
-                        )
-
-                # treeArgs = keys for task for all chunks of all relevant SVs
-                key = 'eval-struct_{}-tree_{}'.format(structNum, treeNum)
-                graph[key] = (
-                    apply,
-                    parseAndEval,
-                    treeArgs,
-                    {
-                        'tree': pickle.dumps(tree),
-                        'listOfIndices': treeIndices,
-                        'P': P,
-                        'tvF': trueValues[struct],
-                        'numChunks': self.chunks,
-                        'allSums': self.settings['allSums']
-                    }
-                )
-
-                # graph[key] = task to evaluate tree for a given structure
-
-                # TODO: need to parse treeArgs in order to batch the chunks
-
-        return graph
-
-
 
     def evaluateTrees(self, svEng, svFcs, P, trueValues, useDask=True):
         """
@@ -386,47 +310,6 @@ class SVRegressor:
 
         return newTree
 
-    
-    def evolvePopulation(self):
-        """
-        Performs an in-place evolution of self.trees using tournament selection,
-        crossover, and mutation. Assumes that self.trees is the current set of
-        parent trees.
-        """
-
-        newTrees = []
-        for _ in range(self.settings['numberOfTrees'] - len(self.trees)):
-            # parent = deepcopy(random.choice(self.trees))
-
-            # # For handling only allowing crossover OR point mutation
-            # pmProb = self.settings['crossoverProb']\
-            #     + self.settings['pointMutateProb']
-
-            # rand = random.random()
-            # if rand < self.settings['crossoverProb']:
-            #     # Randomly perform crossover operation
-            #     donor = self.tournament()
-            #     parent.crossover(donor)
-            # elif rand < pmProb:
-            #     parent.pointMutate(
-            #         self.svNodePool, self.settings['pointMutateProb']
-            #     )
-
-            # parent.updateSVNodes()
-            # newTrees.append(parent)
-
-            newTrees.append(self.newIndividual())
-        
-        return newTrees
-
-
-    def mate(self):
-        raise NotImplementedError
-
-    
-    def mutate(self):
-        raise NotImplementedError
-
 
     def printTop10Header(self, regStep):
         print(regStep, flush=True)
@@ -448,7 +331,6 @@ class SVRegressor:
         """
 
         rawPopulations = [np.array(opt.ask(N)) for opt in self.optimizers]
-        # rawPopulations = self.optimizers.map(_ask, N).compute()
 
         # Used for parsing later
         self.numNodes = {}
@@ -497,13 +379,6 @@ class SVRegressor:
                 dat = dat.astype('float32')
 
                 populationDict[svName][elem] = dat.astype('float32')
-
-                # self.chunks[svName][elem] = int(np.ceil(dat.shape[1]/300))
-                # # self.chunks[svName][elem] = 1
-
-                # populationDict[svName][elem] = np.array_split(
-                #     dat, self.chunks[svName][elem], axis=1
-                # )
 
         return populationDict, rawPopulations
 
@@ -595,9 +470,6 @@ def buildSVNodePool(database):
 def parseAndEval(
     *args,
     **kwargs,
-    # tree=None, listOfIndices=None,
-    # P=None, tvF=None, numChunks=None,
-    # allSums=False
     ):
 
     tree            = kwargs['tree']
@@ -609,12 +481,6 @@ def parseAndEval(
 
     import pickle
     tree = pickle.loads(tree)
-
-    # listOfArgs = [([key for each chunk of SV], idx) for each SV of tree]
-
-    # listOfArgs = [key for each chunk for each SV} -- 1-D; need to parse
-
-    # self.chunks[svName][elem] = int(np.ceil(dat.shape[1]/300))
 
     nodeCounter     = 0
     chunkCounter    = 0
@@ -630,20 +496,8 @@ def parseAndEval(
             idx = listOfIndices[nodeCounter]
             nodeCounter += 1
 
-    # for svNode, chunkTup, idx in zip(tree.svNodes, listOfArgs, listOfIndices):
-
             eng = np.concatenate([c[0] for c in chunkTup], axis=-1)
             fcs = np.concatenate([c[1] for c in chunkTup], axis=-1)
-
-            # Note: stacking these chunks gives all evals for all populations, which
-            # then need to be indexed
-
-            # eng = argTup[0]
-            # fcs = argTup[1]
-            # idx = argTup[2]
-
-            # if 'ffg' in svNode.description:
-            #     fcs = np.concatenate(fcs, axis=-1)
 
             Ne = eng.shape[0]
             Nn = eng.shape[1] // P
