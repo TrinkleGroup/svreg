@@ -293,7 +293,6 @@ class SVTree(list):
                 where N is the number of atoms in the current structure.
         """
 
-        import dask
         import dask.array as da
 
         # Check for single-node tree

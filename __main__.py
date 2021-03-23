@@ -246,10 +246,11 @@ def main(client, settings):
                 populationDict[svName][el] = client.scatter(pop)
 
         graph, keys = evaluator.build_dot_graph(
-            regressor.trees, populationDict, database.trueValues, N
+            regressor.trees, populationDict, database.trueValues, N,
+            settings['allSums']
         )
 
-        perTreeResults = client.get(graph, keys, resources={'GPU': 1})
+        perTreeResults = client.get(graph, keys)#, resources={'GPU': 1})
 
         energies = {struct: [] for struct in database.attrs['structNames']}
         forces   = {struct: [] for struct in database.attrs['structNames']}
@@ -384,7 +385,8 @@ def polish(client, settings):
                 populationDict[svName][el] = client.scatter(pop)
 
         graph, keys = evaluator.build_dot_graph(
-            regressor.trees, populationDict, database.trueValues, N
+            regressor.trees, populationDict, database.trueValues, N,
+            settings['allSums']
         )
 
         perTreeResults = client.get(graph, keys, resources={'GPU': 1})

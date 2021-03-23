@@ -125,16 +125,14 @@ class SVEvaluator:
         return summedResults
 
 
-    def build_dot_graph(self, trees, fullPopDict, trueValues, P):
+    def build_dot_graph(self, trees, fullPopDict, trueValues, P, allSums=False):
 
         structNames = list(self.database.attrs['structNames'])
-        allSVnames  = list(self.database.attrs['svNames'])
-        elements    = list(self.database.attrs['elements'])
 
         import pickle
-        import cupy as cp
+        # import cupy as cp
 
-        def treeStructEval(entry, pickledTrees, popDict, tvF, P):
+        def treeStructEval(entry, pickledTrees, popDict, tvF, P, allSums):
             treeResults = []
 
             # Evaluate all SVs for the structure
@@ -150,28 +148,36 @@ class SVEvaluator:
 
                 for elem in popDict[svName]:
 
-                    pop = cp.asarray(popDict[svName][elem])
+                    # pop = cp.asarray(popDict[svName][elem])
+                    pop = np.array(popDict[svName][elem])
 
                     results[svName][elem] = {}
 
-                    sve = cp.asarray(entry[svName][elem]['energy'])
-                    svf = cp.asarray(entry[svName][elem]['forces'])
+                    # sve = cp.asarray(entry[svName][elem]['energy'])
+                    # svf = cp.asarray(entry[svName][elem]['forces'])
+                    sve = np.array(entry[svName][elem]['energy'])
+                    svf = np.array(entry[svName][elem]['forces'])
 
                     eng = sve.dot(pop)
                     fcs = svf.dot(pop)
 
-                    eng = cp.asnumpy(eng)
-                    fcs = cp.asnumpy(fcs)
+                    # eng = cp.asnumpy(eng)
+                    # fcs = cp.asnumpy(fcs)
 
                     Ne = eng.shape[0]
                     Nn = eng.shape[1] // P
-                    Na = fcs.shape[1]
 
                     eng = eng.reshape((Ne, Nn, P))
                     eng = np.moveaxis(eng, 1, 0)
                     eng = np.moveaxis(eng, -1, 1)
 
-                    fcs = fcs.reshape((Ne, Na, 3, Nn, P))
+                    if allSums:
+                        Na = fcs.shape[0]
+                        fcs = fcs.reshape((Na, 3, Nn, P))
+                    else:
+                        Na = fcs.shape[1]
+                        fcs = fcs.reshape((Ne, Na, 3, Nn, P))
+
                     fcs = np.moveaxis(fcs, -2, 0)
                     fcs = np.moveaxis(fcs, -1, 1)
 
@@ -180,8 +186,8 @@ class SVEvaluator:
 
                     del sve
                     del svf
-                    cp._default_memory_pool.free_all_blocks()
-                    cp._default_pinned_memory_pool.free_all_blocks()
+                    # cp._default_memory_pool.free_all_blocks()
+                    # cp._default_pinned_memory_pool.free_all_blocks()
 
             # Now parse the results
             counters = {
@@ -207,7 +213,7 @@ class SVEvaluator:
 
                         counters[svName][elem] += 1
 
-                engResult, fcsResult = tree.eval(useDask=False)
+                engResult, fcsResult = tree.eval(useDask=False, allSums=allSums)
 
                 fcsErrors = np.average(abs(sum(fcsResult) - tvF), axis=(1,2))
 
@@ -228,7 +234,8 @@ class SVEvaluator:
                 treeStructEval,
                 self.database[struct], pickledTrees, fullPopDict,
                 trueValues[struct]['forces'],
-                P
+                P,
+                allSums
             )
 
             keys.append(key)

@@ -200,7 +200,7 @@ _function_map = {
     # 'arctan': arctan1,
     # 'exp': exp,
     # 'sig': sig,
-    'softplus': softplus
+    # 'softplus': softplus
 }
 
 _arities = {
@@ -214,7 +214,7 @@ _arities = {
         # 'arctan',
         # 'exp',
         # 'sig',
-        'softplus',
+        # 'softplus',
     ],
     2: [
         'add',
