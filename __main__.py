@@ -245,12 +245,14 @@ def main(client, settings):
             for el, pop in populationDict[svName].items():
                 populationDict[svName][el] = client.scatter(pop)
 
-        graph, keys = evaluator.build_dot_graph(
+        # graph, keys = evaluator.build_dot_graph(
+        perTreeResults = evaluator.build_dot_graph(
             regressor.trees, populationDict, database.trueValues, N,
             settings['allSums']
         )
 
-        perTreeResults = client.get(graph, keys)#, resources={'GPU': 1})
+        # perTreeResults = client.get(graph, keys)#, resources={'GPU': 1})
+        perTreeResults = client.gather(client.compute(perTreeResults))
 
         energies = {struct: [] for struct in database.attrs['structNames']}
         forces   = {struct: [] for struct in database.attrs['structNames']}

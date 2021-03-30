@@ -92,24 +92,24 @@ class SVDatabase(dict):
 
                     self[struct][sv][elem]['energy'] = group['energy'][()]
 
-                    if allSums:
-                        forceData = np.einsum('ijkl->jkl', forceData)
+                    # if allSums:
+                    #     forceData = np.einsum('ijkl->jkl', forceData)
 
-                    if useDask:
-                        # self[struct][sv][elem]['energy'] = da.from_array(
-                        #     group['energy'][()],
-                        #     chunks=group['energy'][()].shape
-                        # ).astype('float32').persist()
+                    # if useDask:
+                    #     # self[struct][sv][elem]['energy'] = da.from_array(
+                    #     #     group['energy'][()],
+                    #     #     chunks=group['energy'][()].shape
+                    #     # ).astype('float32').persist()
 
-                        self[struct][sv][elem]['forces'] = da.from_array(
-                            forceData,
-                            # chunks=(5000, forceData.shape[1]),
-                            chunks=forceData.shape
-                        ).astype('float32').persist()
-                    else:
-                        self[struct][sv][elem]['forces'] = forceData
+                    #     self[struct][sv][elem]['forces'] = da.from_array(
+                    #         forceData,
+                    #         # chunks=(5000, forceData.shape[1]),
+                    #         chunks=forceData.shape
+                    #     ).astype('float32').persist()
+                    # else:
+                    #     self[struct][sv][elem]['forces'] = forceData
 
                     futures.append(self[struct][sv][elem]['energy'])
-                    futures.append(self[struct][sv][elem]['forces'])
+                    # futures.append(self[struct][sv][elem]['forces'])
 
         return futures

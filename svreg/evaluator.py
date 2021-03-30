@@ -132,6 +132,30 @@ class SVEvaluator:
         import pickle
         # import cupy as cp
 
+        import h5py
+        import dask
+
+        @dask.delayed
+        def read(entryName):
+            entry = {}
+            with h5py.File(
+                '../svreg_data/hyojung/hj.hdf5-fixed-f32-noref-full-allsums',
+                'r'
+            ) as db:
+
+                for svName in db[entryName]:
+                    entry[svName] = {}
+
+                    for elem in db[entryName][svName]:
+                        entry[svName][elem] = {}
+                        
+                        group = db[entryName][svName][elem]
+                        entry[svName][elem]['energy'] = group['energy'][()]
+                        entry[svName][elem]['forces'] = group['forces'][()]
+            
+            return entry
+
+        @dask.delayed
         def treeStructEval(entry, pickledTrees, popDict, tvF, P, allSums):
             treeResults = []
 
@@ -225,19 +249,33 @@ class SVEvaluator:
         keys    = []
 
         pickledTrees = [pickle.dumps(tree) for tree in trees]
+
+        perTreeResults = []
         for structNum, struct in enumerate(structNames):
-            key = 'treeStructEval-struct_{}'.format(
-                structNum
+
+            perTreeResults.append(
+                treeStructEval(
+                    read(struct),
+                    pickledTrees,
+                    fullPopDict,
+                    trueValues[struct]['forces'],
+                    P,
+                    allSums
+                )
             )
+            # key = 'treeStructEval-struct_{}'.format(
+            #     structNum
+            # )
 
-            graph[key] = (
-                treeStructEval,
-                self.database[struct], pickledTrees, fullPopDict,
-                trueValues[struct]['forces'],
-                P,
-                allSums
-            )
+            # graph[key] = (
+            #     treeStructEval,
+            #     self.database[struct], pickledTrees, fullPopDict,
+            #     trueValues[struct]['forces'],
+            #     P,
+            #     allSums
+            # )
 
-            keys.append(key)
+            # keys.append(key)
 
-        return graph, keys
+        # return graph, keys
+        return perTreeResults
