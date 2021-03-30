@@ -135,7 +135,7 @@ class SVEvaluator:
         import h5py
         import dask
 
-        @dask.delayed
+        # @dask.delayed
         def treeStructEval(pickledTrees, popDict, P, allSums):
 
             from dask.distributed import get_worker
@@ -243,13 +243,23 @@ class SVEvaluator:
 
         pickledTrees = [pickle.dumps(tree) for tree in trees]
 
-        # TODO: these results may or not be in the correct order
-        client = get_client()
-        perTreeResults = client.run(
-            treeStructEval, pickledTrees, fullPopDict, P, allSums
-        )
+        from mpi4py import MPI
+        size = MPI.COMM_WORLD.Get_size() - 2
 
-        return perTreeResults
+        for workerId in range(size):
+            key = 'workerResults-{}'.format(workerId)
+            keys.append(key)
+
+            graph[key] = (treeStructEval, pickledTrees, fullPopDict, P, allSums)
+
+        return graph, keys
+
+        # client = get_client()
+        # perTreeResults = client.run(
+        #     treeStructEval, pickledTrees, fullPopDict, P, allSums
+        # )
+
+        # return perTreeResults
 
         if numTasks is None:
             splits = [[s] for s in structName]

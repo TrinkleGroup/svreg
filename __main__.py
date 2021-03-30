@@ -275,20 +275,21 @@ def main(client, settings):
         #     [database.attrs['elements']]*worldSize,
         # )
 
-        client.gather(client.compute(futures))
+        # client.gather(client.compute(futures))
 
-        # graph, keys = evaluator.build_dot_graph(
-        perTreeResults = evaluator.build_dot_graph(
+        graph, keys = evaluator.build_dot_graph(
+        # perTreeResults = evaluator.build_dot_graph(
             regressor.trees, populationDict, database.trueValues, N,
             worldSize, settings['allSums']
         )
 
-        # perTreeResults = client.get(graph, keys)#, resources={'GPU': 1})
-        perTreeResults = client.gather(client.compute(perTreeResults))
+        perTreeResults = client.get(graph, keys)
+        # perTreeResults = client.gather(client.compute(perTreeResults))
 
-        workers = perTreeResults.keys()
-        perWorkerResults    = [perTreeResults[w][0] for w in workers]
-        perWorkerNames      = [perTreeResults[w][1] for w in workers]
+        # workers = perTreeResults.keys()
+        # perWorkerResults    = [perTreeResults[w][0] for w in workers]
+        # perWorkerNames      = [perTreeResults[w][1] for w in workers]
+        perWorkerResults, perWorkerNames = zip(*perTreeResults)
 
         import itertools
         perWorkerResults    = list(itertools.chain.from_iterable(perWorkerResults))
@@ -441,15 +442,19 @@ def polish(client, settings):
         #     for el, pop in populationDict[svName].items():
         #         populationDict[svName][el] = client.scatter(pop)
 
-        # graph, keys = evaluator.build_dot_graph(
-        perTreeResults = evaluator.build_dot_graph(
+        graph, keys = evaluator.build_dot_graph(
+        # perTreeResults = evaluator.build_dot_graph(
             regressor.trees, populationDict, database.trueValues, N,
             worldSize, settings['allSums']
         )
 
-        workers = perTreeResults.keys()
-        perWorkerResults    = [perTreeResults[w][0] for w in workers]
-        perWorkerNames      = [perTreeResults[w][1] for w in workers]
+        perTreeResults = client.get(graph, keys)
+        # perTreeResults = client.gather(client.compute(perTreeResults))
+
+        # workers = perTreeResults.keys()
+        # perWorkerResults    = [perTreeResults[w][0] for w in workers]
+        # perWorkerNames      = [perTreeResults[w][1] for w in workers]
+        perWorkerResults, perWorkerNames = zip(*perTreeResults)
 
         import itertools
         perWorkerResults    = list(itertools.chain.from_iterable(perWorkerResults))
