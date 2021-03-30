@@ -125,7 +125,7 @@ class SVEvaluator:
         return summedResults
 
 
-    def build_dot_graph(self, trees, fullPopDict, trueValues, P, allSums=False):
+    def build_dot_graph(self, trees, fullPopDict, trueValues, P, numTasks=None, allSums=False):
 
         structNames = list(self.database.attrs['structNames'])
 
@@ -135,134 +135,157 @@ class SVEvaluator:
         import h5py
         import dask
 
-        @dask.delayed
-        def read(entryName):
-            entry = {}
-            with h5py.File(
-                '../svreg_data/hyojung/hj.hdf5-fixed-f32-noref-full-allsums',
-                'r'
-            ) as db:
+        def read(entryNames):
+            entries = []
+            trueForces = []
 
-                for svName in db[entryName]:
-                    entry[svName] = {}
+            for entryName in entryNames:
+                entry = {}
+                with h5py.File(
+                    '/projects/sciteam/bbeb/AlZnMg/AL_Al/AL_Al-full-allsums.hdf5',
+                    'r'
+                ) as db:
 
-                    for elem in db[entryName][svName]:
-                        entry[svName][elem] = {}
-                        
-                        group = db[entryName][svName][elem]
-                        entry[svName][elem]['energy'] = group['energy'][()]
-                        entry[svName][elem]['forces'] = group['forces'][()]
+                    trueForces.append(db[entryName].attrs['forces'])
+
+                    for svName in db[entryName]:
+                        entry[svName] = {}
+
+                        for elem in db[entryName][svName]:
+                            entry[svName][elem] = {}
+                            
+                            group = db[entryName][svName][elem]
+
+                            entry[svName][elem]['energy'] = group['energy'][()]
+                            entry[svName][elem]['forces'] = group['forces'][()]
+
+                    entries.append(entry)
+
             
-            return entry
+            return entries, trueForces
 
         @dask.delayed
-        def treeStructEval(entry, pickledTrees, popDict, tvF, P, allSums):
-            treeResults = []
+        def treeStructEval(entries, pickledTrees, popDict, tvFs, P, allSums):
 
-            # Evaluate all SVs for the structure
-            results = {}
+            allResults = []
+            for entry, tvF in zip(entries, tvFs):
 
-            numStreams = 0
-            for svName in popDict:
-                for elem in popDict[svName]:
-                    numStreams += 0
+                treeResults = []
 
-            for svName in popDict:
-                results[svName] = {}
+                # Evaluate all SVs for the structure
+                results = {}
 
-                for elem in popDict[svName]:
+                numStreams = 0
+                for svName in popDict:
+                    for elem in popDict[svName]:
+                        numStreams += 0
 
-                    # pop = cp.asarray(popDict[svName][elem])
-                    pop = np.array(popDict[svName][elem])
+                for svName in popDict:
+                    results[svName] = {}
 
-                    results[svName][elem] = {}
+                    for elem in popDict[svName]:
 
-                    # sve = cp.asarray(entry[svName][elem]['energy'])
-                    # svf = cp.asarray(entry[svName][elem]['forces'])
-                    sve = np.array(entry[svName][elem]['energy'])
-                    svf = np.array(entry[svName][elem]['forces'])
+                        # pop = cp.asarray(popDict[svName][elem])
+                        pop = np.array(popDict[svName][elem])
 
-                    eng = sve.dot(pop)
-                    fcs = svf.dot(pop)
+                        results[svName][elem] = {}
 
-                    # eng = cp.asnumpy(eng)
-                    # fcs = cp.asnumpy(fcs)
+                        # sve = cp.asarray(entry[svName][elem]['energy'])
+                        # svf = cp.asarray(entry[svName][elem]['forces'])
+                        sve = np.array(entry[svName][elem]['energy'])
+                        svf = np.array(entry[svName][elem]['forces'])
 
-                    Ne = eng.shape[0]
-                    Nn = eng.shape[1] // P
+                        eng = sve.dot(pop)
+                        fcs = svf.dot(pop)
 
-                    eng = eng.reshape((Ne, Nn, P))
-                    eng = np.moveaxis(eng, 1, 0)
-                    eng = np.moveaxis(eng, -1, 1)
+                        # eng = cp.asnumpy(eng)
+                        # fcs = cp.asnumpy(fcs)
 
-                    if allSums:
-                        Na = fcs.shape[0]
-                        fcs = fcs.reshape((Na, 3, Nn, P))
-                    else:
-                        Na = fcs.shape[1]
-                        fcs = fcs.reshape((Ne, Na, 3, Nn, P))
+                        Ne = eng.shape[0]
+                        Nn = eng.shape[1] // P
 
-                    fcs = np.moveaxis(fcs, -2, 0)
-                    fcs = np.moveaxis(fcs, -1, 1)
+                        eng = eng.reshape((Ne, Nn, P))
+                        eng = np.moveaxis(eng, 1, 0)
+                        eng = np.moveaxis(eng, -1, 1)
 
-                    results[svName][elem]['energy'] = eng
-                    results[svName][elem]['forces'] = fcs
+                        if allSums:
+                            Na = fcs.shape[0]
+                            fcs = fcs.reshape((Na, 3, Nn, P))
+                        else:
+                            Na = fcs.shape[1]
+                            fcs = fcs.reshape((Ne, Na, 3, Nn, P))
 
-                    del sve
-                    del svf
-                    # cp._default_memory_pool.free_all_blocks()
-                    # cp._default_pinned_memory_pool.free_all_blocks()
+                        fcs = np.moveaxis(fcs, -2, 0)
+                        fcs = np.moveaxis(fcs, -1, 1)
 
-            # Now parse the results
-            counters = {
-                svName: {
-                    el: 0 for el in popDict[svName]
-                } for svName in popDict
-            }
+                        results[svName][elem]['energy'] = eng
+                        results[svName][elem]['forces'] = fcs
 
-            treeResults = []
-            for tree in pickledTrees:
-                tree = pickle.loads(tree)
+                        del sve
+                        del svf
+                        # cp._default_memory_pool.free_all_blocks()
+                        # cp._default_pinned_memory_pool.free_all_blocks()
 
-                for elem in tree.chemistryTrees:
-                    for svNode in tree.chemistryTrees[elem].svNodes:
-                        svName = svNode.description
+                # Now parse the results
+                counters = {
+                    svName: {
+                        el: 0 for el in popDict[svName]
+                    } for svName in popDict
+                }
 
-                        idx = counters[svName][elem]
+                treeResults = []
+                for tree in pickledTrees:
+                    tree = pickle.loads(tree)
 
-                        eng = results[svName][elem]['energy'][idx]
-                        fcs = results[svName][elem]['forces'][idx]
+                    for elem in tree.chemistryTrees:
+                        for svNode in tree.chemistryTrees[elem].svNodes:
+                            svName = svNode.description
 
-                        svNode.values = (eng, fcs)
+                            idx = counters[svName][elem]
 
-                        counters[svName][elem] += 1
+                            eng = results[svName][elem]['energy'][idx]
+                            fcs = results[svName][elem]['forces'][idx]
 
-                engResult, fcsResult = tree.eval(useDask=False, allSums=allSums)
+                            svNode.values = (eng, fcs)
 
-                fcsErrors = np.average(abs(sum(fcsResult) - tvF), axis=(1,2))
+                            counters[svName][elem] += 1
 
-                treeResults.append((sum(engResult), fcsErrors))
+                    engResult, fcsResult = tree.eval(useDask=False, allSums=allSums)
 
-            return treeResults
+                    fcsErrors = np.average(abs(sum(fcsResult) - tvF), axis=(1,2))
+
+                    treeResults.append((sum(engResult), fcsErrors))
+
+                allResults.append(treeResults)
+
+            return allResults
 
         graph   = {}
         keys    = []
 
         pickledTrees = [pickle.dumps(tree) for tree in trees]
 
+        if numTasks is None:
+            splits = [[s] for s in structName]
+        else:
+            splits = np.array_split(structNames, numTasks)
+
         perTreeResults = []
-        for structNum, struct in enumerate(structNames):
+        for structNum, taskChunk in enumerate(splits):
+
+            entries, trueForces = dask.delayed(read, nout=2)(taskChunk)
 
             perTreeResults.append(
                 treeStructEval(
-                    read(struct),
+                    entries,
                     pickledTrees,
                     fullPopDict,
-                    trueValues[struct]['forces'],
+                    trueForces,
                     P,
                     allSums
                 )
             )
+
             # key = 'treeStructEval-struct_{}'.format(
             #     structNum
             # )
