@@ -1,5 +1,5 @@
+import h5py
 import numpy as np
-import dask.array as da
 
 
 class SVDatabase(dict):
@@ -61,18 +61,12 @@ class SVDatabase(dict):
         }
 
 
-    def load(self, h5pyFile, useDask=True, allSums=False):
+    def load(self, h5pyFile):
 
         structNames = self.attrs['structNames']
         svNames = self.attrs['svNames']
         elements = self.attrs['elements']
 
-        from dask.distributed import get_client
-        client = get_client()
-
-        futures = []
-        energies = []
-        forces = []
         for struct in structNames:
             self[struct] = {}
             for sv in svNames:
@@ -84,32 +78,36 @@ class SVDatabase(dict):
                     self.attrs[sv][k] = v
 
                 for elem in elements:
+                    # TODO: this is a placeholder so that the regressor knows
+                    # structures there are
 
-                    self[struct][sv][elem] = {}
+                    self[struct][sv][elem] = None
+
+
+def worker_load(h5pyFileName, localNames, svNames, elements):
+
+    from dask.distributed import get_worker
+
+    worker = get_worker()
+
+    worker._structures = {}
+    worker._true_forces = {}
+
+    with h5py.File(h5pyFileName, 'r') as h5pyFile:
+        for struct in localNames:
+            worker._structures[struct] = {}
+            for sv in svNames:
+                worker._structures[struct][sv] = {}
+
+                for elem in elements:
+
+                    worker._structures[struct][sv][elem] = {}
 
                     group = h5pyFile[struct][sv][elem]
-                    forceData = group['forces']
 
-                    self[struct][sv][elem]['energy'] = group['energy'][()]
+                    worker._structures[struct][sv][elem]['energy'] = group['energy'][()]
+                    worker._structures[struct][sv][elem]['forces'] = group['forces'][()]
+                    
+            worker._true_forces[struct] = h5pyFile[struct].attrs['forces']
 
-                    # if allSums:
-                    #     forceData = np.einsum('ijkl->jkl', forceData)
-
-                    # if useDask:
-                    #     # self[struct][sv][elem]['energy'] = da.from_array(
-                    #     #     group['energy'][()],
-                    #     #     chunks=group['energy'][()].shape
-                    #     # ).astype('float32').persist()
-
-                    #     self[struct][sv][elem]['forces'] = da.from_array(
-                    #         forceData,
-                    #         # chunks=(5000, forceData.shape[1]),
-                    #         chunks=forceData.shape
-                    #     ).astype('float32').persist()
-                    # else:
-                    #     self[struct][sv][elem]['forces'] = forceData
-
-                    futures.append(self[struct][sv][elem]['energy'])
-                    # futures.append(self[struct][sv][elem]['forces'])
-
-        return futures
+    print('Worker._structures:', len(worker._structures), flush=True)

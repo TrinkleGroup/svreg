@@ -17,8 +17,8 @@ from dask_mpi import initialize
 with dask.config.set({"distributed.worker.resources.GPU": 1}):
     initialize(
         nthreads=1,
-        memory_limit='8 GB',
-        interface='ipogif0',
+        memory_limit='4 GB',
+        # interface='ipogif0',
         local_directory=os.getcwd()
     )
 
@@ -71,7 +71,21 @@ def main(client, settings):
     # Setup
     with h5py.File(settings['databasePath'], 'r') as h5pyFile:
         database = SVDatabase(h5pyFile)
-        wait(database.load(h5pyFile, allSums=settings['allSums']))
+        wait(database.load(h5pyFile))
+
+        splits = np.array_split(database.attrs['structNames'], worldSize)
+
+        from svreg.database import worker_load
+
+        futures = client.map(
+            worker_load,
+            [settings['databasePath']]*worldSize,
+            splits,
+            [database.attrs['svNames']]*worldSize,
+            [database.attrs['elements']]*worldSize,
+        )
+
+        client.gather(client.compute(futures))
 
         evaluator = SVEvaluator(database, settings)
 
@@ -243,9 +257,25 @@ def main(client, settings):
         # Continue optimization of currently active trees
         populationDict, rawPopulations = regressor.generatePopulationDict(N)
 
-        for svName in populationDict:
-            for el, pop in populationDict[svName].items():
-                populationDict[svName][el] = client.scatter(pop)
+        # for svName in populationDict:
+        #     for el, pop in populationDict[svName].items():
+        #         populationDict[svName][el] = client.scatter(pop)
+
+        # from svreg.database import worker_load
+
+        # def update_pop(popDict):
+        #     from dask.distributed import get_worker
+        #     worker._population_dict = popDict
+
+        # futures = client.run(
+        #     update_pop,
+        #     [settings['databasePath']]*worldSize,
+        #     splits,
+        #     [database.attrs['svNames']]*worldSize,
+        #     [database.attrs['elements']]*worldSize,
+        # )
+
+        client.gather(client.compute(futures))
 
         # graph, keys = evaluator.build_dot_graph(
         perTreeResults = evaluator.build_dot_graph(
@@ -255,6 +285,20 @@ def main(client, settings):
 
         # perTreeResults = client.get(graph, keys)#, resources={'GPU': 1})
         perTreeResults = client.gather(client.compute(perTreeResults))
+
+        workers = perTreeResults.keys()
+        perWorkerResults    = [perTreeResults[w][0] for w in workers]
+        perWorkerNames      = [perTreeResults[w][1] for w in workers]
+
+        import itertools
+        perWorkerResults    = list(itertools.chain.from_iterable(perWorkerResults))
+        perWorkerNames      = list(itertools.chain.from_iterable(perWorkerNames))
+
+        perWorkerResults = [
+            x for _, x in sorted(zip(perWorkerNames, perWorkerResults))
+        ]
+
+        perTreeResults = perWorkerResults
 
         energies = {struct: [] for struct in database.attrs['structNames']}
         forces   = {struct: [] for struct in database.attrs['structNames']}
@@ -302,7 +346,22 @@ def polish(client, settings):
     # Setup
     with h5py.File(settings['databasePath'], 'r') as h5pyFile:
         database = SVDatabase(h5pyFile)
-        wait(database.load(h5pyFile, allSums=settings['allSums']))
+        wait(database.load(h5pyFile))
+
+        splits = np.array_split(database.attrs['structNames'], worldSize)
+
+        from svreg.database import worker_load
+        import itertools
+
+        futures = client.map(
+            worker_load,
+            [settings['databasePath']]*worldSize,
+            splits,
+            [database.attrs['svNames']]*worldSize,
+            [database.attrs['elements']]*worldSize,
+        )
+
+        client.gather(client.compute(futures))
 
         evaluator = SVEvaluator(database, settings)
 
@@ -378,9 +437,9 @@ def polish(client, settings):
 
         populationDict, rawPopulations = regressor.generatePopulationDict(N)
 
-        for svName in populationDict:
-            for el, pop in populationDict[svName].items():
-                populationDict[svName][el] = client.scatter(pop)
+        # for svName in populationDict:
+        #     for el, pop in populationDict[svName].items():
+        #         populationDict[svName][el] = client.scatter(pop)
 
         # graph, keys = evaluator.build_dot_graph(
         perTreeResults = evaluator.build_dot_graph(
@@ -388,13 +447,19 @@ def polish(client, settings):
             worldSize, settings['allSums']
         )
 
-        # perTreeResults = client.get(graph, keys)#, resources={'GPU': 1})
-        perTreeResults = client.gather(client.compute(perTreeResults))
-
-        print([len(el) for el in perTreeResults], flush=True)
+        workers = perTreeResults.keys()
+        perWorkerResults    = [perTreeResults[w][0] for w in workers]
+        perWorkerNames      = [perTreeResults[w][1] for w in workers]
 
         import itertools
-        perTreeResults = list(itertools.chain.from_iterable(perTreeResults))
+        perWorkerResults    = list(itertools.chain.from_iterable(perWorkerResults))
+        perWorkerNames      = list(itertools.chain.from_iterable(perWorkerNames))
+
+        perWorkerResults = [
+            x for _, x in sorted(zip(perWorkerNames, perWorkerResults))
+        ]
+
+        perTreeResults = perWorkerResults
 
         energies = {struct: [] for struct in database.attrs['structNames']}
         forces   = {struct: [] for struct in database.attrs['structNames']}

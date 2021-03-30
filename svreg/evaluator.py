@@ -135,37 +135,15 @@ class SVEvaluator:
         import h5py
         import dask
 
-        def read(entryNames):
-            entries = []
-            trueForces = []
-
-            for entryName in entryNames:
-                entry = {}
-                with h5py.File(
-                    '/projects/sciteam/bbeb/AlZnMg/AL_Al/AL_Al-full-allsums.hdf5',
-                    'r'
-                ) as db:
-
-                    trueForces.append(db[entryName].attrs['forces'])
-
-                    for svName in db[entryName]:
-                        entry[svName] = {}
-
-                        for elem in db[entryName][svName]:
-                            entry[svName][elem] = {}
-                            
-                            group = db[entryName][svName][elem]
-
-                            entry[svName][elem]['energy'] = group['energy'][()]
-                            entry[svName][elem]['forces'] = group['forces'][()]
-
-                    entries.append(entry)
-
-            
-            return entries, trueForces
-
         @dask.delayed
-        def treeStructEval(entries, pickledTrees, popDict, tvFs, P, allSums):
+        def treeStructEval(pickledTrees, popDict, P, allSums):
+
+            from dask.distributed import get_worker
+            worker = get_worker()
+
+            names = list(worker._structures.keys())
+            entries = [worker._structures[k] for k in names]
+            tvFs = worker._true_forces.values()
 
             allResults = []
             for entry, tvF in zip(entries, tvFs):
@@ -258,12 +236,20 @@ class SVEvaluator:
 
                 allResults.append(treeResults)
 
-            return allResults
+            return allResults, names
 
         graph   = {}
         keys    = []
 
         pickledTrees = [pickle.dumps(tree) for tree in trees]
+
+        # TODO: these results may or not be in the correct order
+        client = get_client()
+        perTreeResults = client.run(
+            treeStructEval, pickledTrees, fullPopDict, P, allSums
+        )
+
+        return perTreeResults
 
         if numTasks is None:
             splits = [[s] for s in structName]
@@ -273,14 +259,14 @@ class SVEvaluator:
         perTreeResults = []
         for structNum, taskChunk in enumerate(splits):
 
-            entries, trueForces = dask.delayed(read, nout=2)(taskChunk)
+            # entries, trueForces = dask.delayed(read, nout=2)(taskChunk)
 
             perTreeResults.append(
                 treeStructEval(
-                    entries,
+                    # entries,
                     pickledTrees,
                     fullPopDict,
-                    trueForces,
+                    # trueForces,
                     P,
                     allSums
                 )
