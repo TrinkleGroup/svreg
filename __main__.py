@@ -74,7 +74,10 @@ def main(client, settings):
         database = SVDatabase(h5pyFile)
         wait(database.load(h5pyFile))
 
-        splits = np.array_split(database.attrs['structNames'], worldSize)
+        names = list(database.attrs['structNames'])
+        random.shuffle(names)
+
+        splits = np.array_split(names, worldSize)
 
         from svreg.database import worker_load
 
@@ -326,7 +329,10 @@ def polish(client, settings):
         database = SVDatabase(h5pyFile)
         wait(database.load(h5pyFile))
 
-        splits = np.array_split(database.attrs['structNames'], worldSize)
+        names = list(database.attrs['structNames'])
+        random.shuffle(names)
+
+        splits = np.array_split(names, worldSize)
 
         from svreg.database import worker_load
         import itertools

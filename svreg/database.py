@@ -67,6 +67,8 @@ class SVDatabase(dict):
         svNames = self.attrs['svNames']
         elements = self.attrs['elements']
 
+        print("Loading {} structures...".format(len(structNames)), flush=True)
+
         for struct in structNames:
             self[struct] = {}
             for sv in svNames:
