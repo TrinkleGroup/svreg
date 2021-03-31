@@ -6,6 +6,7 @@ import time
 import h5py
 import shutil
 import argparse
+import itertools
 from mpi4py import MPI
 from copy import deepcopy
 
@@ -14,13 +15,13 @@ import numpy as np
 
 import dask
 from dask_mpi import initialize
-with dask.config.set({"distributed.worker.resources.GPU": 1}):
-    initialize(
-        nthreads=1,
-        memory_limit='4 GB',
-        # interface='ipogif0',
-        local_directory=os.getcwd()
-    )
+# with dask.config.set({"distributed.worker.resources.GPU": 1}):
+initialize(
+    nthreads=2,
+    memory_limit='8 GB',
+    interface='ipogif0',
+    local_directory=os.getcwd()
+)
 
 import dask
 import dask.array
@@ -257,56 +258,32 @@ def main(client, settings):
         # Continue optimization of currently active trees
         populationDict, rawPopulations = regressor.generatePopulationDict(N)
 
-        # for svName in populationDict:
-        #     for el, pop in populationDict[svName].items():
-        #         populationDict[svName][el] = client.scatter(pop)
-
-        # from svreg.database import worker_load
-
-        # def update_pop(popDict):
-        #     from dask.distributed import get_worker
-        #     worker._population_dict = popDict
-
-        # futures = client.run(
-        #     update_pop,
-        #     [settings['databasePath']]*worldSize,
-        #     splits,
-        #     [database.attrs['svNames']]*worldSize,
-        #     [database.attrs['elements']]*worldSize,
-        # )
-
-        # client.gather(client.compute(futures))
+        for svName in populationDict:
+            for el, pop in populationDict[svName].items():
+                populationDict[svName][el] = client.scatter(pop, broadcast=True)
 
         graph, keys = evaluator.build_dot_graph(
-        # perTreeResults = evaluator.build_dot_graph(
             regressor.trees, populationDict, database.trueValues, N,
             worldSize, settings['allSums']
         )
 
-        perTreeResults = client.get(graph, keys)
-        # perTreeResults = client.gather(client.compute(perTreeResults))
+        perWorkerResults = client.get(graph, keys, direct=True)#, resources={'GPU': 1})
 
-        # workers = perTreeResults.keys()
-        # perWorkerResults    = [perTreeResults[w][0] for w in workers]
-        # perWorkerNames      = [perTreeResults[w][1] for w in workers]
-        perWorkerResults, perWorkerNames = zip(*perTreeResults)
+        perStructResults, perStructNames = zip(*perWorkerResults)
 
-        import itertools
-        perWorkerResults    = list(itertools.chain.from_iterable(perWorkerResults))
-        perWorkerNames      = list(itertools.chain.from_iterable(perWorkerNames))
+        perStructResults    = list(itertools.chain.from_iterable(perStructResults))
+        perStructNames      = list(itertools.chain.from_iterable(perStructNames))
 
-        perWorkerResults = [
-            x for _, x in sorted(zip(perWorkerNames, perWorkerResults))
+        perStructResults = [
+            x for _, x in sorted(zip(perStructNames, perStructResults))
         ]
-
-        perTreeResults = perWorkerResults
 
         energies = {struct: [] for struct in database.attrs['structNames']}
         forces   = {struct: [] for struct in database.attrs['structNames']}
 
         counter = 0
         for struct in database.attrs['structNames']:
-            res = perTreeResults[counter]
+            res = perStructResults[counter]
             energies[struct]    = [s[0] for s in res]
             forces[struct]      = [s[1] for s in res]
             counter += 1
@@ -438,40 +415,32 @@ def polish(client, settings):
 
         populationDict, rawPopulations = regressor.generatePopulationDict(N)
 
-        # for svName in populationDict:
-        #     for el, pop in populationDict[svName].items():
-        #         populationDict[svName][el] = client.scatter(pop)
+        for svName in populationDict:
+            for el, pop in populationDict[svName].items():
+                populationDict[svName][el] = client.scatter(pop, broadcast=True)
 
         graph, keys = evaluator.build_dot_graph(
-        # perTreeResults = evaluator.build_dot_graph(
             regressor.trees, populationDict, database.trueValues, N,
             worldSize, settings['allSums']
         )
 
-        perTreeResults = client.get(graph, keys)
-        # perTreeResults = client.gather(client.compute(perTreeResults))
+        perWorkerResults = client.get(graph, keys, direct=True)#, resources={'GPU': 1})
 
-        # workers = perTreeResults.keys()
-        # perWorkerResults    = [perTreeResults[w][0] for w in workers]
-        # perWorkerNames      = [perTreeResults[w][1] for w in workers]
-        perWorkerResults, perWorkerNames = zip(*perTreeResults)
+        perStructResults, perStructNames = zip(*perWorkerResults)
 
-        import itertools
-        perWorkerResults    = list(itertools.chain.from_iterable(perWorkerResults))
-        perWorkerNames      = list(itertools.chain.from_iterable(perWorkerNames))
+        perStructResults    = list(itertools.chain.from_iterable(perStructResults))
+        perStructNames      = list(itertools.chain.from_iterable(perStructNames))
 
-        perWorkerResults = [
-            x for _, x in sorted(zip(perWorkerNames, perWorkerResults))
+        perStructResults = [
+            x for _, x in sorted(zip(perStructNames, perStructResults))
         ]
-
-        perTreeResults = perWorkerResults
 
         energies = {struct: [] for struct in database.attrs['structNames']}
         forces   = {struct: [] for struct in database.attrs['structNames']}
 
         counter = 0
         for struct in database.attrs['structNames']:
-            res = perTreeResults[counter]
+            res = perStructResults[counter]
             energies[struct]    = [s[0] for s in res]
             forces[struct]      = [s[1] for s in res]
             counter += 1
@@ -741,6 +710,6 @@ if __name__ == '__main__':
         else:
             # Begin run
             if settings['runType'] == 'GA':
-                        main(client, settings)
+                main(client, settings)
             else:
                 polish(client, settings)

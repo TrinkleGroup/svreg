@@ -1,3 +1,4 @@
+import pickle
 import dask
 import dask.array
 from dask.distributed import get_client
@@ -129,13 +130,7 @@ class SVEvaluator:
 
         structNames = list(self.database.attrs['structNames'])
 
-        import pickle
-        # import cupy as cp
 
-        import h5py
-        import dask
-
-        # @dask.delayed
         def treeStructEval(pickledTrees, popDict, P, allSums):
 
             from dask.distributed import get_worker
@@ -232,9 +227,11 @@ class SVEvaluator:
 
                     fcsErrors = np.average(abs(sum(fcsResult) - tvF), axis=(1,2))
 
-                    treeResults.append((sum(engResult), fcsErrors))
+                    treeResults.append([sum(engResult), fcsErrors])
 
                 allResults.append(treeResults)
+
+            allResults = np.array(allResults, dtype=np.float32)
 
             return allResults, names
 
@@ -243,58 +240,19 @@ class SVEvaluator:
 
         pickledTrees = [pickle.dumps(tree) for tree in trees]
 
-        from mpi4py import MPI
-        size = MPI.COMM_WORLD.Get_size() - 2
-
-        for workerId in range(size):
-            key = 'workerResults-{}'.format(workerId)
-            keys.append(key)
-
-            graph[key] = (treeStructEval, pickledTrees, fullPopDict, P, allSums)
-
-        return graph, keys
-
-        # client = get_client()
-        # perTreeResults = client.run(
-        #     treeStructEval, pickledTrees, fullPopDict, P, allSums
-        # )
-
-        # return perTreeResults
-
-        if numTasks is None:
-            splits = [[s] for s in structName]
-        else:
-            splits = np.array_split(structNames, numTasks)
-
         perTreeResults = []
-        for structNum, taskChunk in enumerate(splits):
+        for chunkNum in range(numTasks):
 
-            # entries, trueForces = dask.delayed(read, nout=2)(taskChunk)
+            key = 'worker_eval-{}'.format(chunkNum)
 
-            perTreeResults.append(
-                treeStructEval(
-                    # entries,
-                    pickledTrees,
-                    fullPopDict,
-                    # trueForces,
-                    P,
-                    allSums
-                )
+            graph[key] = (
+              treeStructEval,
+              pickledTrees,
+              fullPopDict,
+              P,
+              allSums
             )
 
-            # key = 'treeStructEval-struct_{}'.format(
-            #     structNum
-            # )
+            keys.append(key)
 
-            # graph[key] = (
-            #     treeStructEval,
-            #     self.database[struct], pickledTrees, fullPopDict,
-            #     trueValues[struct]['forces'],
-            #     P,
-            #     allSums
-            # )
-
-            # keys.append(key)
-
-        # return graph, keys
-        return perTreeResults
+        return graph, keys

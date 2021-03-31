@@ -105,9 +105,11 @@ def worker_load(h5pyFileName, localNames, svNames, elements):
 
                     group = h5pyFile[struct][sv][elem]
 
-                    worker._structures[struct][sv][elem]['energy'] = group['energy'][()]
-                    worker._structures[struct][sv][elem]['forces'] = group['forces'][()]
-                    
-            worker._true_forces[struct] = h5pyFile[struct].attrs['forces']
+                    energyData = np.array(group['energy'][()], dtype=np.float32)
+                    forcesData = np.array(group['forces'][()], dtype=np.float32)
 
-    print('Worker._structures:', len(worker._structures), flush=True)
+                    worker._structures[struct][sv][elem]['energy'] = energyData
+                    worker._structures[struct][sv][elem]['forces'] = forcesData
+                    
+            tvF = h5pyFile[struct].attrs['forces']
+            worker._true_forces[struct] = np.array(tvF, dtype=np.float32)
