@@ -18,8 +18,8 @@ from dask_mpi import initialize
 # with dask.config.set({"distributed.worker.resources.GPU": 1}):
 initialize(
     nthreads=2,
-    memory_limit='8 GB',
-    interface='ipogif0',
+    memory_limit='4 GB',
+    # interface='ipogif0',
     local_directory=os.getcwd()
 )
 
@@ -266,7 +266,7 @@ def main(client, settings):
                 populationDict[svName][el] = client.scatter(pop, broadcast=True)
 
         graph, keys = evaluator.build_dot_graph(
-            regressor.trees, populationDict, database.trueValues, N,
+            regressor.trees, populationDict, N,
             worldSize, settings['allSums']
         )
 
@@ -421,12 +421,12 @@ def polish(client, settings):
 
         populationDict, rawPopulations = regressor.generatePopulationDict(N)
 
-        for svName in populationDict:
-            for el, pop in populationDict[svName].items():
-                populationDict[svName][el] = client.scatter(pop, broadcast=True)
+        # for svName in populationDict:
+        #     for el, pop in populationDict[svName].items():
+        #         populationDict[svName][el] = client.scatter(pop, broadcast=True)
 
         graph, keys = evaluator.build_dot_graph(
-            regressor.trees, populationDict, database.trueValues, N,
+            regressor.trees, populationDict, N,
             worldSize, settings['allSums']
         )
 

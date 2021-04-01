@@ -126,10 +126,7 @@ class SVEvaluator:
         return summedResults
 
 
-    def build_dot_graph(self, trees, fullPopDict, trueValues, P, numTasks=None, allSums=False):
-
-        structNames = list(self.database.attrs['structNames'])
-
+    def build_dot_graph(self, trees, fullPopDict, P, numTasks=None, allSums=False):
 
         def treeStructEval(pickledTrees, popDict, P, allSums):
 
@@ -141,65 +138,78 @@ class SVEvaluator:
             tvFs = worker._true_forces.values()
 
             allResults = []
-            for entry, tvF in zip(entries, tvFs):
 
-                treeResults = []
+            # Evaluate each SV for all structures simultaneously
+            results = {}
 
-                # Evaluate all SVs for the structure
-                results = {}
+            for svName in popDict:
+                results[svName] = {}
 
-                numStreams = 0
-                for svName in popDict:
-                    for elem in popDict[svName]:
-                        numStreams += 0
+                for elem in popDict[svName]:
 
-                for svName in popDict:
-                    results[svName] = {}
+                    # pop = cp.asarray(popDict[svName][elem])
+                    pop = np.array(popDict[svName][elem])
 
-                    for elem in popDict[svName]:
+                    results[svName][elem] = {}
 
-                        # pop = cp.asarray(popDict[svName][elem])
-                        pop = np.array(popDict[svName][elem])
+                    # sve = cp.asarray(entry[svName][elem]['energy'])
+                    # svf = cp.asarray(entry[svName][elem]['forces'])
+                    # sve = np.array(entry[svName][elem]['energy'])
+                    # svf = np.array(entry[svName][elem]['forces'])
 
-                        results[svName][elem] = {}
+                    bigSVE = [
+                        entry[svName][elem]['energy'] for entry in entries
+                    ]
 
-                        # sve = cp.asarray(entry[svName][elem]['energy'])
-                        # svf = cp.asarray(entry[svName][elem]['forces'])
-                        sve = np.array(entry[svName][elem]['energy'])
-                        svf = np.array(entry[svName][elem]['forces'])
+                    bigSVF = [
+                        entry[svName][elem]['forces'] for entry in entries
+                    ]
 
-                        eng = sve.dot(pop)
-                        fcs = svf.dot(pop)
+                    splitsE = np.cumsum([sve.shape[0] for sve in bigSVE])
+                    splitsF = np.cumsum([svf.shape[0] for svf in bigSVF])
+                    
+                    bigSVE = np.concatenate(bigSVE, axis=0)
+                    bigSVF = np.concatenate(bigSVF, axis=0)
 
-                        # eng = cp.asnumpy(eng)
-                        # fcs = cp.asnumpy(fcs)
+                    eng = bigSVE.dot(pop)
+                    fcs = bigSVF.dot(pop)
 
-                        Ne = eng.shape[0]
-                        Nn = eng.shape[1] // P
+                    # eng = cp.asnumpy(eng)
+                    # fcs = cp.asnumpy(fcs)
 
-                        eng = eng.reshape((Ne, Nn, P))
-                        eng = np.moveaxis(eng, 1, 0)
-                        eng = np.moveaxis(eng, -1, 1)
+                    Ne = eng.shape[0]
+                    Nn = eng.shape[1] // P
 
-                        if allSums:
-                            Na = fcs.shape[0]
-                            fcs = fcs.reshape((Na, 3, Nn, P))
-                        else:
-                            Na = fcs.shape[1]
-                            fcs = fcs.reshape((Ne, Na, 3, Nn, P))
+                    eng = eng.reshape((Ne, Nn, P))
+                    eng = np.moveaxis(eng, 1, 0)
+                    eng = np.moveaxis(eng, -1, 1)
 
-                        fcs = np.moveaxis(fcs, -2, 0)
-                        fcs = np.moveaxis(fcs, -1, 1)
+                    if allSums:
+                        Na = fcs.shape[0]
+                        fcs = fcs.reshape((Na, 3, Nn, P))
+                    else:
+                        Na = fcs.shape[1]
+                        fcs = fcs.reshape((Ne, Na, 3, Nn, P))
 
-                        results[svName][elem]['energy'] = eng
-                        results[svName][elem]['forces'] = fcs
+                    fcs = np.moveaxis(fcs, -2, 0)
+                    fcs = np.moveaxis(fcs, -1, 1)
 
-                        del sve
-                        del svf
-                        # cp._default_memory_pool.free_all_blocks()
-                        # cp._default_pinned_memory_pool.free_all_blocks()
+                    perEntryEng = np.array_split(eng, splitsE[:-1], axis=-1)
+                    perEntryFcs = np.array_split(fcs, splitsF[:-1], axis=-2)
 
-                # Now parse the results
+                    results[svName][elem]['energy'] = perEntryEng
+                    results[svName][elem]['forces'] = perEntryFcs
+
+                    del bigSVE
+                    del bigSVF
+                    # cp._default_memory_pool.free_all_blocks()
+                    # cp._default_pinned_memory_pool.free_all_blocks()
+
+            # results[svName][elem]['energy'] = [(Nn, P, Na) for each entry]
+            # results[svName][elem]['forces'] = [(Nn, P, Na, 3) for each entry]
+
+            # Now parse the results
+            for entryNum, trueForces in enumerate(tvFs):
                 counters = {
                     svName: {
                         el: 0 for el in popDict[svName]
@@ -216,8 +226,8 @@ class SVEvaluator:
 
                             idx = counters[svName][elem]
 
-                            eng = results[svName][elem]['energy'][idx]
-                            fcs = results[svName][elem]['forces'][idx]
+                            eng = results[svName][elem]['energy'][entryNum][idx]
+                            fcs = results[svName][elem]['forces'][entryNum][idx]
 
                             svNode.values = (eng, fcs)
 
@@ -225,12 +235,15 @@ class SVEvaluator:
 
                     engResult, fcsResult = tree.eval(useDask=False, allSums=allSums)
 
-                    fcsErrors = np.average(abs(sum(fcsResult) - tvF), axis=(1,2))
+                    fcsErrors = np.average(
+                        abs(sum(fcsResult) - trueForces), axis=(1,2)
+                    )
 
                     treeResults.append([sum(engResult), fcsErrors])
 
                 allResults.append(treeResults)
 
+            # allResults = [[results for each tree] for each entry]
             allResults = np.array(allResults, dtype=np.float32)
 
             return allResults, names
