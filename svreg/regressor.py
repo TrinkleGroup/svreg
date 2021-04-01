@@ -413,7 +413,7 @@ def buildSVNodePool(database):
 
     svNodePool = []
 
-    for svName in database[database.attrs['structNames'][0]]:
+    for svName in database:
 
         restrictions = None
         if 'restrictions' in database.attrs[svName]:
