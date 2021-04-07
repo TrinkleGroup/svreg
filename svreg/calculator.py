@@ -14,7 +14,7 @@ from ase.calculators.calculator import Calculator
 
 
 class TreeCalculator(Calculator):
-    def __init__(self, tree, y, *args, **kwargs):
+    def __init__(self, tree, y, cutoffs, *args, **kwargs):
         Calculator.__init__(self, *args, **kwargs)
 
         self.implemented_properties = ['energy', 'forces']
@@ -22,6 +22,7 @@ class TreeCalculator(Calculator):
 
         self.tree   = tree
         self.y      = y
+        self.cutoffs = cutoffs
 
 
     def set_atoms(self, atoms):
@@ -29,8 +30,12 @@ class TreeCalculator(Calculator):
 
 
     def get_potential_energy(self, atoms):
-        return self.tree.directEvaluation(self.y, atoms, 'energy')
+        return self.tree.directEvaluation(
+            self.y, atoms, 'energy', 'fixed', cutoffs=self.cutoffs
+        )
 
 
     def get_forces(self, atoms):
-        return self.tree.directEvaluation(self.y, atoms, 'forces')
+        return self.tree.directEvaluation(
+            self.y, atoms, 'forces', 'fixed', cutoffs=self.cutoffs
+        )

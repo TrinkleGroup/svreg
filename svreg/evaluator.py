@@ -126,7 +126,7 @@ class SVEvaluator:
         return summedResults
 
 
-    def build_dot_graph(self, trees, database, fullPopDict, P, numTasks=None, allSums=False):
+    def build_dot_graph(self, trees, database, fullPopDict, P, numTasks=None, allSums=False, useDask=True):
 
         allResults = []
 
@@ -150,40 +150,71 @@ class SVEvaluator:
                 bigSVE = database[svName][elem]['energy']
                 bigSVF = database[svName][elem]['forces']
 
-                splits = database.splits[svName][elem]
-                
-                eng = bigSVE.dot(pop)
-                fcs = bigSVF.dot(pop)
+                if useDask:
 
-                # eng = cp.asnumpy(eng)
-                # fcs = cp.asnumpy(fcs)
+                    splits = database.splits[svName][elem]
+                    
+                    eng = bigSVE.dot(pop)
+                    fcs = bigSVF.dot(pop)
 
-                Ne = eng.shape[0]
-                Nn = eng.shape[1] // P
+                    # eng = cp.asnumpy(eng)
+                    # fcs = cp.asnumpy(fcs)
 
-                eng = eng.reshape((Ne, Nn, P))
-                eng = np.moveaxis(eng, 1, 0)
-                eng = np.moveaxis(eng, -1, 1)
+                    Ne = eng.shape[0]
+                    Nn = eng.shape[1] // P
 
-                if allSums:
-                    Na = fcs.shape[0]
-                    fcs = fcs.reshape((Na, 3, Nn, P))
+                    eng = eng.reshape((Ne, Nn, P))
+                    eng = np.moveaxis(eng, 1, 0)
+                    eng = np.moveaxis(eng, -1, 1)
+
+                    if allSums:
+                        Na = fcs.shape[0]
+                        fcs = fcs.reshape((Na, 3, Nn, P))
+                    else:
+                        Na = fcs.shape[1]
+                        fcs = fcs.reshape((Ne, Na, 3, Nn, P))
+
+                    fcs = da.moveaxis(fcs, -2, 0)
+                    fcs = da.moveaxis(fcs, -1, 1)
+
+                    perEntryEng = []
+                    perEntryFcs = []
+
+                    for idx in range(len(splits)-1):
+                        start   = splits[idx]
+                        stop    = splits[idx + 1]
+
+                        perEntryEng.append(eng[:, :, start:stop])
+                        perEntryFcs.append(fcs[:, :, start:stop])
                 else:
-                    Na = fcs.shape[1]
-                    fcs = fcs.reshape((Ne, Na, 3, Nn, P))
+                    perEntryEng = []
+                    perEntryFcs = []
 
-                fcs = da.moveaxis(fcs, -2, 0)
-                fcs = da.moveaxis(fcs, -1, 1)
+                    for ii, (sve, svf) in enumerate(zip(bigSVE, bigSVF)):
+                        print(ii, flush=True)
+                        eng = np.dot(sve, pop)
+                        fcs = np.dot(svf, pop)
 
-                perEntryEng = []
-                perEntryFcs = []
+                        Ne = eng.shape[0]
+                        Nn = eng.shape[1] // P
 
-                for idx in range(len(splits)-1):
-                    start   = splits[idx]
-                    stop    = splits[idx + 1]
+                        eng = eng.reshape((Ne, Nn, P))
+                        eng = np.moveaxis(eng, 1, 0)
+                        eng = np.moveaxis(eng, -1, 1)
 
-                    perEntryEng.append(eng[:, :, start:stop])
-                    perEntryFcs.append(fcs[:, :, start:stop])
+                        if allSums:
+                            Na = fcs.shape[0]
+                            fcs = fcs.reshape((Na, 3, Nn, P))
+                        else:
+                            Na = fcs.shape[1]
+                            fcs = fcs.reshape((Ne, Na, 3, Nn, P))
+
+                        fcs = np.moveaxis(fcs, -2, 0)
+                        fcs = np.moveaxis(fcs, -1, 1)
+
+                        perEntryEng.append(eng)
+                        perEntryFcs.append(fcs)
+ 
 
                 # perEntryEng = np.array_split(eng, splits[:-1], axis=-1)
                 # perEntryFcs = np.array_split(fcs, splits[:-1], axis=-2)
@@ -198,11 +229,6 @@ class SVEvaluator:
 
             # results[svName][elem]['energy'] = [(Nn, P, Na) for each entry]
             # results[svName][elem]['forces'] = [(Nn, P, Na, 3) for each entry]
-
-        from dask.distributed import get_client
-        client = get_client()
-
-        # results = client.gather(client.compute(results))
 
         # Now parse the results
         for entryNum, struct in enumerate(database.attrs['structNames']):
@@ -232,15 +258,24 @@ class SVEvaluator:
                 engResult, fcsResult = tree.eval(useDask=True, allSums=allSums)
 
                 trueForces = database.trueValues[struct]['forces']
-                fcsErrors = da.average(
-                    abs(sum(fcsResult) - trueForces), axis=(1,2)
-                )
+                if useDask:
+                    fcsErrors = da.average(
+                        abs(sum(fcsResult) - trueForces), axis=(1,2)
+                    )
+                else:
+                    fcsErrors = np.average(
+                        abs(sum(fcsResult) - trueForces), axis=(1,2)
+                    )
 
                 treeResults.append([sum(engResult), fcsErrors])
 
             allResults.append(treeResults)
 
-        allResults = client.gather(client.compute(allResults))
+        if useDask:
+            from dask.distributed import get_client
+            client = get_client()
+
+            allResults = client.gather(client.compute(allResults))
 
         # allResults = [[results for each tree] for each entry]
         allResults = np.array(allResults, dtype=np.float32)

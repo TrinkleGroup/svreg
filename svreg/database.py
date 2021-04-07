@@ -61,7 +61,7 @@ class SVDatabase(dict):
         }
 
 
-    def load(self, h5pyFile):
+    def load(self, h5pyFile, useDask=True):
 
         structNames = self.attrs['structNames']
         svNames = self.attrs['svNames']
@@ -99,5 +99,13 @@ class SVDatabase(dict):
                 # TODO: use splits to do dask array chunking
                 
                 self[sv][elem] = {}
-                self[sv][elem]['energy'] = np.concatenate(bigSVE, axis=0)
-                self[sv][elem]['forces'] = da.from_array(np.concatenate(bigSVF, axis=0))
+
+                if useDask:
+                    self[sv][elem]['energy'] = np.concatenate(bigSVE, axis=0)
+                    self[sv][elem]['forces'] = da.from_array(np.concatenate(bigSVF, axis=0))
+                else:
+                    # self[sv][elem]['energy'] = np.concatenate(bigSVE, axis=0)
+                    # self[sv][elem]['forces'] = np.concatenate(bigSVF, axis=0)
+
+                    self[sv][elem]['energy'] = bigSVE
+                    self[sv][elem]['forces'] = bigSVF
