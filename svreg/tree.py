@@ -835,6 +835,7 @@ class SVTree(list):
         ])
 
 
+    @profile
     def directEvaluation(self, y, atoms, allElements, evalType, bc_type, cutoffs, hostType=None):
         """
         Evaluates a tree by performing SV summations directly, rather than
