@@ -964,13 +964,11 @@ class SVTree(list):
                 args = []
                 for n in subTrees[-1][1:]:
                     if isinstance(n, Summation):
-                        # eng = np.array([n.loop(atoms, 'energy', hostType)])
-                        eng = n.loop(atoms, 'energy', hostType)
 
                         if evalType == 'forces':
-                            # fcs = np.array([n.loop(atoms, evalType, hostType)])
-                            fcs = n.loop(atoms, evalType, hostType)
+                            fcs, eng = n.loop(atoms, evalType, hostType)
                         else:
+                            eng = n.loop(atoms, 'energy', hostType)
                             fcs = None
 
                         args.append((eng, fcs))
