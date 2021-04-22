@@ -68,6 +68,8 @@ PairSplineTree::PairSplineTree(LAMMPS *lmp) : Pair(lmp)
 
   comm_forward = 1;
   comm_reverse = 0;
+
+  totalNumParams = 0;
 }
 
 /* ---------------------------------------------------------------------- */
@@ -528,10 +530,7 @@ void PairSplineTree::read_file(char **arg, Error * error)
     std::string line_str;
 
     while (fgets(line, MAXLINE, fp) != NULL) {
-
       line_str = std::string(line);
-
-      printf("Line: %s\n", line_str.c_str());
 
       if (line[0] != '#' && line[0] != '\n') {
         // Look for SV declaration first
@@ -545,12 +544,15 @@ void PairSplineTree::read_file(char **arg, Error * error)
           sv.parse(fp, error);
           sv.svType = three;
 
+          printf("Parsed template: %s\n", sv.name.c_str());
+
           sv_templates.emplace(sv.name, sv);
         }
 
         if (line_str.substr(0,4).compare("Tree") == 0) {
 
           utils::sfgets(FLERR, line, MAXLINE, fp, filename, error);
+          printf("Parsed tree: %s\n", line);
           std::string tree_str = line;
           tree_str = tree_str.substr(0, tree_str.size()-1);  // trailing newline
 
@@ -630,12 +632,14 @@ void PairSplineTree::read_file(char **arg, Error * error)
 
             // +2 because of d0 and dN
             totalNumParams += svn->numParams;
+            printf("totalNumParams: %d\n", totalNumParams);
           }
         }
         else if (line_str.substr(0,10).compare("Parameters") == 0) {
           int svIdx = 0;
           int added = 0;
 
+          printf("Loading %d parameters\n", totalNumParams);
           for (int ii=0; ii<totalNumParams; ii++) {
             utils::sfgets(FLERR, line, MAXLINE, fp, filename, error);
             double k = std::stod(std::string(line));
@@ -652,6 +656,8 @@ void PairSplineTree::read_file(char **arg, Error * error)
         }
       }
     }
+
+    printf("I'm done with the read loop\n");
 
     elements = new char*[nelements];
     int el_i = 0;
