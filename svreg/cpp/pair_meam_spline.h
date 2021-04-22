@@ -94,6 +94,26 @@ static std::string helper_reduce(const std::string& str,
     return result;
 }
 
+static int helper_pairing(int a, int b) {
+  // Cantor pairing function; maps pairs of indices to a unique integer
+  // Note: sort x and y to return a unique value regardless of order
+  int x, y;
+
+  if (a < b) {
+    x = a;
+    y = b;
+  } else {
+    x = b;
+    y = a;
+  }
+
+  return (x*x + 2*x*y + y*y + 3*x + y)/2;
+}
+
+static int helper_pairing(int a){return a;}
+
+// TODO: If a 4-body SV is ever defined, we'll need a helper_pairing(a, b, c)
+
 public:
   PairSplineTree(class LAMMPS *);
   virtual ~PairSplineTree();
@@ -129,14 +149,15 @@ protected:
   class StructureVector {
     public:
       StructureVector() :
+        svType(""),
         name(""),
         neighbor_elements(),
         cutoffs({0, 0}),
-        // components(),
         num_knots(),
         parameters(),
         numKnots(0),
-        numParams(0) {}
+        numParams(0),
+        g() {}
 
       void parse(FILE* fp, Error* error);
 
@@ -144,8 +165,6 @@ protected:
       public:
         /// Default constructor.
         SplineFunction() : X(NULL), Xs(NULL), Y(NULL), Y2(NULL), Ydelta(NULL), N(0) {}
-
-        // FunctionNode(std::function<double (double, double)> func) :
 
         /// Destructor.
         ~SplineFunction() {
@@ -263,8 +282,10 @@ protected:
         double xmax_shifted; // The end of the spline interval after it has been shifted to begin at X=0.
       };
 
+      std::string svType;
       std::string name;
       std::vector<std::string> neighbor_elements;
+      std::vector<int> neighbor_types;
       double cutoffs[2];
       // std::vector<std::string> components;
       std::vector<int> num_knots;
@@ -273,6 +294,7 @@ protected:
       int numParams;
       std::vector<SplineFunction *> splines;
       int bondType;
+      SplineFunction * g;
 
       void display();
       void splineSetup(Error * error);
@@ -297,42 +319,35 @@ protected:
   };
 
 
-  class SVNode : public StructureVector, public Node {};
+  class SVNode : public StructureVector, public Node {
+    public:
+      int hostType;
+      std::string hostElement;
+  };
 
-  int totalNumParams;
-  std::map<std::string, std::vector<Node *>> nodes;
-  std::vector<SVNode *> svnodes;
-  std::vector<SVNode *> rho_nodes;
-  std::vector<SVNode *> ffg_nodes;
+  int totalNumParams;  // numKnots + 2 (boundary conditions) for all SVNodes
+  std::map<std::string, std::vector<Node *>> nodes;  // Includes function nodes
+  std::vector<SVNode *> svnodes;  // Useful pointer to all SVNodes
+  std::map<int, std::vector<SVNode *>> rho_nodes;  // key=host, val=Rho SVNs
+  std::map<int, std::vector<SVNode *>> ffg_nodes;  // key=host, val=FFG SVNs
 
   /// Helper data structure for potential routine.
   struct MEAM2Body {
     int tag;  // holds the index of the second atom (j)
     double r;
-    double f, fprime;
+    std::vector<double> f, fprime;
     double del[3];
   };
 
   std::map<std::string, StructureVector> sv_templates;
 
-  // TODO: build the map svs[elem][svname] = StructureVector()
-  // Could be svs[elem][svname] = idx, where idx indexes rho_svs or ffg_svs
-  // Need something like svs[host][neighbors]
-  // Or maybe svs[host][ij_to_potl(itype,jtype)]?
-  // Could define a bondType object: i+j?
-
-  double* zero_atom_energies; // Shift embedding energy by this value to make it zero for a single atom in vacuum.
-
   double cutoff;          // The cutoff radius
-  bool threeBody;  // flag for running triplet loop
 
   int nmax;               // Size of temporary array.
   int maxNeighbors;       // The last maximum number of neighbors a single atoms has.
   MEAM2Body* twoBodyInfo; // Temporary array.
 
-  double* Uprime_values;
-
-  void read_file(const char* filename);
+  void read_file(char **arg, Error * error);
   void allocate();
 
 
