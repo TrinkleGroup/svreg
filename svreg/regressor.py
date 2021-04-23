@@ -55,7 +55,10 @@ class SVRegressor:
 
         self.settings = settings
         self.svNodePool = buildSVNodePool(database)
-        numStructs = len(database.attrs['structNames'])
+
+        self.structNames    = database.attrs['structNames']
+        self.svNames        = database.attrs['svNames']
+        self.elements       = database.attrs['elements']
 
         if settings['optimizer'] == 'CMA':
             self.optimizer = cma.CMAEvolutionStrategy
@@ -307,47 +310,6 @@ class SVRegressor:
 
         return newTree
 
-    
-    def evolvePopulation(self):
-        """
-        Performs an in-place evolution of self.trees using tournament selection,
-        crossover, and mutation. Assumes that self.trees is the current set of
-        parent trees.
-        """
-
-        newTrees = []
-        for _ in range(self.settings['numberOfTrees'] - len(self.trees)):
-            # parent = deepcopy(random.choice(self.trees))
-
-            # # For handling only allowing crossover OR point mutation
-            # pmProb = self.settings['crossoverProb']\
-            #     + self.settings['pointMutateProb']
-
-            # rand = random.random()
-            # if rand < self.settings['crossoverProb']:
-            #     # Randomly perform crossover operation
-            #     donor = self.tournament()
-            #     parent.crossover(donor)
-            # elif rand < pmProb:
-            #     parent.pointMutate(
-            #         self.svNodePool, self.settings['pointMutateProb']
-            #     )
-
-            # parent.updateSVNodes()
-            # newTrees.append(parent)
-
-            newTrees.append(self.newIndividual())
-        
-        return newTrees
-
-
-    def mate(self):
-        raise NotImplementedError
-
-    
-    def mutate(self):
-        raise NotImplementedError
-
 
     def printTop10Header(self, regStep):
         print(regStep, flush=True)
@@ -369,7 +331,6 @@ class SVRegressor:
         """
 
         rawPopulations = [np.array(opt.ask(N)) for opt in self.optimizers]
-        # rawPopulations = self.optimizers.map(_ask, N).compute()
 
         # Used for parsing later
         self.numNodes = {}
@@ -407,8 +368,12 @@ class SVRegressor:
 
                     self.numNodes[svName][elem] += 1
 
+        self.chunks = {}
         # Stack each group
         for svName in populationDict:
+            if svName not in self.chunks:
+                self.chunks[svName] = {}
+
             for elem, popList in populationDict[svName].items():
                 dat = np.concatenate(popList, axis=0).T
 
@@ -448,7 +413,7 @@ def buildSVNodePool(database):
 
     svNodePool = []
 
-    for svName in database[database.attrs['structNames'][0]]:
+    for svName in database:
 
         restrictions = None
         if 'restrictions' in database.attrs[svName]:
@@ -499,42 +464,65 @@ def buildSVNodePool(database):
         )
 
     return svNodePool
+
     
-def parseAndEval(tree, listOfArgs, P, tvF, allSums=False):
+def parseAndEval(
+    *args,
+    **kwargs,
+    ):
+
+    tree            = kwargs['tree']
+    listOfIndices   = kwargs['listOfIndices']
+    P               = kwargs['P']
+    tvF             = kwargs['tvF']
+    numChunks       = kwargs['numChunks']
+    allSums         = kwargs['allSums']
 
     import pickle
     tree = pickle.loads(tree)
 
-    for svNode, argTup in zip(tree.svNodes, listOfArgs):
-        eng = argTup[0]
-        fcs = argTup[1]
-        idx = argTup[2]
+    nodeCounter     = 0
+    chunkCounter    = 0
+    for elem in tree.elements:
+        for svNode in tree.chemistryTrees[elem].svNodes:
+            svName = svNode.description
 
-        Ne = eng.shape[0]
-        Nn = eng.shape[1] // P
+            chunkTup = []
+            for _ in range(numChunks[svName][elem]):
+                chunkTup.append(args[chunkCounter])
+                chunkCounter += 1
 
-        eng = eng.reshape((Ne, Nn, P))
-        eng = np.moveaxis(eng, 1, 0)
-        eng = np.moveaxis(eng, -1, 1)
+            idx = listOfIndices[nodeCounter]
+            nodeCounter += 1
 
-        # fcs shape: (Ne, Na, 3, P*Nn)
+            eng = np.concatenate([c[0] for c in chunkTup], axis=-1)
+            fcs = np.concatenate([c[1] for c in chunkTup], axis=-1)
 
-        if allSums:
-            Na = fcs.shape[0]
-            fcs = fcs.reshape(Na, 3, Nn, P)
-        else:
-            Na = fcs.shape[1]
-            fcs = fcs.reshape(Ne, Na, 3, Nn, P)
+            Ne = eng.shape[0]
+            Nn = eng.shape[1] // P
 
-        fcs = np.moveaxis(fcs, -2, 0)
-        fcs = np.moveaxis(fcs, -1, 1)
+            eng = eng.reshape((Ne, Nn, P))
+            eng = np.moveaxis(eng, 1, 0)
+            eng = np.moveaxis(eng, -1, 1)
 
-        # fcs shape: (Nn, P, Ne, Na, 3)
+            # fcs shape: (Ne, Na, 3, P*Nn)
 
-        svNode.values = (eng[idx], fcs[idx])
+            if allSums:
+                Na = fcs.shape[0]
+                fcs = fcs.reshape(Na, 3, Nn, P)
+            else:
+                Na = fcs.shape[1]
+                fcs = fcs.reshape(Ne, Na, 3, Nn, P)
+
+            fcs = np.moveaxis(fcs, -2, 0)
+            fcs = np.moveaxis(fcs, -1, 1)
+
+            # fcs shape: (Nn, P, Ne, Na, 3)
+
+            svNode.values = (eng[idx], fcs[idx])
 
     engResult, fcsResult = tree.eval(useDask=False, allSums=allSums)
 
-    fcsErrors = np.average(abs(sum(fcsResult) - tvF), axis=(1,2))
+    fcsErrors = np.average(abs(sum(fcsResult) - tvF['forces']), axis=(1,2))
 
     return sum(engResult), fcsErrors

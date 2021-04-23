@@ -203,9 +203,170 @@ class FFG(Summation):
         self.fjSpline = None
         self.fkSpline = None
         self.gSpline  = None
-
     
-    def loop(self, atoms, evalType, hostType=None):
+    def eval(self, atoms, evalType, hostType=None):
+
+        totalEnergy = None
+        partialsum = None
+        gVal = None
+        fkVal = None
+        fjPrime = None
+        fjVal = None
+        jForces = None
+        iForces = None
+        forces = None
+
+        atomTypesStrings = atoms.get_chemical_symbols()
+        atomTypes = np.array(
+            list(map(lambda s: self.allElements.index(s), atomTypesStrings))
+        )
+
+        N = len(atoms)
+        if evalType == 'energy':
+            totalEnergy = np.zeros((1, N))
+        elif evalType == 'forces':
+            forces = np.zeros((1, N, N, 3))
+
+        # Allows double counting bonds; needed for embedding energy calculations
+        nl = NeighborList(
+            np.ones(N)*(self.cutoffs[-1]/2.),
+            self_interaction=False, bothways=True, skin=0.0
+        )
+
+        nl.update(atoms)
+
+        cell = atoms.get_cell()
+
+        for i, atom in enumerate(atoms):
+
+            if hostType is not None:
+                if atomTypesStrings[i] != hostType:
+                   continue 
+
+            ipos = atom.position
+
+            neighbors, offsets = nl.get_neighbors(i)
+
+            if evalType == 'forces':
+                iForces = np.zeros((3,))
+
+            jIdx = 0
+            for j, offsetj in zip(neighbors, offsets):
+                jIdx += 1
+
+                # j = atomic ID, so it can be used for indexing
+                jtype = atomTypes[j]
+                jtypeStr = atomTypesStrings[j]
+
+                if hostType is not None:
+                    if atomTypesStrings[j] not in self._inputTypesSet:
+                        continue
+
+                self.fjSpline = self.fSplines[jtypeStr]
+
+                # offset accounts for periodic images
+                jpos = atoms[j].position + np.dot(offsetj, cell)
+
+                jvec = jpos - ipos
+                rij = np.sqrt(jvec[0]**2 + jvec[1]**2 + jvec[2]**2)
+                jvec /= rij
+
+                if (evalType == 'energy') or (evalType == 'forces'):
+                    fjVal = self.fjSpline(rij)
+                    partialsum = 0.0
+                if evalType == 'forces':
+                    fjPrime = self.fjSpline(rij, 1)
+                    jForces = np.zeros((3,))
+               
+                for k, offsetk in zip(neighbors[jIdx:], offsets[jIdx:]):
+                    ktype = atomTypes[k]
+                    ktypeStr = atomTypesStrings[k]
+
+                    if hostType is not None:
+                        neighTypes = set([
+                            atomTypesStrings[j], atomTypesStrings[k]
+                        ])
+
+                        if neighTypes != self._inputTypesSet:
+                            continue
+
+                    self.fkSpline = self.fSplines[ktypeStr]
+
+                    key = '_'.join(sorted(list(set([jtypeStr, ktypeStr]))))
+
+                    self.gSpline  = self.gSplines[key] 
+
+                    # 11%
+                    kpos = atoms[k].position + np.dot(offsetk, cell)
+
+                    kvec = kpos - ipos
+                    rik = np.sqrt(kvec[0]**2 + kvec[1]**2 + kvec[2]**2)
+                    kvec /= rik
+
+                    cosTheta = np.dot(jvec, kvec)#/rij/rik
+
+                    d0 = jvec                       # on i due to j
+                    d1 = -cosTheta * jvec / rij     # on j due to i?
+                    d2 = kvec / rij                 # on i and j due to k?
+                    d3 = kvec                       # on i due to k
+                    d4 = -cosTheta * kvec / rik     # on k due to i?
+                    d5 = jvec / rik                 # on i and k due to j?
+
+                    # 10%
+                    dirs = np.vstack([d0, d1, d2, d3, d4, d5])
+
+                    if (evalType == 'energy') or (evalType == 'forces'):
+                        # 10%
+                        fkVal = self.fkSpline(rik)
+                        # 9%
+                        gVal = self.gSpline(cosTheta)
+                        partialsum += fkVal*gVal
+
+                    if evalType == 'forces':
+
+                        # 4%
+                        fkPrime = self.fkSpline(rik, 1)
+                        # 4%
+                        gPrime  = self.gSpline(cosTheta, 1)
+
+                        fij = -gVal*fkVal*fjPrime
+                        fik = -gVal*fjVal*fkPrime
+
+                        prefactor = fjVal*fkVal*gPrime
+
+                        prefactor_ij = prefactor/rij
+                        prefactor_ik = prefactor/rik
+
+                        fij += prefactor_ij*cosTheta
+                        fik += prefactor_ik*cosTheta
+
+                        fj = jvec*fij - kvec*prefactor_ij
+                        fk = kvec*fik - jvec*prefactor_ik
+
+                        jForces += fj
+                        iForces -= fk
+
+                        forces[:, i, k, :] += fk
+                # end triplet loop
+
+                if evalType == 'energy':
+                    totalEnergy[:, i] += fjVal*partialsum
+                elif evalType == 'forces':
+                    forces[:, i, i, :] -= jForces
+                    forces[:, i, j, :] += jForces
+            # end neighbor loop
+
+            if evalType == 'forces':
+                forces[:, i, i, :] += iForces
+        # end atom loop
+
+        if evalType == 'energy':
+            return totalEnergy
+        elif evalType == 'forces':
+            return forces
+
+ 
+    def loop(self, atoms, evalType, hostType=None, verbose=False):
 
         totalEnergy = None
         energySV = None
@@ -394,6 +555,10 @@ class FFG(Summation):
                         gVal = self.gSpline(cosTheta)
                         partialsum += fkVal*gVal
 
+                        if verbose:
+                            print('rij, fj(rij): {:.6f} {:.6f}'.format(rik, fkVal))
+                            print('FFG:', i, j, k, fjVal, fkVal, gVal)
+
                     if evalType == 'forces':
 
                         fkPrime = self.fkSpline(rik, 1)
@@ -420,6 +585,8 @@ class FFG(Summation):
                 # end triplet loop
 
                 if evalType == 'energy':
+                    if verbose and (partialsum != 0):
+                        print('\t{:.7f} {:.6f}'.format(fjVal, partialsum))
                     totalEnergy[:, i] += fjVal*partialsum
                 elif evalType == 'forces':
                     forces[:, i, i, :] -= jForces
@@ -604,7 +771,7 @@ class Rho(Summation):
         self.rho = None
 
 
-    def loop(self, atoms, evalType, hostType=None):
+    def loop(self, atoms, evalType, hostType=None, verbose=False):
 
         totalEnergy = None
         energySV = None
@@ -713,6 +880,9 @@ class Rho(Summation):
                     # type. If they are different types, then they need to be
                     # evaluated with different Rho splines, which is why you
                     # can't simply multiply by 2 here
+
+                    if verbose:
+                        print("Rho: {} {} {:.2f} {:.6f}".format(itypeStr, jtypeStr, rij, self.rho(rij)))
 
                     totalEnergy[:, i] += self.rho(rij)
                 elif evalType == 'forces':

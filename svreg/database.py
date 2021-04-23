@@ -1,6 +1,6 @@
+import h5py
 import numpy as np
 import dask.array as da
-
 
 class SVDatabase(dict):
     """
@@ -37,8 +37,8 @@ class SVDatabase(dict):
 
     def __init__(self, h5pyFile):
         # Prepare class variables
-        self['energy'] = {}
-        self['forces'] = {}
+        # self['energy'] = {}
+        # self['forces'] = {}
 
         structNames = list(h5pyFile.keys())
         svNames =  list(h5pyFile[structNames[0]].keys())
@@ -61,45 +61,51 @@ class SVDatabase(dict):
         }
 
 
-    def load(self, h5pyFile, useDask=True, allSums=False):
+    def load(self, h5pyFile, useDask=True):
 
         structNames = self.attrs['structNames']
         svNames = self.attrs['svNames']
         elements = self.attrs['elements']
 
-        futures = []
-        for struct in structNames:
-            self[struct] = {}
-            for sv in svNames:
-                self[struct][sv] = {}
-                self.attrs[sv] = {}
+        print("Loading {} structures...".format(len(structNames)), flush=True)
 
-                # components, restrictions, etc.
-                for k, v in h5pyFile[struct][sv].attrs.items():
-                    self.attrs[sv][k] = v
+        self.splits = {}
 
-                for elem in elements:
+        for sv in svNames:
+            self.attrs[sv] = {}
 
-                    self[struct][sv][elem] = {}
+            # components, restrictions, etc.
+            for k, v in h5pyFile[structNames[0]][sv].attrs.items():
+                self.attrs[sv][k] = v
 
-                    group = h5pyFile[struct][sv][elem]
-                    forceData = group['forces']
+            self[sv] = {}
+            self.splits[sv] = {}
 
-                    self[struct][sv][elem]['energy'] = group['energy'][()]
+            for elem in elements:
 
-                    if allSums:
-                        forceData = np.einsum('ijkl->jkl', forceData)
+                bigSVE = [
+                    h5pyFile[struct][sv][elem]['energy'] for struct in structNames
+                ]
 
-                    if useDask:
-                        self[struct][sv][elem]['forces'] = da.from_array(
-                            forceData,
-                            # chunks=(5000, forceData.shape[1]),
-                            chunks=forceData.shape
-                        ).astype('float32').persist()
-                    else:
-                        self[struct][sv][elem]['forces'] = forceData
+                bigSVF = [
+                    h5pyFile[struct][sv][elem]['forces'] for struct in structNames
+                ]
 
-                    futures.append(self[struct][sv][elem]['energy'])
-                    futures.append(self[struct][sv][elem]['forces'])
+                splits = np.cumsum([sve.shape[0] for sve in bigSVE])
 
-        return futures
+                splits = np.concatenate([[0], splits])
+                self.splits[sv][elem] = splits
+
+                # TODO: use splits to do dask array chunking
+                
+                self[sv][elem] = {}
+
+                if useDask:
+                    self[sv][elem]['energy'] = np.concatenate(bigSVE, axis=0)
+                    self[sv][elem]['forces'] = da.from_array(np.concatenate(bigSVF, axis=0))
+                else:
+                    # self[sv][elem]['energy'] = np.concatenate(bigSVE, axis=0)
+                    # self[sv][elem]['forces'] = np.concatenate(bigSVF, axis=0)
+
+                    self[sv][elem]['energy'] = bigSVE
+                    self[sv][elem]['forces'] = bigSVF

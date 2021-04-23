@@ -110,6 +110,25 @@ class Test_SVTree(unittest.TestCase):
             ]
         )
 
+        tree6 = SVTree(
+            nodes=[
+                FunctionNode('add'),
+                deepcopy(self.svNodePool[0]),
+                FunctionNode('add'),
+                deepcopy(self.svNodePool[1]),
+                deepcopy(self.svNodePool[0]),
+            ]
+        )
+
+        tree7 = SVTree(
+            nodes=[
+                FunctionNode('add'),
+                deepcopy(self.svNodePool[1]),
+                FunctionNode('add'),
+                deepcopy(self.svNodePool[0]),
+                deepcopy(self.svNodePool[0]),
+            ]
+        )
 
         self.assertTrue(self.tree == tree1)
 
@@ -117,6 +136,8 @@ class Test_SVTree(unittest.TestCase):
         self.assertFalse(self.tree == tree3)
         self.assertFalse(self.tree == tree4)
         self.assertFalse(self.tree == tree5)
+
+        self.assertFalse(tree6 != tree7)
 
 
 

@@ -1,8 +1,10 @@
+import pickle
 import dask
-import dask.array
+import dask.array as da
 from dask.distributed import get_client
 
 import numpy as np
+import cupy as cp
 
 
 class SVEvaluator:
@@ -11,100 +13,145 @@ class SVEvaluator:
         self.database   = database
         self.settings   = settings
 
-  
-    def evaluate(self, populationDict, evalType, useDask=True):
-        """
-        Evaluates all of the populations on all of their corresponding structure
-        vectors in the database.
+    def evaluate(self, trees, database, fullPopDict, P, numTasks=None, allSums=False, useDask=True):
 
-        Args:
-            populationDict (dict):
-                {svName: population}
+        allResults = []
 
-        Returns:
-            svResults (dict):
-                svResults[structName][svName][elem]
-        """
+        # Evaluate each SV for all structures simultaneously
+        results = {}
 
-        structNames = list(self.database.attrs['structNames'])
-        allSVnames  = list(self.database.attrs['svNames'])
-        elements    = list(self.database.attrs['elements'])
+        for svName in fullPopDict:
+            results[svName] = {}
 
-        tasks = []
+            for elem in fullPopDict[svName]:
 
-        ffgTasks = []
-        rhoTasks = []
-        for struct in structNames:
-            for svName in allSVnames:
-                if svName not in populationDict: continue
+                pop = cp.asarray(fullPopDict[svName][elem])
 
-                for elem in elements:
-                    if elem not in populationDict[svName]: continue
+                results[svName][elem] = {}
 
-                    sv = self.database[struct][svName][elem][evalType]
-                    pop = populationDict[svName][elem]
+                bigSVE = cp.asarray(database[svName][elem]['energy'])
+                bigSVF = cp.asarray(database[svName][elem]['forces'])
 
-                    if useDask:
-                        if 'ffg' in svName:
-                            ffgTasks.append((sv, pop))
-                        else:
-                            rhoTasks.append((sv, pop))
+                if useDask:
+
+                    splits = database.splits[svName][elem]
+                    
+                    eng = bigSVE.dot(pop)
+                    fcs = bigSVF.dot(pop)
+
+                    eng = cp.asnumpy(eng)
+                    fcs = cp.asnumpy(fcs)
+
+                    Ne = eng.shape[0]
+                    Nn = eng.shape[1] // P
+
+                    eng = eng.reshape((Ne, Nn, P))
+                    eng = np.moveaxis(eng, 1, 0)
+                    eng = np.moveaxis(eng, -1, 1)
+
+                    if allSums:
+                        Na = fcs.shape[0]
+                        fcs = fcs.reshape((Na, 3, Nn, P))
                     else:
-                        tasks.append((sv, pop))
+                        Na = fcs.shape[1]
+                        fcs = fcs.reshape((Ne, Na, 3, Nn, P))
 
-        def dot(tup):
-            return tup[0].dot(tup[1])
+                    fcs = da.moveaxis(fcs, -2, 0)
+                    fcs = da.moveaxis(fcs, -1, 1)
 
-        @dask.delayed
-        def ffgDot(tup):
-            return tup[0].dot(tup[1])
+                    perEntryEng = []
+                    perEntryFcs = []
 
-        @dask.delayed
-        def rhoDot(tup):
-            return tup[0].dot(tup[1])
+                    for idx in range(len(splits)-1):
+                        start   = splits[idx]
+                        stop    = splits[idx + 1]
+
+                        perEntryEng.append(eng[:, :, start:stop])
+                        perEntryFcs.append(fcs[:, :, start:stop])
+                else:
+                    perEntryEng = []
+                    perEntryFcs = []
+
+                    for ii, (sve, svf) in enumerate(zip(bigSVE, bigSVF)):
+                        print(ii, flush=True)
+                        eng = np.dot(sve, pop)
+                        fcs = np.dot(svf, pop)
+
+                        Ne = eng.shape[0]
+                        Nn = eng.shape[1] // P
+
+                        eng = eng.reshape((Ne, Nn, P))
+                        eng = np.moveaxis(eng, 1, 0)
+                        eng = np.moveaxis(eng, -1, 1)
+
+                        if allSums:
+                            Na = fcs.shape[0]
+                            fcs = fcs.reshape((Na, 3, Nn, P))
+                        else:
+                            Na = fcs.shape[1]
+                            fcs = fcs.reshape((Ne, Na, 3, Nn, P))
+
+                        fcs = np.moveaxis(fcs, -2, 0)
+                        fcs = np.moveaxis(fcs, -1, 1)
+
+                        perEntryEng.append(eng)
+                        perEntryFcs.append(fcs)
+ 
+
+                results[svName][elem]['energy'] = perEntryEng
+                results[svName][elem]['forces'] = perEntryFcs
+
+                del bigSVE
+                del bigSVF
+                cp._default_memory_pool.free_all_blocks()
+                cp._default_pinned_memory_pool.free_all_blocks()
+
+        # Now parse the results
+        for entryNum, struct in enumerate(database.attrs['structNames']):
+            counters = {
+                svName: {
+                    el: 0 for el in fullPopDict[svName]
+                } for svName in fullPopDict
+            }
+
+            treeResults = []
+            for tree in trees:
+
+                for elem in tree.chemistryTrees:
+                    for svNode in tree.chemistryTrees[elem].svNodes:
+                        svName = svNode.description
+
+                        idx = counters[svName][elem]
+
+                        eng = results[svName][elem]['energy'][entryNum][idx]
+                        fcs = results[svName][elem]['forces'][entryNum][idx]
+
+                        svNode.values = (eng, fcs)
+
+                        counters[svName][elem] += 1
+
+                engResult, fcsResult = tree.eval(useDask=True, allSums=allSums)
+
+                trueForces = database.trueValues[struct]['forces']
+                if useDask:
+                    fcsErrors = da.average(
+                        abs(sum(fcsResult) - trueForces), axis=(1,2)
+                    )
+                else:
+                    fcsErrors = np.average(
+                        abs(sum(fcsResult) - trueForces), axis=(1,2)
+                    )
+
+                treeResults.append([sum(engResult), fcsErrors])
+
+            allResults.append(treeResults)
 
         if useDask:
-            ffgResults = [ffgDot(t) for t in ffgTasks]
-            rhoResults = [rhoDot(t) for t in rhoTasks]
-
+            from dask.distributed import get_client
             client = get_client()
 
-            ffgResults = client.compute(ffgResults, priority=100)
+            allResults = client.gather(client.compute(allResults))
 
-            results = []
-            for struct in structNames[::-1]:
-                for svName in allSVnames[::-1]:
-                    if svName not in populationDict: continue
+        allResults = np.array(allResults, dtype=np.float32)
 
-                    for elem in elements[::-1]:
-                        if elem not in populationDict[svName]: continue
-
-                        if 'ffg' in svName:
-                            results.append(ffgResults.pop())
-                        else:
-                            results.append(rhoResults.pop())
-
-            results = results[::-1]
-        else:
-            results = [dot((np.array(t[0]), t[1])) for t in tasks]
-
-        summedResults = {
-            structName: {
-                svName: {
-                    elem: None for elem in elements
-                }
-                for svName in allSVnames
-            }
-            for structName in structNames
-        }
-
-        for struct in structNames[::-1]:
-            for svName in allSVnames[::-1]:
-                if svName not in populationDict: continue
-
-                for elem in elements[::-1]:
-                    if elem not in populationDict[svName]: continue
-
-                    summedResults[struct][svName][elem] = results.pop()
-                
-        return summedResults
+        return allResults

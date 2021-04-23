@@ -6,17 +6,20 @@ import time
 import h5py
 import shutil
 import argparse
+import itertools
 from mpi4py import MPI
 from copy import deepcopy
 
 import random
 import numpy as np
 
+import dask
 from dask_mpi import initialize
+# with dask.config.set({"distributed.worker.resources.GPU": 1}):
 initialize(
     nthreads=2,
     memory_limit='4 GB',
-    # interface='ipogif0',
+    interface='ipogif0',
     local_directory=os.getcwd()
 )
 
@@ -62,12 +65,14 @@ start = time.time()
 
 # @profile
 def main(client, settings):
+    worldSize = MPI.COMM_WORLD.Get_size() - 2
+
     global start
 
     # Setup
     with h5py.File(settings['databasePath'], 'r') as h5pyFile:
         database = SVDatabase(h5pyFile)
-        wait(database.load(h5pyFile, allSums=settings['allSums']))
+        wait(database.load(h5pyFile))
 
         evaluator = SVEvaluator(database, settings)
 
@@ -239,32 +244,20 @@ def main(client, settings):
         # Continue optimization of currently active trees
         populationDict, rawPopulations = regressor.generatePopulationDict(N)
 
-        svEng = evaluator.evaluate(populationDict, 'energy', useDask=False)
-        
-        for svName in populationDict:
-            for el, pop in populationDict[svName].items():
-                populationDict[svName][el] = client.scatter(pop)#, broadcast=True)
-
-        svFcs = evaluator.evaluate(populationDict, 'forces')
-
-        perTreeResults = regressor.evaluateTrees(
-            svEng, svFcs, N, database.trueValues
+        perStructResults = evaluator.evaluate(
+            regressor.trees, database, populationDict, N,
+            worldSize, settings['allSums']
         )
-
-        perTreeResults = client.gather(client.compute(perTreeResults))
 
         energies = {struct: [] for struct in database.attrs['structNames']}
         forces   = {struct: [] for struct in database.attrs['structNames']}
 
-        for structName in database.attrs['structNames'][::-1]:
-            for _ in range(len(regressor.trees)):
-                res = perTreeResults.pop()
-
-                energies[structName].append(res[0])
-                forces[structName].append(res[1])
-
-            energies[structName] = energies[structName][::-1]
-            forces[structName] = forces[structName][::-1]
+        counter = 0
+        for struct in database.attrs['structNames']:
+            res = perStructResults[counter]
+            energies[struct]    = [s[0] for s in res]
+            forces[struct]      = [s[1] for s in res]
+            counter += 1
 
         # Save the (per-struct) errors and the single-value costs
         errors = computeErrors(
@@ -297,11 +290,12 @@ def main(client, settings):
 
 
 def polish(client, settings):
+    worldSize = MPI.COMM_WORLD.Get_size() - 2
 
     # Setup
     with h5py.File(settings['databasePath'], 'r') as h5pyFile:
         database = SVDatabase(h5pyFile)
-        wait(database.load(h5pyFile, allSums=settings['allSums']))
+        wait(database.load(h5pyFile))
 
         evaluator = SVEvaluator(database, settings)
 
@@ -320,29 +314,22 @@ def polish(client, settings):
     else:
         from svreg.nodes import FunctionNode
 
-        tree = MCTree(['Mo', 'Ti'])
+        tree = MCTree(['Al'])
 
         from copy import deepcopy
 
-        treeMo = SVTree()
-        treeMo.nodes = [
+        treeAl = SVTree()
+        treeAl.nodes = [
             FunctionNode('add'),
             deepcopy(regressor.svNodePool[0]),
+            FunctionNode('add'),
+            deepcopy(regressor.svNodePool[0]),
+            FunctionNode('add'),
+            deepcopy(regressor.svNodePool[1]),
             deepcopy(regressor.svNodePool[1]),
         ]
 
-        treeTi = SVTree()
-        treeTi.nodes = [
-            FunctionNode('add'),
-            FunctionNode('add'),
-            deepcopy(regressor.svNodePool[3]),
-            deepcopy(regressor.svNodePool[3]),
-            deepcopy(regressor.svNodePool[4]),
-        ]
-
-        tree.chemistryTrees['Mo'] = treeMo
-        tree.chemistryTrees['Ti'] = treeTi
-        
+        tree.chemistryTrees['Al'] = treeAl
         tree.updateSVNodes()
 
         regressor.trees = [tree]
@@ -384,32 +371,20 @@ def polish(client, settings):
 
         populationDict, rawPopulations = regressor.generatePopulationDict(N)
 
-        svEng = evaluator.evaluate(populationDict, 'energy', useDask=False)
-
-        for svName in populationDict:
-            for el, pop in populationDict[svName].items():
-                populationDict[svName][el] = client.scatter(pop, broadcast=True)
-
-        svFcs = evaluator.evaluate(populationDict, 'forces')
-
-        perTreeResults = regressor.evaluateTrees(
-            svEng, svFcs, N, database.trueValues
+        perStructResults = evaluator.evaluate(
+            regressor.trees, database, populationDict, N,
+            worldSize, settings['allSums']
         )
-
-        perTreeResults = client.gather(client.compute(perTreeResults))
 
         energies = {struct: [] for struct in database.attrs['structNames']}
         forces   = {struct: [] for struct in database.attrs['structNames']}
 
-        for structName in database.attrs['structNames'][::-1]:
-            for _ in range(len(regressor.trees)):
-                res = perTreeResults.pop()
-
-                energies[structName].append(res[0])
-                forces[structName].append(res[1])
-
-            energies[structName] = energies[structName][::-1]
-            forces[structName] = forces[structName][::-1]
+        counter = 0
+        for struct in database.attrs['structNames']:
+            res = perStructResults[counter]
+            energies[struct]    = [s[0] for s in res]
+            forces[struct]      = [s[1] for s in res]
+            counter += 1
 
         # Save the (per-struct) errors and the single-value costs
         errors = computeErrors(
@@ -676,6 +651,6 @@ if __name__ == '__main__':
         else:
             # Begin run
             if settings['runType'] == 'GA':
-                        main(client, settings)
+                main(client, settings)
             else:
                 polish(client, settings)
