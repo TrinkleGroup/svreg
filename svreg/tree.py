@@ -207,7 +207,7 @@ class SVTree(list):
             The string representation of a tree. Should match the format
             used in SVTree.__str__, where chemistry trees are printed
             alphabetically, each chemistry tree is prefixed by "<<element>>",
-            and multiple chemistry trees are separated by ",".
+            and multiple chemistry trees are separated by "|".
 
             Examples:
                 'ffg_AB'
@@ -835,8 +835,7 @@ class SVTree(list):
         ])
 
 
-    @profile
-    def directEvaluation(self, y, atoms, allElements, evalType, bc_type, cutoffs, hostType=None):
+    def directEvaluation(self, y, atoms, allElements, evalType, bc_type, cutoffs, hostType=None, verbose=False):
         """
         Evaluates a tree by performing SV summations directly, rather than
         using the SV representation.
@@ -968,7 +967,7 @@ class SVTree(list):
                         if evalType == 'forces':
                             fcs, eng = n.loop(atoms, evalType, hostType)
                         else:
-                            eng = n.loop(atoms, 'energy', hostType)
+                            eng = n.loop(atoms, 'energy', hostType, verbose=verbose)
                             fcs = None
 
                         args.append((eng, fcs))
@@ -1102,6 +1101,54 @@ class MultiComponentTree(SVTree):
         tree.updateSVNodes()
         return tree
 
+    def write_to_lammps(self, fname, y, cutoffs):
+        writtenTemplates = []
+
+        with open(fname, 'w') as f:
+            # Write SV templates
+            f.write("#"*80 + "\n")
+            f.write("# STRUCTURE VECTORS\n")
+
+            for svn in self.svNodes:
+
+                if svn.description in writtenTemplates: continue
+                writtenTemplates.append(svn.description)
+
+                nodeType = svn.description.split('_')[0]
+
+                if nodeType == 'rho':
+                    f.write("Rho\n")
+                elif nodeType == 'ffg':
+                    f.write("FFG\n")
+
+                f.write("\tname: {}\n".format(svn.description))
+
+                neighborElements = list(set(itertools.chain.from_iterable(
+                    svn.inputTypes.values())))
+                
+                neighborElements = ' '.join(sorted(neighborElements))
+
+                f.write("\tneighbors: {}\n".format(neighborElements))
+                f.write("\tcutoffs: {}\n".format(' '.join([str(c) for c in cutoffs])))
+
+                numKnots = ' '.join(
+                    [str(svn.numParams[c] - 2) for c in svn.components]
+                )
+
+                f.write("\tnum_knots: {}\n".format(numKnots))
+                f.write("\n")
+
+            f.write("#"*80 + "\n")
+            f.write("# TREE\n")
+            f.write("Tree\n")
+            f.write("{}\n".format(str(self)))
+
+            f.write("#"*80 + "\n")
+            f.write("# PARAMETERS\n")
+            f.write("Parameters\n")
+
+            for y_i in y:
+                f.write("{}\n".format(y_i))
     
     def eval(self, useDask=True, allSums=False):
         vals = [
@@ -1214,7 +1261,7 @@ class MultiComponentTree(SVTree):
         self.totalNumParams = sum(self.numParams.values())
 
 
-    def directEvaluation(self, y, atoms, evalType, bc_type, cutoffs):
+    def directEvaluation(self, y, atoms, evalType, bc_type, cutoffs, verbose=False):
         splits = np.cumsum([
             self.chemistryTrees[el].totalNumParams for el in self.elements
         ])
@@ -1224,7 +1271,7 @@ class MultiComponentTree(SVTree):
         res = [
             self.chemistryTrees[el].directEvaluation(
                 splitPop[ii], atoms, self.elements, evalType, bc_type, cutoffs,
-                hostType=el
+                hostType=el, verbose=verbose
             )
             for ii, el in enumerate(self.elements)
         ]

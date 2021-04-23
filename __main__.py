@@ -19,7 +19,7 @@ from dask_mpi import initialize
 initialize(
     nthreads=2,
     memory_limit='4 GB',
-    # interface='ipogif0',
+    interface='ipogif0',
     local_directory=os.getcwd()
 )
 
@@ -244,25 +244,10 @@ def main(client, settings):
         # Continue optimization of currently active trees
         populationDict, rawPopulations = regressor.generatePopulationDict(N)
 
-        # for svName in populationDict:
-        #     for el, pop in populationDict[svName].items():
-        #         populationDict[svName][el] = client.scatter(pop, broadcast=True)
-
-        graph, keys = evaluator.build_dot_graph(
+        perStructResults = evaluator.evaluate(
             regressor.trees, database, populationDict, N,
             worldSize, settings['allSums']
         )
-
-        perWorkerResults = client.get(graph, keys, direct=True)#, resources={'GPU': 1})
-
-        perStructResults, perStructNames = zip(*perWorkerResults)
-
-        perStructResults    = list(itertools.chain.from_iterable(perStructResults))
-        perStructNames      = list(itertools.chain.from_iterable(perStructNames))
-
-        perStructResults = [
-            x for _, x in sorted(zip(perStructNames, perStructResults))
-        ]
 
         energies = {struct: [] for struct in database.attrs['structNames']}
         forces   = {struct: [] for struct in database.attrs['structNames']}
@@ -386,26 +371,10 @@ def polish(client, settings):
 
         populationDict, rawPopulations = regressor.generatePopulationDict(N)
 
-        # for svName in populationDict:
-        #     for el, pop in populationDict[svName].items():
-        #         populationDict[svName][el] = client.scatter(pop, broadcast=True)
-
-        # graph, keys = evaluator.build_dot_graph(
-        perStructResults = evaluator.build_dot_graph(
+        perStructResults = evaluator.evaluate(
             regressor.trees, database, populationDict, N,
             worldSize, settings['allSums']
         )
-
-        # perWorkerResults = client.get(graph, keys, direct=True)#, resources={'GPU': 1})
-
-        # perStructResults, perStructNames = zip(*perWorkerResults)
-
-        # perStructResults    = list(itertools.chain.from_iterable(perStructResults))
-        # perStructNames      = list(itertools.chain.from_iterable(perStructNames))
-
-        # perStructResults = [
-        #     x for _, x in sorted(zip(perStructNames, perStructResults))
-        # ]
 
         energies = {struct: [] for struct in database.attrs['structNames']}
         forces   = {struct: [] for struct in database.attrs['structNames']}

@@ -17,27 +17,31 @@
 #     products of each sub-spline in the order listed in the 'components' field.
 #     - For the FFG SVs, the settings for the g spline should always be listed
 #     last in num_knots.
+#     - For FFG splines with neighbors of different types, it is assumed that
+#     the neighbor types will be sorted alphabetically. This means that the
+#     num_knots and the parameters will assume that the first spline is the F
+#     spline of the element that comes first alphabetically.
 
 Rho
-    name: rho_0
+    name: rho_Mo
     neighbors: Mo
     cutoffs: 2.4 5.2
     num_knots: 7
 
 Rho
-    name: rho_1
+    name: rho_Ti
     neighbors: Ti
     cutoffs: 2.4 5.2
     num_knots: 7
 
 FFG
-    name: ffg_0_1
+    name: ffg_Mo_Ti
     neighbors: Mo Ti
     cutoffs: 2.4 5.2
     num_knots: 7 7 7
 
 FFG
-    name: ffg_1_1
+    name: ffg_Ti_Ti
     neighbors: Ti Ti
     cutoffs: 2.4 5.2
     num_knots: 7 7
@@ -51,10 +55,13 @@ FFG
 # Currently only the 'add' function is supported.
 # Structure vectors names must start with one of the names defined in this file.
 # Note: duplicate SVs have independent parameters.
+# Note: the order of the element sub-trees doesn't affect the
+#   atom_type -> element mapping; this is only affected by the order of the
+#   pair_coeff arguments in the LAMMPS input file.
 
 Tree
-<Mo> add(rho_0, add(ffg_0_1, ffg_1_1)) | <Ti> add(rho_1, rho_1)
-# Mo add rho_0 add ffg_0_1 ffg_1_1 | Ti add rho_1 rho_1
+<Mo> add(rho_Mo, add(ffg_Mo_Ti, ffg_Ti_Ti)) | <Ti> add(rho_Ti, rho_Ti)
+# Mo add rho_Mo add ffg_Mo_Ti ffg_Ti_Ti | Ti add rho_Ti rho_Ti
 
 ################################################################################
 # PARAMETERS 

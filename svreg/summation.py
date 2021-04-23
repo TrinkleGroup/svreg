@@ -128,7 +128,6 @@ class Summation:
         self.bc_type        = bc_type
 
 
-    # @profile
     def loop(self, atoms, evalType, hostType=None):
         """
         Loops over the desired properties of the structure, and returns the
@@ -205,7 +204,6 @@ class FFG(Summation):
         self.fkSpline = None
         self.gSpline  = None
     
-    @profile
     def eval(self, atoms, evalType, hostType=None):
 
         totalEnergy = None
@@ -368,9 +366,7 @@ class FFG(Summation):
             return forces
 
  
-    
-    @profile
-    def loop(self, atoms, evalType, hostType=None):
+    def loop(self, atoms, evalType, hostType=None, verbose=False):
 
         totalEnergy = None
         energySV = None
@@ -559,6 +555,10 @@ class FFG(Summation):
                         gVal = self.gSpline(cosTheta)
                         partialsum += fkVal*gVal
 
+                        if verbose:
+                            print('rij, fj(rij): {:.6f} {:.6f}'.format(rik, fkVal))
+                            print('FFG:', i, j, k, fjVal, fkVal, gVal)
+
                     if evalType == 'forces':
 
                         fkPrime = self.fkSpline(rik, 1)
@@ -585,6 +585,8 @@ class FFG(Summation):
                 # end triplet loop
 
                 if evalType == 'energy':
+                    if verbose and (partialsum != 0):
+                        print('\t{:.7f} {:.6f}'.format(fjVal, partialsum))
                     totalEnergy[:, i] += fjVal*partialsum
                 elif evalType == 'forces':
                     forces[:, i, i, :] -= jForces
@@ -769,7 +771,7 @@ class Rho(Summation):
         self.rho = None
 
 
-    def loop(self, atoms, evalType, hostType=None):
+    def loop(self, atoms, evalType, hostType=None, verbose=False):
 
         totalEnergy = None
         energySV = None
@@ -878,6 +880,9 @@ class Rho(Summation):
                     # type. If they are different types, then they need to be
                     # evaluated with different Rho splines, which is why you
                     # can't simply multiply by 2 here
+
+                    if verbose:
+                        print("Rho: {} {} {:.2f} {:.6f}".format(itypeStr, jtypeStr, rij, self.rho(rij)))
 
                     totalEnergy[:, i] += self.rho(rij)
                 elif evalType == 'forces':
