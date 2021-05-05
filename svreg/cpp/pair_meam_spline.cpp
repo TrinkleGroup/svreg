@@ -329,14 +329,13 @@ void PairSplineTree::compute(int eflag, int vflag)
   comm->forward_comm_pair(this);
 
   // Compute two-body pair interactions
-  for(int ii = 0; ii < listhalf->inum; ii++) {
-    int i = listhalf->ilist[ii];
+  for(int ii = 0; ii < listfull->inum; ii++) {
+    int i = listfull->ilist[ii];
     const int itype = atom->type[i];
 
     for (SVNode * rho : rho_nodes[itype-1]) {
-      // for(int jj = 0; jj < listhalf->numneigh[i]; jj++) {
       for(int jj = 0; jj < listfull->numneigh[i]; jj++) {
-        int j = listhalf->firstneigh[i][jj];
+        int j = listfull->firstneigh[i][jj];
         j &= NEIGHMASK;
 
         double jdel[3];

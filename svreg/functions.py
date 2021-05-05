@@ -73,10 +73,18 @@ def _derivative_log(x):
 #@dask.delayed
 def _derivative_mul(a, b):
     """Chain rule on a*b = a*(db/dr) + (da/dr)*b"""
-    return (
-        a[0][:, :, np.newaxis, np.newaxis]*b[1]
-        + a[1]*b[0][:, :, np.newaxis, np.newaxis]
-    )
+
+    if len(a[1].shape) < 4:
+        # allSums = True
+        return (
+            a[0][:, :, np.newaxis]*b[1]
+            + a[1]*b[0][:, :, np.newaxis]
+        )
+    else:
+        return (
+            a[0][:, :, np.newaxis, np.newaxis]*b[1]
+            + a[1]*b[0][:, :, np.newaxis, np.newaxis]
+        )
 
 
 # #@dask.delayed
@@ -190,7 +198,7 @@ softplus = _Function(function=splus, name='softplus', arity=1)
 
 _function_map = {
     'add': add2,
-    # 'mul': mul2,
+    'mul': mul2,
     # 'sqrt': sqrt1,
     # 'log': log1,
     # 'inv': inv1,
@@ -200,7 +208,7 @@ _function_map = {
     # 'arctan': arctan1,
     # 'exp': exp,
     # 'sig': sig,
-    # 'softplus': softplus
+    'softplus': softplus
 }
 
 _arities = {
@@ -214,11 +222,11 @@ _arities = {
         # 'arctan',
         # 'exp',
         # 'sig',
-        # 'softplus',
+        'softplus',
     ],
     2: [
         'add',
-        # 'mul'
+        'mul'
     ],
 }
 

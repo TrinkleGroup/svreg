@@ -2,7 +2,8 @@ units metal
 read_data ${data_file}
 
 pair_style spline/tree
-pair_coeff * * /home/jvita/scripts/svreg/examples/tree_write.txt Ti Mo
+# pair_coeff * * /home/jvita/scripts/svreg/examples/tree_write.txt Ti Mo
+pair_coeff * * tree_write.txt Ti Mo
 
 mass 1 47.87
 mass 2 95.95
@@ -14,4 +15,4 @@ neigh_modify once no every 1 delay 0 check yes
 fix 1 all nvt temp 100 100 $(100.0*dt)
 thermo 1
 
-run 10000
+run 0
