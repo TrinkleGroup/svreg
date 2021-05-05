@@ -4,7 +4,6 @@ import dask.array as da
 from dask.distributed import get_client
 
 import numpy as np
-# import cupy as cp
 
 
 class SVEvaluator:
@@ -13,7 +12,9 @@ class SVEvaluator:
         self.database   = database
         self.settings   = settings
 
-    def evaluate(self, trees, database, fullPopDict, P, allSums=False, useDask=True):
+    def evaluate(self, trees, database, fullPopDict, P, allSums=False, useDask=True, useGPU=False):
+        if useGPU:
+            import cupy as cp
 
         allResults = []
 
@@ -40,11 +41,19 @@ class SVEvaluator:
                     if allSums:
                         splits = database.splits[svName][elem]
 
-                        eng = np.concatenate(bigSVE).dot(pop)
-                        fcs = np.concatenate(bigSVF).dot(pop)
+                        bigSVE = np.concatenate(bigSVE)
+                        bigSVF = np.concatenate(bigSVF)
 
-                        # eng = cp.asnumpy(eng)
-                        # fcs = cp.asnumpy(fcs)
+                        if useGPU:
+                            bigSVE = cp.asarray(bigSVE)
+                            bigSVF = cp.asarray(bigSVF)
+
+                        eng = bigSVE.dot(pop)
+                        fcs = bigSVF.dot(pop)
+
+                        if useGPU:
+                            eng = cp.asnumpy(eng)
+                            fcs = cp.asnumpy(fcs)
 
                         Ne = eng.shape[0]
                         Nn = eng.shape[1] // P
@@ -125,8 +134,9 @@ class SVEvaluator:
 
                 del bigSVE
                 del bigSVF
-                # cp._default_memory_pool.free_all_blocks()
-                # cp._default_pinned_memory_pool.free_all_blocks()
+                if useGPU:
+                    cp._default_memory_pool.free_all_blocks()
+                    cp._default_pinned_memory_pool.free_all_blocks()
 
         # Now parse the results
         for entryNum, struct in enumerate(database.attrs['structNames']):

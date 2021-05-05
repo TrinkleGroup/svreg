@@ -28,6 +28,10 @@ _valid_options = {
             ' regression run. `DEBUG` runs the debug function set in'\
                 ' __main__.py.'
     ),
+    'useGPU': Option(
+        'useGPU', bool, None, False,
+        'True to use GPU acceleration. Requires cupy installation.'
+    ),
     'refStruct': Option(
         'refStruct', str, None, 'Ground_state_crystal',
         'The database key corresponding to the name of the structure that'\

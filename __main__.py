@@ -246,7 +246,7 @@ def main(client, settings):
 
         perStructResults = evaluator.evaluate(
             regressor.trees, database, populationDict, N,
-            settings['allSums']
+            settings['allSums'], settings['useGPU']
         )
 
         energies = {struct: [] for struct in database.attrs['structNames']}
@@ -373,7 +373,7 @@ def polish(client, settings):
 
         perStructResults = evaluator.evaluate(
             regressor.trees, database, populationDict, N,
-            settings['allSums']
+            settings['allSums'], settings['useGPU']
         )
 
         energies = {struct: [] for struct in database.attrs['structNames']}
