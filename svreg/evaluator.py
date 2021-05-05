@@ -31,8 +31,6 @@ class SVEvaluator:
 
                 results[svName][elem] = {}
 
-                # bigSVE = cp.asarray(database[svName][elem]['energy'])
-                # bigSVF = cp.asarray(database[svName][elem]['forces'])
                 bigSVE = np.array(database[svName][elem]['energy'])
                 bigSVF = np.array(database[svName][elem]['forces'])
 
@@ -82,8 +80,17 @@ class SVEvaluator:
                         perEntryFcs = []
 
                         for (sve, svf) in zip(bigSVE, bigSVF):
+
+                            if useGPU:
+                                sve = cp.asarray(sve)
+                                svf = cp.asarray(svf)
+
                             eng = sve.dot(pop)
                             fcs = svf.dot(pop)
+
+                            if useGPU:
+                                eng = cp.asnumpy(eng)
+                                fcs = cp.asnumpy(fcs)
 
                             Ne = eng.shape[0]
                             Nn = eng.shape[1] // P
@@ -106,8 +113,17 @@ class SVEvaluator:
                     perEntryFcs = []
 
                     for sve, svf in zip(bigSVE, bigSVF):
-                        eng = np.dot(sve, pop)
-                        fcs = np.dot(svf, pop)
+
+                        if useGPU:
+                            sve = cp.asarray(sve)
+                            svf = cp.asarray(svf)
+
+                        eng = sve.dot(pop)
+                        fcs = svf.dot(pop)
+
+                        if useGPU:
+                            eng = cp.asnumpy(eng)
+                            fcs = cp.asnumpy(fcs)
 
                         Ne = eng.shape[0]
                         Nn = eng.shape[1] // P
