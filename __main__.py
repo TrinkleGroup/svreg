@@ -74,6 +74,23 @@ def main(client, settings):
         database = SVDatabase(h5pyFile)
         wait(database.load(h5pyFile))
 
+        names = list(database.attrs['structNames'])
+        random.shuffle(names)
+
+        splits = np.array_split(names, worldSize)
+
+        from svreg.database import worker_load
+
+        futures = client.map(
+            worker_load,
+            [settings['databasePath']]*worldSize,
+            splits,
+            [database.attrs['svNames']]*worldSize,
+            [database.attrs['elements']]*worldSize,
+        )
+
+        client.gather(client.compute(futures))
+
         evaluator = SVEvaluator(database, settings)
 
     regressor = SVRegressor(settings, database)
@@ -244,10 +261,22 @@ def main(client, settings):
         # Continue optimization of currently active trees
         populationDict, rawPopulations = regressor.generatePopulationDict(N)
 
-        perStructResults = evaluator.evaluate(
-            regressor.trees, database, populationDict, N,
-            settings['allSums'], settings['useGPU']
+        graph, keys = evaluator.evaluate(
+            regressor.trees, populationDict, N,
+            worldSize, settings['allSums']
         )
+
+        perWorkerResults = client.get(graph, keys, direct=True)#, resources={'GPU': 1})
+
+        perStructResults, perStructNames = zip(*perWorkerResults)
+
+        perStructResults    = list(itertools.chain.from_iterable(perStructResults))
+        perStructNames      = list(itertools.chain.from_iterable(perStructNames))
+
+        perStructResults = [
+            x for _, x in sorted(zip(perStructNames, perStructResults))
+        ]
+
 
         energies = {struct: [] for struct in database.attrs['structNames']}
         forces   = {struct: [] for struct in database.attrs['structNames']}
@@ -296,6 +325,23 @@ def polish(client, settings):
     with h5py.File(settings['databasePath'], 'r') as h5pyFile:
         database = SVDatabase(h5pyFile)
         wait(database.load(h5pyFile))
+
+        names = list(database.attrs['structNames'])
+        random.shuffle(names)
+
+        splits = np.array_split(names, worldSize)
+
+        from svreg.database import worker_load
+
+        futures = client.map(
+            worker_load,
+            [settings['databasePath']]*worldSize,
+            splits,
+            [database.attrs['svNames']]*worldSize,
+            [database.attrs['elements']]*worldSize,
+        )
+
+        client.gather(client.compute(futures))
 
         evaluator = SVEvaluator(database, settings)
 
@@ -371,10 +417,26 @@ def polish(client, settings):
 
         populationDict, rawPopulations = regressor.generatePopulationDict(N)
 
-        perStructResults = evaluator.evaluate(
-            regressor.trees, database, populationDict, N,
-            settings['allSums'], settings['useGPU']
+        # perStructResults = evaluator.evaluate(
+        #     regressor.trees, database, populationDict, N,
+        #     worldSize, settings['allSums'], settings['useGPU']
+        # )
+
+        graph, keys = evaluator.evaluate(
+            regressor.trees, populationDict, N,
+            worldSize, settings['allSums']
         )
+
+        perWorkerResults = client.get(graph, keys, direct=True)#, resources={'GPU': 1})
+
+        perStructResults, perStructNames = zip(*perWorkerResults)
+
+        perStructResults    = list(itertools.chain.from_iterable(perStructResults))
+        perStructNames      = list(itertools.chain.from_iterable(perStructNames))
+
+        perStructResults = [
+            x for _, x in sorted(zip(perStructNames, perStructResults))
+        ]
 
         energies = {struct: [] for struct in database.attrs['structNames']}
         forces   = {struct: [] for struct in database.attrs['structNames']}
