@@ -13,7 +13,7 @@ class SVEvaluator:
         self.database   = database
         self.settings   = settings
 
-    def evaluate(self, trees, database, fullPopDict, P, numTasks=None, allSums=False, useDask=True):
+    def evaluate(self, trees, database, fullPopDict, P, allSums=False, useDask=True):
 
         allResults = []
 
@@ -37,45 +37,66 @@ class SVEvaluator:
 
                 if useDask:
 
-                    splits = database.splits[svName][elem]
-                    
-                    eng = bigSVE.dot(pop)
-                    fcs = bigSVF.dot(pop)
-
-                    # eng = cp.asnumpy(eng)
-                    # fcs = cp.asnumpy(fcs)
-
-                    Ne = eng.shape[0]
-                    Nn = eng.shape[1] // P
-
-                    eng = eng.reshape((Ne, Nn, P))
-                    eng = np.moveaxis(eng, 1, 0)
-                    eng = np.moveaxis(eng, -1, 1)
-
                     if allSums:
+                        splits = database.splits[svName][elem]
+
+                        eng = np.concatenate(bigSVE).dot(pop)
+                        fcs = np.concatenate(bigSVF).dot(pop)
+
+                        # eng = cp.asnumpy(eng)
+                        # fcs = cp.asnumpy(fcs)
+
+                        Ne = eng.shape[0]
+                        Nn = eng.shape[1] // P
+
+                        eng = eng.reshape((Ne, Nn, P))
+                        eng = np.moveaxis(eng, 1, 0)
+                        eng = np.moveaxis(eng, -1, 1)
+
                         Na = fcs.shape[0]
                         fcs = fcs.reshape((Na, 3, Nn, P))
+
+                        fcs = da.moveaxis(fcs, -2, 0)
+                        fcs = da.moveaxis(fcs, -1, 1)
+
+                        perEntryEng = []
+                        perEntryFcs = []
+
+                        for idx in range(len(splits)-1):
+                            start   = splits[idx]
+                            stop    = splits[idx + 1]
+
+                            perEntryEng.append(eng[:, :, start:stop])
+                            perEntryFcs.append(fcs[:, :, start:stop])
                     else:
-                        Na = fcs.shape[1]
-                        fcs = fcs.reshape((Ne, Na, 3, Nn, P))
+                        perEntryEng = []
+                        perEntryFcs = []
 
-                    fcs = da.moveaxis(fcs, -2, 0)
-                    fcs = da.moveaxis(fcs, -1, 1)
+                        for (sve, svf) in zip(bigSVE, bigSVF):
+                            eng = sve.dot(pop)
+                            fcs = svf.dot(pop)
 
-                    perEntryEng = []
-                    perEntryFcs = []
+                            Ne = eng.shape[0]
+                            Nn = eng.shape[1] // P
 
-                    for idx in range(len(splits)-1):
-                        start   = splits[idx]
-                        stop    = splits[idx + 1]
+                            eng = eng.reshape((Ne, Nn, P))
+                            eng = np.moveaxis(eng, 1, 0)
+                            eng = np.moveaxis(eng, -1, 1)
 
-                        perEntryEng.append(eng[:, :, start:stop])
-                        perEntryFcs.append(fcs[:, :, start:stop])
+                            Na = fcs.shape[1]
+
+                            fcs = fcs.reshape((Ne, Na, 3, Nn, P))
+
+                            fcs = da.moveaxis(fcs, -2, 0)
+                            fcs = da.moveaxis(fcs, -1, 1)
+
+                            perEntryEng.append(eng)
+                            perEntryFcs.append(fcs)
                 else:
                     perEntryEng = []
                     perEntryFcs = []
 
-                    for ii, (sve, svf) in enumerate(zip(bigSVE, bigSVF)):
+                    for sve, svf in zip(bigSVE, bigSVF):
                         eng = np.dot(sve, pop)
                         fcs = np.dot(svf, pop)
 

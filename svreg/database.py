@@ -96,13 +96,12 @@ class SVDatabase(dict):
                 splits = np.concatenate([[0], splits])
                 self.splits[sv][elem] = splits
 
-                # TODO: use splits to do dask array chunking
-                
                 self[sv][elem] = {}
 
                 if useDask:
-                    self[sv][elem]['energy'] = np.concatenate(bigSVE, axis=0)
-                    self[sv][elem]['forces'] = da.from_array(np.concatenate(bigSVF, axis=0))
+                    self[sv][elem]['energy'] = [np.array(sve) for sve in bigSVE]
+                    # self[sv][elem]['forces'] = da.from_array(np.concatenate(bigSVF, axis=0))
+                    self[sv][elem]['forces'] = [da.from_array(np.array(svf)) for svf in bigSVF]
                 else:
                     # self[sv][elem]['energy'] = np.concatenate(bigSVE, axis=0)
                     # self[sv][elem]['forces'] = np.concatenate(bigSVF, axis=0)
