@@ -4,7 +4,7 @@ import dask.array as da
 from dask.distributed import get_client
 
 import numpy as np
-import cupy as cp
+# import cupy as cp
 
 
 class SVEvaluator:
@@ -25,12 +25,15 @@ class SVEvaluator:
 
             for elem in fullPopDict[svName]:
 
-                pop = cp.asarray(fullPopDict[svName][elem])
+                # pop = cp.asarray(fullPopDict[svName][elem])
+                pop = np.array(fullPopDict[svName][elem])
 
                 results[svName][elem] = {}
 
-                bigSVE = cp.asarray(database[svName][elem]['energy'])
-                bigSVF = cp.asarray(database[svName][elem]['forces'])
+                # bigSVE = cp.asarray(database[svName][elem]['energy'])
+                # bigSVF = cp.asarray(database[svName][elem]['forces'])
+                bigSVE = np.array(database[svName][elem]['energy'])
+                bigSVF = np.array(database[svName][elem]['forces'])
 
                 if useDask:
 
@@ -39,8 +42,8 @@ class SVEvaluator:
                     eng = bigSVE.dot(pop)
                     fcs = bigSVF.dot(pop)
 
-                    eng = cp.asnumpy(eng)
-                    fcs = cp.asnumpy(fcs)
+                    # eng = cp.asnumpy(eng)
+                    # fcs = cp.asnumpy(fcs)
 
                     Ne = eng.shape[0]
                     Nn = eng.shape[1] // P
@@ -73,7 +76,6 @@ class SVEvaluator:
                     perEntryFcs = []
 
                     for ii, (sve, svf) in enumerate(zip(bigSVE, bigSVF)):
-                        print(ii, flush=True)
                         eng = np.dot(sve, pop)
                         fcs = np.dot(svf, pop)
 
@@ -96,15 +98,14 @@ class SVEvaluator:
 
                         perEntryEng.append(eng)
                         perEntryFcs.append(fcs)
- 
 
                 results[svName][elem]['energy'] = perEntryEng
                 results[svName][elem]['forces'] = perEntryFcs
 
                 del bigSVE
                 del bigSVF
-                cp._default_memory_pool.free_all_blocks()
-                cp._default_pinned_memory_pool.free_all_blocks()
+                # cp._default_memory_pool.free_all_blocks()
+                # cp._default_pinned_memory_pool.free_all_blocks()
 
         # Now parse the results
         for entryNum, struct in enumerate(database.attrs['structNames']):
@@ -130,14 +131,17 @@ class SVEvaluator:
 
                         counters[svName][elem] += 1
 
-                engResult, fcsResult = tree.eval(useDask=True, allSums=allSums)
 
                 trueForces = database.trueValues[struct]['forces']
                 if useDask:
+                    engResult, fcsResult = tree.eval(useDask=True, allSums=allSums)
+
                     fcsErrors = da.average(
                         abs(sum(fcsResult) - trueForces), axis=(1,2)
                     )
                 else:
+                    engResult, fcsResult = tree.eval(useDask=False, allSums=allSums)
+
                     fcsErrors = np.average(
                         abs(sum(fcsResult) - trueForces), axis=(1,2)
                     )
