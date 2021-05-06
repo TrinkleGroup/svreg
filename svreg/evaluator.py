@@ -38,6 +38,8 @@ class SVEvaluator:
 
                     # pop = cp.asarray(fullPopDict[svName][elem])
                     pop = np.array(fullPopDict[svName][elem])
+                    if useGPU:
+                        pop = cp.asarray(pop)
 
                     results[svName][elem] = {}
 

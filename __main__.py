@@ -263,7 +263,7 @@ def main(client, settings):
 
         graph, keys = evaluator.evaluate(
             regressor.trees, populationDict, N,
-            worldSize, settings['allSums']
+            worldSize, settings['allSums'], useGPU=settings['useGPU']
         )
 
         perWorkerResults = client.get(graph, keys, direct=True)#, resources={'GPU': 1})
@@ -417,14 +417,9 @@ def polish(client, settings):
 
         populationDict, rawPopulations = regressor.generatePopulationDict(N)
 
-        # perStructResults = evaluator.evaluate(
-        #     regressor.trees, database, populationDict, N,
-        #     worldSize, settings['allSums'], settings['useGPU']
-        # )
-
         graph, keys = evaluator.evaluate(
             regressor.trees, populationDict, N,
-            worldSize, settings['allSums']
+            worldSize, settings['allSums'], useGPU=settings['useGPU']
         )
 
         perWorkerResults = client.get(graph, keys, direct=True)#, resources={'GPU': 1})
