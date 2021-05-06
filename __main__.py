@@ -17,8 +17,8 @@ import dask
 from dask_mpi import initialize
 # with dask.config.set({"distributed.worker.resources.GPU": 1}):
 initialize(
-    nthreads=2,
-    memory_limit='4 GB',
+    nthreads=1,
+    memory_limit='32 GB',
     interface='ipogif0',
     local_directory=os.getcwd()
 )
@@ -87,6 +87,7 @@ def main(client, settings):
             splits,
             [database.attrs['svNames']]*worldSize,
             [database.attrs['elements']]*worldSize,
+            [settings['allSums']]*worldSize,
         )
 
         client.gather(client.compute(futures))
@@ -277,7 +278,6 @@ def main(client, settings):
             x for _, x in sorted(zip(perStructNames, perStructResults))
         ]
 
-
         energies = {struct: [] for struct in database.attrs['structNames']}
         forces   = {struct: [] for struct in database.attrs['structNames']}
 
@@ -339,6 +339,7 @@ def polish(client, settings):
             splits,
             [database.attrs['svNames']]*worldSize,
             [database.attrs['elements']]*worldSize,
+            [settings['allSums']]*worldSize,
         )
 
         client.gather(client.compute(futures))
@@ -649,11 +650,13 @@ if __name__ == '__main__':
     settings.printSettings()
 
     if settings['allSums']:
-        for key in _function_map:
-            if key != 'add':
-                raise RuntimeError(
-                    "allSums == True, but function map includes other functions"
-                )
+        _function_map = {'add': _function_map['add']}
+
+        # for key in _function_map:
+        #     if key != 'add':
+        #         raise RuntimeError(
+        #             "allSums == True, but function map includes other functions"
+        #         )
 
     # Prepare save directories
     if os.path.isdir(settings['outputPath']):

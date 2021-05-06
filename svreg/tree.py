@@ -91,7 +91,7 @@ class SVTree(list):
 
 
     @classmethod
-    def random(cls, svNodePool, maxDepth=1, method='grow', maxNumSVs=1):
+    def random(cls, svNodePool, maxDepth=1, method='grow', maxNumSVs=1, allSums=False):
         """
         Generates a random tree with a maximum depth of maxDepth by randomly
         adding nodes from a pool of function nodes and the given svNodes list.
@@ -140,7 +140,10 @@ class SVTree(list):
             return tree
         else:
             # Choose a random function as the head, then continue with building
-            tree.nodes.append(FunctionNode.random())
+            if allSums:
+                tree.nodes.append(FunctionNode('add'))
+            else:
+                tree.nodes.append(FunctionNode.random())
 
         # Track how many children need to be added to the current node. The tree
         # is complete once this list is empty
@@ -160,7 +163,11 @@ class SVTree(list):
                 ):
 
                 # Chose to add a FunctionNode
-                tree.nodes.append(FunctionNode.random())
+                if allSums:
+                    tree.nodes.append(FunctionNode('add'))
+                else:
+                    tree.nodes.append(FunctionNode.random())
+
                 nodesToAdd.append(tree.nodes[-1].function.arity)
 
                 # Only count embedding functions (or *) when considering depth
@@ -1045,7 +1052,7 @@ class MultiComponentTree(SVTree):
 
 
     @classmethod
-    def random(cls, svNodePool, elements, maxDepth=1):
+    def random(cls, svNodePool, elements, maxDepth=1, allSums=False):
         """
         Overloads SVTree.random() to generate random trees for each chemistry,
         then to update the corresponding class attributes.
@@ -1054,7 +1061,7 @@ class MultiComponentTree(SVTree):
         tree = cls(elements)
 
         tree.chemistryTrees = {
-            el: SVTree.random(svNodePool, maxDepth=maxDepth)
+            el: SVTree.random(svNodePool, maxDepth=maxDepth, allSums=allSums)
             for el in tree.elements
         }
 

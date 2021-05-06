@@ -129,7 +129,8 @@ class SVRegressor:
             randTree = MCTree.random(
                 svNodePool=self.svNodePool,
                 maxDepth=random.randint(0, self.settings['maxTreeDepth']),
-                elements=elements
+                elements=elements,
+                allSums=self.settings['allSums']
             )
 
             if str(randTree) not in uniqueTreeNames:

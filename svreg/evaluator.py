@@ -24,7 +24,6 @@ class SVEvaluator:
 
             names = list(worker._structures.keys())
             entries = [worker._structures[k] for k in names]
-            tvFs = worker._true_forces.values()
 
             allResults = []
 
@@ -49,11 +48,13 @@ class SVEvaluator:
                     bigSVE = [e[svName][elem]['energy'] for e in entries]
                     bigSVF = [e[svName][elem]['forces'] for e in entries]
 
+                    splits = np.cumsum([sve.shape[0] for sve in bigSVE])
+                    splits = np.concatenate([[0], splits])
+
                     if useDask:
 
                         if allSums:
                             # splits = database.splits[svName][elem]
-                            splits = worker._splits
 
                             bigSVE = np.concatenate(bigSVE)
                             bigSVF = np.concatenate(bigSVF)
@@ -95,7 +96,8 @@ class SVEvaluator:
                             perEntryEng = []
                             perEntryFcs = []
 
-                            for (sve, svf) in zip(bigSVE, bigSVF):
+                            ns = len(bigSVE)
+                            for ii, (sve, svf) in enumerate(zip(bigSVE, bigSVF)):
 
                                 if useGPU:
                                     sve = cp.asarray(sve)
@@ -119,8 +121,8 @@ class SVEvaluator:
 
                                 fcs = fcs.reshape((Ne, Na, 3, Nn, P))
 
-                                fcs = da.moveaxis(fcs, -2, 0)
-                                fcs = da.moveaxis(fcs, -1, 1)
+                                fcs = np.moveaxis(fcs, -2, 0)
+                                fcs = np.moveaxis(fcs, -1, 1)
 
                                 perEntryEng.append(eng)
                                 perEntryFcs.append(fcs)
@@ -172,7 +174,8 @@ class SVEvaluator:
 
             # Now parse the results
             # for entryNum, struct in enumerate(database.attrs['structNames']):
-            for entryNum, (struct, trueForces) in enumerate(zip(names, tvFs)):
+            for entryNum, struct in enumerate(names):
+
                 counters = {
                     svName: {
                         el: 0 for el in fullPopDict[svName]
@@ -198,10 +201,11 @@ class SVEvaluator:
 
 
                     # trueForces = database.trueValues[struct]['forces']
+                    trueForces = worker._true_forces[struct]
                     if useDask:
-                        engResult, fcsResult = tree.eval(useDask=True, allSums=allSums)
+                        engResult, fcsResult = tree.eval(useDask=False, allSums=allSums)
 
-                        fcsErrors = da.average(
+                        fcsErrors = np.average(
                             abs(sum(fcsResult) - trueForces), axis=(1,2)
                         )
                     else:
@@ -215,11 +219,11 @@ class SVEvaluator:
 
                 allResults.append(treeResults)
 
-            if useDask:
-                from dask.distributed import get_client
-                client = get_client()
+            # if useDask:
+            #     from dask.distributed import get_client
+            #     client = get_client()
 
-                allResults = client.gather(client.compute(allResults))
+            #     allResults = client.gather(client.compute(allResults))
 
             allResults = np.array(allResults, dtype=np.float32)
 

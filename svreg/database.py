@@ -40,7 +40,7 @@ class SVDatabase(dict):
         # self['energy'] = {}
         # self['forces'] = {}
 
-        structNames = list(h5pyFile.keys())
+        structNames = sorted(list(h5pyFile.keys()))[::10]
         svNames =  list(h5pyFile[structNames[0]].keys())
         elements = sorted(list(h5pyFile[structNames[0]][svNames[0]].keys()))
 
@@ -112,7 +112,7 @@ class SVDatabase(dict):
                     self[sv][elem]['forces'] = bigSVF
 
 
-def worker_load(h5pyFileName, localNames, svNames, elements):
+def worker_load(h5pyFileName, localNames, svNames, elements, allSums):
 
     from dask.distributed import get_worker
 
@@ -120,7 +120,6 @@ def worker_load(h5pyFileName, localNames, svNames, elements):
 
     worker._structures = {}
     worker._true_forces = {}
-    worker._splits = [0]
 
     with h5py.File(h5pyFileName, 'r') as h5pyFile:
         for struct in localNames:
@@ -137,12 +136,11 @@ def worker_load(h5pyFileName, localNames, svNames, elements):
                     energyData = np.array(group['energy'][()], dtype=np.float32)
                     forcesData = np.array(group['forces'][()], dtype=np.float32)
 
+                    if allSums:
+                        forcesData = forcesData.sum(axis=1)
+
                     worker._structures[struct][sv][elem]['energy'] = energyData
                     worker._structures[struct][sv][elem]['forces'] = forcesData
 
-                    worker._splits.append(energyData.shape[0])
-                    
             tvF = h5pyFile[struct].attrs['forces']
             worker._true_forces[struct] = np.array(tvF, dtype=np.float32)
-
-    worker._splits = np.cumsum(worker._splits)[:-1]
