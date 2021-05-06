@@ -75,7 +75,8 @@ class Population(list):
             return MCTree.random(
                 svNodePool=self.svNodePool,
                 maxDepth=random.randint(0, self.settings['maxTreeDepth']),
-                elements=self.elements
+                elements=self.elements,
+                allSums=self.settings['allSums']
             ), None, None
 
         newTree = self.tournament(self.settings['tournamentSize'])
@@ -86,7 +87,8 @@ class Population(list):
 
         if random.random() < self.settings['pointMutateProb']:
             newTree.pointMutate(
-                self.svNodePool, self.settings['pointMutateProb']
+                self.svNodePool, self.settings['pointMutateProb'],
+                allSums=self.settings['allSums']
             )
 
         newTree.updateSVNodes()

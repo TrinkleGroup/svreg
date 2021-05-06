@@ -7,7 +7,8 @@
 ################################################################################
 
 seed        1123
-runType     POLISH
+runType     GA
+useGPU      False
 
 ################################################################################
 # Database settings
@@ -22,8 +23,11 @@ runType     POLISH
 # refStruct           Ti48Mo80_type1_c10
 # databasePath        ../svreg_data/hyojung/hj.hdf5-fixed-f32-noref-full
 
-refStruct           AL-step_1-data-0000.0000.0002.0000.03.h5-0
-databasePath        /home/jvita/scripts/svreg_data/AlZnMg/AL_Al/AL_Al-full-allsums.hdf5
+# refStruct           AL-step_1-data-0000.0000.0002.0000.03.h5-0
+# databasePath        /home/jvita/scripts/svreg_data/AlZnMg/AL_Al/AL_Al-full-allsums.hdf5
+
+refStruct           AL-step_14-data-003.001.012.000.000.005.h5-0
+databasePath        /home/jvita/scripts/svreg_data/AlZnMg/AL_Al/AL_Al.hdf5-fixed-f32-noref130
 
 outputPath          ./results/debug2
 overwrite           True
@@ -40,7 +44,7 @@ optimizer               CMA
 numberOfTrees           10
 tournamentSize          5
 
-optimizerPopSize        100
+optimizerPopSize        17
 
 crossoverProb           0.2
 pointMutateProb         0.2

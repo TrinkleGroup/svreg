@@ -801,7 +801,7 @@ class SVTree(list):
         raise NotImplementedError
 
 
-    def pointMutate(self, svNodePool, mutProb):
+    def pointMutate(self, svNodePool, mutProb, allSums=False):
         """
         Perform an in-place mutation of the current set of nodes.
 
@@ -823,7 +823,10 @@ class SVTree(list):
             if isinstance(node, FunctionNode):
                 # Choose a function with the same arity
                 arity = node.function.arity
-                self.nodes[mutIdx] = FunctionNode.random(arity=arity)
+
+                if not allSums:
+                    # if allSums, can't mutate function nodes
+                    self.nodes[mutIdx] = FunctionNode.random(arity=arity)
             else:
                 # Choose a random SV node
                 self.nodes[mutIdx] = deepcopy(random.choice(svNodePool))
@@ -1229,9 +1232,9 @@ class MultiComponentTree(SVTree):
         parentTree1.crossover(parentTree2)
 
 
-    def pointMutate(self, svNodePool, mutProb):
+    def pointMutate(self, svNodePool, mutProb, allSums=False):
         for tree in self.chemistryTrees.values():
-            tree.pointMutate(svNodePool, mutProb)
+            tree.pointMutate(svNodePool, mutProb, allSums=allSums)
 
 
     def updateSVNodes(self):

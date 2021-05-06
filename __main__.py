@@ -18,8 +18,8 @@ from dask_mpi import initialize
 # with dask.config.set({"distributed.worker.resources.GPU": 1}):
 initialize(
     nthreads=1,
-    memory_limit='32 GB',
-    interface='ipogif0',
+    memory_limit='3 GB',
+    # interface='ipogif0',
     local_directory=os.getcwd()
 )
 
