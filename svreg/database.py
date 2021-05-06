@@ -40,7 +40,7 @@ class SVDatabase(dict):
         # self['energy'] = {}
         # self['forces'] = {}
 
-        structNames = sorted(list(h5pyFile.keys()))[::10]
+        structNames = sorted(list(h5pyFile.keys()))
         svNames =  list(h5pyFile[structNames[0]].keys())
         elements = sorted(list(h5pyFile[structNames[0]][svNames[0]].keys()))
 
