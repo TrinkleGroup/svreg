@@ -414,7 +414,7 @@ def buildSVNodePool(database):
 
     svNodePool = []
 
-    for svName in database:
+    for svName in database.attrs['svNames']:
 
         restrictions = None
         if 'restrictions' in database.attrs[svName]:

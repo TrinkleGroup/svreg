@@ -72,25 +72,26 @@ def main(client, settings):
     # Setup
     with h5py.File(settings['databasePath'], 'r') as h5pyFile:
         database = SVDatabase(h5pyFile)
-        wait(database.load(h5pyFile))
+        wait(database.load(h5pyFile, allSums=settings['allSums']))
 
-        names = list(database.attrs['structNames'])
-        random.shuffle(names)
+        if settings['allSums']:
+            names = list(database.attrs['structNames'])
+            random.shuffle(names)
 
-        splits = np.array_split(names, worldSize)
+            splits = np.array_split(names, worldSize)
 
-        from svreg.database import worker_load
+            from svreg.database import worker_load
 
-        futures = client.map(
-            worker_load,
-            [settings['databasePath']]*worldSize,
-            splits,
-            [database.attrs['svNames']]*worldSize,
-            [database.attrs['elements']]*worldSize,
-            [settings['allSums']]*worldSize,
-        )
+            futures = client.map(
+                worker_load,
+                [settings['databasePath']]*worldSize,
+                splits,
+                [database.attrs['svNames']]*worldSize,
+                [database.attrs['elements']]*worldSize,
+                [settings['allSums']]*worldSize,
+            )
 
-        client.gather(client.compute(futures))
+            client.gather(client.compute(futures))
 
         evaluator = SVEvaluator(database, settings)
 
@@ -263,7 +264,7 @@ def main(client, settings):
         populationDict, rawPopulations = regressor.generatePopulationDict(N)
 
         graph, keys = evaluator.evaluate(
-            regressor.trees, populationDict, N,
+            regressor.trees, populationDict, N, database,
             worldSize, settings['allSums'], useGPU=settings['useGPU']
         )
 
@@ -324,25 +325,26 @@ def polish(client, settings):
     # Setup
     with h5py.File(settings['databasePath'], 'r') as h5pyFile:
         database = SVDatabase(h5pyFile)
-        wait(database.load(h5pyFile))
+        wait(database.load(h5pyFile, allSums=settings['allSums']))
 
-        names = list(database.attrs['structNames'])
-        random.shuffle(names)
+        if settings['allSums']:
+            names = list(database.attrs['structNames'])
+            random.shuffle(names)
 
-        splits = np.array_split(names, worldSize)
+            splits = np.array_split(names, worldSize)
 
-        from svreg.database import worker_load
+            from svreg.database import worker_load
 
-        futures = client.map(
-            worker_load,
-            [settings['databasePath']]*worldSize,
-            splits,
-            [database.attrs['svNames']]*worldSize,
-            [database.attrs['elements']]*worldSize,
-            [settings['allSums']]*worldSize,
-        )
+            futures = client.map(
+                worker_load,
+                [settings['databasePath']]*worldSize,
+                splits,
+                [database.attrs['svNames']]*worldSize,
+                [database.attrs['elements']]*worldSize,
+                [settings['allSums']]*worldSize,
+            )
 
-        client.gather(client.compute(futures))
+            client.gather(client.compute(futures))
 
         evaluator = SVEvaluator(database, settings)
 
@@ -419,7 +421,7 @@ def polish(client, settings):
         populationDict, rawPopulations = regressor.generatePopulationDict(N)
 
         graph, keys = evaluator.evaluate(
-            regressor.trees, populationDict, N,
+            regressor.trees, populationDict, N, database,
             worldSize, settings['allSums'], useGPU=settings['useGPU']
         )
 

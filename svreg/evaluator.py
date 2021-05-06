@@ -1,4 +1,6 @@
+import h5py
 import pickle
+from re import I
 import dask
 import dask.array as da
 from dask.distributed import get_client
@@ -13,11 +15,112 @@ class SVEvaluator:
         self.settings   = settings
 
     # def evaluate(self, trees, database, fullPopDict, P, allSums=False, useDask=True, useGPU=False):
-    def evaluate(self, trees, fullPopDict, P, numTasks, allSums=False, useDask=True, useGPU=False):
+    def evaluate(self, trees, fullPopDict, P, database, numTasks, useDask=True, useGPU=False):
         if useGPU:
             import cupy as cp
 
-        def treeStructEval(pickledTrees, popDict, P, allSums):
+        def singleStructEval(pickledTrees, P, struct, trueForces):
+            with h5py.File(self.settings['databasePath'], 'r') as h5pyFile:
+
+                entry = {}
+                for sv in fullPopDict:
+                    entry[sv] = {}
+
+                    for elem in fullPopDict[sv]:
+                        entry[sv][elem] = {}
+
+                        group = h5pyFile[struct][sv][elem]
+
+                        energyData = np.array(group['energy'][()], dtype=np.float32)
+                        forcesData = np.array(group['forces'][()], dtype=np.float32)
+
+                        if self.settings['allSums']:
+                            forcesData = forcesData.sum(axis=1)
+
+                        entry[sv][elem]['energy'] = energyData
+                        entry[sv][elem]['forces'] = forcesData
+
+
+            allResults = []
+
+            results = {}
+
+            for svName in fullPopDict:
+                results[svName] = {}
+
+                for elem in fullPopDict[svName]:
+                    pop = np.array(fullPopDict[svName][elem])
+                    sve = entry[svName][elem]['energy']
+                    svf = entry[svName][elem]['forces']
+
+                    if useGPU:
+                        pop = cp.asarray(pop)
+                        sve = cp.asarray(sve)
+                        svf = cp.asarray(svf)
+
+                    eng = sve.dot(pop)
+                    fcs = svf.dot(pop)
+
+                    if useGPU:
+                        eng = cp.asnumpy(eng)
+                        fcs = cp.asnumpy(fcs)
+
+                    Ne = eng.shape[0]
+                    Nn = eng.shape[1] // P
+
+                    eng = eng.reshape((Ne, Nn, P))
+                    eng = np.moveaxis(eng, 1, 0)
+                    eng = np.moveaxis(eng, -1, 1)
+
+                    Na = fcs.shape[1]
+
+                    fcs = fcs.reshape((Ne, Na, 3, Nn, P))
+
+                    fcs = np.moveaxis(fcs, -2, 0)
+                    fcs = np.moveaxis(fcs, -1, 1)
+
+                    results[svName][elem] = {}
+
+                    results[svName][elem]['energy'] = eng
+                    results[svName][elem]['forces'] = fcs
+
+            counters = {
+                svName: {
+                    el: 0 for el in fullPopDict[svName]
+                } for svName in fullPopDict
+            }
+
+            treeResults = []
+            for tree in pickledTrees:
+                tree = pickle.loads(tree)
+
+                for elem in tree.chemistryTrees:
+                    for svNode in tree.chemistryTrees[elem].svNodes:
+                        svName = svNode.description
+
+                        idx = counters[svName][elem]
+
+                        eng = results[svName][elem]['energy'][idx]
+                        fcs = results[svName][elem]['forces'][idx]
+
+                        svNode.values = (eng, fcs)
+
+                        counters[svName][elem] += 1
+
+                engResult, fcsResult = tree.eval(useDask=False, allSums=self.settings['allSums'])
+
+                fcsErrors = np.average(
+                    abs(sum(fcsResult) - trueForces), axis=(1,2)
+                )
+
+                treeResults.append([sum(engResult), fcsErrors])
+
+            allResults.append(treeResults)
+
+            return allResults
+
+
+        def batchStructsEval(pickledTrees, P):
 
             from dask.distributed import get_worker
             worker = get_worker()
@@ -26,86 +129,19 @@ class SVEvaluator:
 
             allResults = []
 
-            if not allSums:
+            if not self.settings['allSums']:
                 # Evaluate structures one at a time
 
+                # TODO: if you can't stack, is there any point of batching? hurts load balancing
+                # TODO: let rank 0 on each node use GPU, but have others run on CPU
+                pass
+
                 for struct in names:
-                    entry = worker._structures[struct]
-                    results = {}
-
-                    for svName in fullPopDict:
-                        results[svName] = {}
-
-                        for elem in fullPopDict[svName]:
-                            pop = np.array(fullPopDict[svName][elem])
-                            sve = entry[svName][elem]['energy']
-                            svf = entry[svName][elem]['forces']
-
-                            if useGPU:
-                                pop = cp.asarray(pop)
-                                sve = cp.asarray(sve)
-                                svf = cp.asarray(svf)
-
-                            eng = sve.dot(pop)
-                            fcs = svf.dot(pop)
-
-                            if useGPU:
-                                eng = cp.asnumpy(eng)
-                                fcs = cp.asnumpy(fcs)
-
-                            Ne = eng.shape[0]
-                            Nn = eng.shape[1] // P
-
-                            eng = eng.reshape((Ne, Nn, P))
-                            eng = np.moveaxis(eng, 1, 0)
-                            eng = np.moveaxis(eng, -1, 1)
-
-                            Na = fcs.shape[1]
-
-                            fcs = fcs.reshape((Ne, Na, 3, Nn, P))
-
-                            fcs = np.moveaxis(fcs, -2, 0)
-                            fcs = np.moveaxis(fcs, -1, 1)
-
-                            results[svName][elem] = {}
-
-                            results[svName][elem]['energy'] = eng
-                            results[svName][elem]['forces'] = fcs
-
-                    counters = {
-                        svName: {
-                            el: 0 for el in fullPopDict[svName]
-                        } for svName in fullPopDict
-                    }
-
-                    treeResults = []
-                    for tree in pickledTrees:
-                        tree = pickle.loads(tree)
-
-                        for elem in tree.chemistryTrees:
-                            for svNode in tree.chemistryTrees[elem].svNodes:
-                                svName = svNode.description
-
-                                idx = counters[svName][elem]
-
-                                eng = results[svName][elem]['energy'][idx]
-                                fcs = results[svName][elem]['forces'][idx]
-
-                                svNode.values = (eng, fcs)
-
-                                counters[svName][elem] += 1
-
-                        trueForces = worker._true_forces[struct]
-
-                        engResult, fcsResult = tree.eval(useDask=False, allSums=allSums)
-
-                        fcsErrors = np.average(
-                            abs(sum(fcsResult) - trueForces), axis=(1,2)
-                        )
-
-                        treeResults.append([sum(engResult), fcsErrors])
-
-                    allResults.append(treeResults)
+                    allResults += singleStructEval(
+                        pickledTrees, P,
+                        worker._structures[struct],
+                        worker._true_forces[struct]
+                    )
             else:
                 # Structures can be stacked and evaluated all at once
 
@@ -212,7 +248,7 @@ class SVEvaluator:
 
                         trueForces = worker._true_forces[struct]
 
-                        engResult, fcsResult = tree.eval(useDask=False, allSums=allSums)
+                        engResult, fcsResult = tree.eval(useDask=False, allSums=self.settings['allSums'])
 
                         fcsErrors = np.average(
                             abs(sum(fcsResult) - trueForces), axis=(1,2)
@@ -221,12 +257,6 @@ class SVEvaluator:
                         treeResults.append([sum(engResult), fcsErrors])
 
                     allResults.append(treeResults)
-
-            # if useDask:
-            #     from dask.distributed import get_client
-            #     client = get_client()
-
-            #     allResults = client.gather(client.compute(allResults))
 
             allResults = np.array(allResults, dtype=np.float32)
 
@@ -237,19 +267,41 @@ class SVEvaluator:
 
         pickledTrees = [pickle.dumps(tree) for tree in trees]
 
-        perTreeResults = []
-        for chunkNum in range(numTasks):
+        if self.settings['allSums']:
+            for chunkNum in range(numTasks):
 
-            key = 'worker_eval-{}'.format(chunkNum)
+                key = 'worker_eval-{}'.format(chunkNum)
 
-            graph[key] = (
-              treeStructEval,
-              pickledTrees,
-              fullPopDict,
-              P,
-              allSums
+                graph[key] = (
+                    batchStructsEval,
+                    pickledTrees,
+                    P,
+                )
+
+                keys.append(key)
+
+            return graph, keys
+        else:
+            for structNum, struct in enumerate(database.attrs['structNames']):
+                key = 'struct-eval-{}'.format(structNum)
+
+                graph[key] = (
+                    singleStructEval,
+                    pickledTrees,
+                    P,
+                    # database[struct],
+                    struct,
+                    database.trueValues[struct]['forces']
+                )
+
+            def dummy(list_of_results):
+                return itertools.chain.from_iterable(list_of_results), database.attrs['structNames']
+
+            import itertools
+            graph['gather-evals'] = (
+                # itertools.chain.from_iterable,
+                dummy,
+                ['struct-eval-{}'.format(si) for si in range(len(database.attrs['structNames']))]
             )
 
-            keys.append(key)
-
-        return graph, keys
+            return graph, ['gather-evals']
