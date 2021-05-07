@@ -208,7 +208,7 @@ class SVEvaluator:
                             stop    = splits[idx + 1]
 
                             perEntryEng.append(eng[:, :, start:stop])
-                            perEntryFcs.append(fcs[:, :, start:stop])
+                            perEntryFcs.append(fcs[:, :, start:stop, :])
 
                         results[svName][elem]['energy'] = perEntryEng
                         results[svName][elem]['forces'] = perEntryFcs
@@ -267,41 +267,16 @@ class SVEvaluator:
 
         pickledTrees = [pickle.dumps(tree) for tree in trees]
 
-        if self.settings['allSums']:
-            for chunkNum in range(numTasks):
+        for chunkNum in range(numTasks):
 
-                key = 'worker_eval-{}'.format(chunkNum)
+            key = 'worker_eval-{}'.format(chunkNum)
 
-                graph[key] = (
-                    batchStructsEval,
-                    pickledTrees,
-                    P,
-                )
-
-                keys.append(key)
-
-            return graph, keys
-        else:
-            for structNum, struct in enumerate(database.attrs['structNames']):
-                key = 'struct-eval-{}'.format(structNum)
-
-                graph[key] = (
-                    singleStructEval,
-                    pickledTrees,
-                    P,
-                    # database[struct],
-                    struct,
-                    database.trueValues[struct]['forces']
-                )
-
-            def dummy(list_of_results):
-                return itertools.chain.from_iterable(list_of_results), database.attrs['structNames']
-
-            import itertools
-            graph['gather-evals'] = (
-                # itertools.chain.from_iterable,
-                dummy,
-                ['struct-eval-{}'.format(si) for si in range(len(database.attrs['structNames']))]
+            graph[key] = (
+              treeStructEval,
+              pickledTrees,
+              fullPopDict,
+              P,
+              allSums
             )
 
             return graph, ['gather-evals']
