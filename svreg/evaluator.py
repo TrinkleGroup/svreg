@@ -172,7 +172,7 @@ class SVEvaluator:
                             stop    = splits[idx + 1]
 
                             perEntryEng.append(eng[:, :, start:stop])
-                            perEntryFcs.append(fcs[:, :, start:stop])
+                            perEntryFcs.append(fcs[:, :, start:stop, :])
 
                         results[svName][elem]['energy'] = perEntryEng
                         results[svName][elem]['forces'] = perEntryFcs
@@ -237,7 +237,6 @@ class SVEvaluator:
 
         pickledTrees = [pickle.dumps(tree) for tree in trees]
 
-        perTreeResults = []
         for chunkNum in range(numTasks):
 
             key = 'worker_eval-{}'.format(chunkNum)

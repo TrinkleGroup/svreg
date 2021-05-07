@@ -136,8 +136,8 @@ def worker_load(h5pyFileName, localNames, svNames, elements, allSums):
                     energyData = np.array(group['energy'][()], dtype=np.float32)
                     forcesData = np.array(group['forces'][()], dtype=np.float32)
 
-                    if allSums:
-                        forcesData = forcesData.sum(axis=1)
+                    if (allSums) and (len(forcesData.shape) == 4):
+                        forcesData = forcesData.sum(axis=0)
 
                     worker._structures[struct][sv][elem]['energy'] = energyData
                     worker._structures[struct][sv][elem]['forces'] = forcesData
