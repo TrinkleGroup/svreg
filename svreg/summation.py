@@ -403,7 +403,6 @@ class FFG(Summation):
             totalEnergy = np.zeros((1, N))
         elif evalType == 'forces':
             forces = np.zeros((1, N, N, 3))
-            totalEnergy = np.zeros((1, N))
 
         # Allows double counting bonds; needed for embedding energy calculations
         nl = NeighborList(
@@ -586,7 +585,6 @@ class FFG(Summation):
                 elif evalType == 'forces':
                     forces[:, i, i, :] -= jForces
                     forces[:, i, j, :] += jForces
-                    totalEnergy[:, i] += fjVal*partialsum
             # end neighbor loop
 
             if evalType == 'forces':
@@ -598,8 +596,7 @@ class FFG(Summation):
         elif evalType == 'energy':
             return totalEnergy
         elif evalType == 'forces':
-            print(forces.shape, totalEnergy.shape)
-            return forces, totalEnergy
+            return forces
 
  
     def add_to_energy_sv(self, sv, rij, rik, cos, atomId):
@@ -801,7 +798,6 @@ class Rho(Summation):
             totalEnergy = np.zeros((1, N))
         elif evalType == 'forces':
             forces = np.zeros((1, N, N, 3))
-            totalEnergy = np.zeros((1, N))
 
         # Note that double counting is always allowed, but it must be done
         # manually (rather than directly multiplying each bond by 2)
@@ -888,15 +884,13 @@ class Rho(Summation):
 
                     forces[:, i, i, :] += fcs
                     forces[:, i, j, :] -= fcs
-                    totalEnergy[:, i] += self.rho(rij)
 
         if evalType == 'vector':
             return energySV, forcesSV
         elif evalType == 'energy':
             return totalEnergy
         elif evalType == 'forces':
-            print(forces.shape, totalEnergy.shape)
-            return forces, totalEnergy
+            return forces
 
 
     def add_to_energy_sv(self, sv, rij, atomId):

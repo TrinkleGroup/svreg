@@ -61,13 +61,15 @@ class SVDatabase(dict):
         }
 
 
-    def load(self, h5pyFile, useDask=True, allSums=False):
+    def load(self, h5pyFile, useDask=True):
 
         structNames = self.attrs['structNames']
         svNames = self.attrs['svNames']
         elements = self.attrs['elements']
 
         print("Loading {} structures...".format(len(structNames)), flush=True)
+
+        self.splits = {}
 
         for sv in svNames:
             self.attrs[sv] = {}
@@ -76,58 +78,38 @@ class SVDatabase(dict):
             for k, v in h5pyFile[structNames[0]][sv].attrs.items():
                 self.attrs[sv][k] = v
 
-        if allSums:
-            # for allSums=True, data is batched and loaded on specific workers later
-            return
-        else:
-            for struct in self.attrs['structNames']:
-                # self[struct] = {}
+            self[sv] = {}
+            self.splits[sv] = {}
 
-                for sv in svNames:
-                    # self[struct][sv] = {}
+            for elem in elements:
 
-                    for elem in elements:
+                continue
 
-                        # group = h5pyFile[struct][sv][elem]
+                bigSVE = [
+                    h5pyFile[struct][sv][elem]['energy'] for struct in structNames
+                ]
 
-                        # energyData = np.array(group['energy'][()], dtype=np.float32)
-                        # forcesData = np.array(group['forces'][()], dtype=np.float32)
+                bigSVF = [
+                    h5pyFile[struct][sv][elem]['forces'] for struct in structNames
+                ]
 
-                        # if allSums:
-                        #     forcesData = forcesData.sum(axis=1)
+                splits = np.cumsum([sve.shape[0] for sve in bigSVE])
 
-                        # # TODO: maybe I should just load from a file later?
+                splits = np.concatenate([[0], splits])
+                self.splits[sv][elem] = splits
 
-                        # self[struct][sv][elem] = {'energy': energyData, 'forces': forcesData}
+                self[sv][elem] = {}
 
-                        self.trueValues[struct]['energy'] = h5pyFile[struct].attrs['energy']
-                        self.trueValues[struct]['forces'] = h5pyFile[struct].attrs['forces']
+                if useDask:
+                    self[sv][elem]['energy'] = [np.array(sve) for sve in bigSVE]
+                    # self[sv][elem]['forces'] = da.from_array(np.concatenate(bigSVF, axis=0))
+                    self[sv][elem]['forces'] = [da.from_array(np.array(svf)) for svf in bigSVF]
+                else:
+                    # self[sv][elem]['energy'] = np.concatenate(bigSVE, axis=0)
+                    # self[sv][elem]['forces'] = np.concatenate(bigSVF, axis=0)
 
-                    # bigSVE = [
-                    #     h5pyFile[struct][sv][elem]['energy'] for struct in structNames
-                    # ]
-
-                    # bigSVF = [
-                    #     h5pyFile[struct][sv][elem]['forces'] for struct in structNames
-                    # ]
-
-                    # splits = np.cumsum([sve.shape[0] for sve in bigSVE])
-
-                    # splits = np.concatenate([[0], splits])
-                    # self.splits[sv][elem] = splits
-
-                    # self[sv][elem] = {}
-
-                    # if useDask:
-                    #     self[sv][elem]['energy'] = [np.array(sve) for sve in bigSVE]
-                    #     # self[sv][elem]['forces'] = da.from_array(np.concatenate(bigSVF, axis=0))
-                    #     self[sv][elem]['forces'] = [da.from_array(np.array(svf)) for svf in bigSVF]
-                    # else:
-                    #     # self[sv][elem]['energy'] = np.concatenate(bigSVE, axis=0)
-                    #     # self[sv][elem]['forces'] = np.concatenate(bigSVF, axis=0)
-
-                    #     self[sv][elem]['energy'] = bigSVE
-                    #     self[sv][elem]['forces'] = bigSVF
+                    self[sv][elem]['energy'] = bigSVE
+                    self[sv][elem]['forces'] = bigSVF
 
 
 def worker_load(h5pyFileName, localNames, svNames, elements, allSums):
