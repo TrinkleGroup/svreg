@@ -70,6 +70,22 @@ PairSplineTree::PairSplineTree(LAMMPS *lmp) : Pair(lmp)
   comm_reverse = 0;
 
   totalNumParams = 0;
+  
+  arity2Functions.insert(
+    std::make_pair(
+      "add",
+      std::make_pair(PairSplineTree::add, PairSplineTree::_deriv_add)
+    )
+  );
+
+  arity2Functions.insert(
+    std::make_pair(
+      "mul",
+      std::make_pair(PairSplineTree::mul, PairSplineTree::_deriv_mul)
+    )
+  );
+
+
 }
 
 /* ---------------------------------------------------------------------- */
@@ -102,6 +118,40 @@ void PairSplineTree::compute(int eflag, int vflag)
 
   // Grow per-atom array if necessary
 
+  for (int itype=0; itype<rho_nodes.size(); itype++) {
+    for (SVNode * rho : rho_nodes[itype]) {
+      rho->energies.resize(listfull->inum);
+
+      // Initialize forces array
+      for (int i=0; i<listfull->inum; i++) {
+        std::vector<dvec> tmp;
+
+        for (int j=0; j<listfull->inum; j++) {
+          tmp.push_back({0, 0, 0});
+        }
+
+        rho->forces.push_back(tmp);
+      }
+    }
+  }
+
+  for (int itype=0; itype<ffg_nodes.size(); itype++) {
+    for (SVNode * ffg : ffg_nodes[itype]) {
+      ffg->energies.resize(listfull->inum);
+
+      // Initialize forces array
+      for (int i=0; i<listfull->inum; i++) {
+        std::vector<dvec> tmp;
+
+        for (int j=0; j<listfull->inum; j++) {
+          tmp.push_back({0, 0, 0});
+        }
+
+        ffg->forces.push_back(tmp);
+      }
+    }
+  }
+
   if (atom->nmax > nmax) {
     nmax = atom->nmax;
   }
@@ -123,17 +173,13 @@ void PairSplineTree::compute(int eflag, int vflag)
     twoBodyInfo = new MEAM2Body[maxNeighbors];
   }
 
-  // Sum three-body contributions to charge density and
-  // the embedding energy
-
-  // Sum SV contributions to energy
-  // TODO: this loop would need to be redone for non-linear embedding functions.
-  // SVNodes would need to store their own results, then they could be run
-  // through the equation evaluation later (including calculating derivatives).
+  atom->map_init();
+  atom->map_set();
 
   // Loop over all atoms
   for(int ii = 0; ii < listfull->inum; ii++) {
     int i = listfull->ilist[ii];
+    int iGlobalTag = atom->tag[ii]-1;
     int numBonds = 0;
 
     MEAM2Body* nextTwoBodyInfo = twoBodyInfo;
@@ -161,6 +207,9 @@ void PairSplineTree::compute(int eflag, int vflag)
 
         // Record bond information for future use
         nextTwoBodyInfo->tag = j;
+        // TODO: I don't think that jj is the same as ii
+        // nextTwoBodyInfo->globalTag = atom->tag[jj]-1;
+        nextTwoBodyInfo->globalTag = atom->tag[j]-1;
         nextTwoBodyInfo->r = rij;
         nextTwoBodyInfo->del[0] = jdelx / rij;
         nextTwoBodyInfo->del[1] = jdely / rij;
@@ -202,18 +251,22 @@ void PairSplineTree::compute(int eflag, int vflag)
           }
 
           // Accumulate FFG contribution to energy
-          per_atom_energy += nextTwoBodyInfo->f[ffg_i] * partial_sum;
+          double tmp = nextTwoBodyInfo->f[ffg_i]*partial_sum;
+          per_atom_energy += tmp;
+          ffg->energies[iGlobalTag] += tmp;  // used for tracking intermediate energies
+          // ffg->energies[i] += tmp;  // used for tracking intermediate energies
         }
 
         // Loop over Rho SVs
         for (SVNode * rho : rho_nodes[itype-1]) {
 
-          // TODO: this needs to go in both directions
-
           // Check if correct bond type
           if (jtype != rho->bondType) continue;
 
-          per_atom_energy += rho->splines[0]->eval(rij);
+          double tmp = rho->splines[0]->eval(rij);
+          per_atom_energy += tmp;
+          rho->energies[iGlobalTag] += tmp;
+          // rho->energies[i] += tmp;
         }
 
         numBonds++;
@@ -221,20 +274,10 @@ void PairSplineTree::compute(int eflag, int vflag)
       }
     }
 
-    // TODO: if you were using non-linear embedding functions you would need U'
-
-    if(eflag) {
-      if(eflag_global)
-        eng_vdwl += per_atom_energy;
-      if(eflag_atom)
-        eatom[i] += per_atom_energy;
-    }
-
-
     // Compute three-body contributions to force, if FFG SVs are used
-    double forces_i[3] = {0, 0, 0};
-
     for (int ffg_i=0; ffg_i<num_ffg; ffg_i++) {
+      double forces_i[3] = {0, 0, 0};
+
       SVNode * ffg = ffg_nodes[itype-1][ffg_i];
 
       for(int jj = 0; jj < numBonds; jj++) {
@@ -286,6 +329,8 @@ void PairSplineTree::compute(int eflag, int vflag)
           forces_j[1] += fj[1];
           forces_j[2] += fj[2];
 
+          // TODO: I think you're missing cross terms here; forces on j due to k?
+
           fk[0] = bondk->del[0] * fik - bondj.del[0] * prefactor_ik;
           fk[1] = bondk->del[1] * fik - bondj.del[1] * prefactor_ik;
           fk[2] = bondk->del[2] * fik - bondj.del[2] * prefactor_ik;
@@ -294,9 +339,15 @@ void PairSplineTree::compute(int eflag, int vflag)
           forces_i[2] -= fk[2];
 
           int k = bondk->tag;
-          forces[k][0] += fk[0];
-          forces[k][1] += fk[1];
-          forces[k][2] += fk[2];
+
+          // forces[k][0] += fk[0];
+          // forces[k][1] += fk[1];
+          // forces[k][2] += fk[2];
+
+          // Forces on atom k due to atom i
+          ffg->forces[iGlobalTag][bondk->globalTag][0] += fk[0];
+          ffg->forces[iGlobalTag][bondk->globalTag][1] += fk[1];
+          ffg->forces[iGlobalTag][bondk->globalTag][2] += fk[2];
 
           if(evflag) {
             double delta_ij[3];
@@ -311,19 +362,32 @@ void PairSplineTree::compute(int eflag, int vflag)
           }
         }
 
-        forces[i][0] -= forces_j[0];
-        forces[i][1] -= forces_j[1];
-        forces[i][2] -= forces_j[2];
-        forces[j][0] += forces_j[0];
-        forces[j][1] += forces_j[1];
-        forces[j][2] += forces_j[2];
+        // forces[i][0] -= forces_j[0];
+        // forces[i][1] -= forces_j[1];
+        // forces[i][2] -= forces_j[2];
+        // forces[j][0] += forces_j[0];
+        // forces[j][1] += forces_j[1];
+        // forces[j][2] += forces_j[2];
+
+        // Forces on atom i due to atom j
+        ffg->forces[iGlobalTag][iGlobalTag][0] -= forces_j[0];
+        ffg->forces[iGlobalTag][iGlobalTag][1] -= forces_j[1];
+        ffg->forces[iGlobalTag][iGlobalTag][2] -= forces_j[2];
+        // Forces on atom j due to atom i
+        ffg->forces[iGlobalTag][bondj.globalTag][0] += forces_j[0];
+        ffg->forces[iGlobalTag][bondj.globalTag][1] += forces_j[1];
+        ffg->forces[iGlobalTag][bondj.globalTag][2] += forces_j[2];
       }
 
+      // Forces on atom i due to atoms k
+      ffg->forces[iGlobalTag][iGlobalTag][0] += forces_i[0];
+      ffg->forces[iGlobalTag][iGlobalTag][1] += forces_i[1];
+      ffg->forces[iGlobalTag][iGlobalTag][2] += forces_i[2];
     }
 
-    forces[i][0] += forces_i[0];
-    forces[i][1] += forces_i[1];
-    forces[i][2] += forces_i[2];
+    // forces[i][0] += forces_i[0];
+    // forces[i][1] += forces_i[1];
+    // forces[i][2] += forces_i[2];
   }
 
   comm->forward_comm_pair(this);
@@ -359,12 +423,25 @@ void PairSplineTree::compute(int eflag, int vflag)
 
           fpair /= rij;
 
-          forces[i][0] += jdel[0]*fpair;
-          forces[i][1] += jdel[1]*fpair;
-          forces[i][2] += jdel[2]*fpair;
-          forces[j][0] -= jdel[0]*fpair;
-          forces[j][1] -= jdel[1]*fpair;
-          forces[j][2] -= jdel[2]*fpair;
+          // forces[i][0] += jdel[0]*fpair;
+          // forces[i][1] += jdel[1]*fpair;
+          // forces[i][2] += jdel[2]*fpair;
+          // forces[j][0] -= jdel[0]*fpair;
+          // forces[j][1] -= jdel[1]*fpair;
+          // forces[j][2] -= jdel[2]*fpair;
+
+          // Forces on atom i due to atom j
+          rho->forces[atom->tag[i]-1][atom->tag[i]-1][0] += jdel[0]*fpair;
+          rho->forces[atom->tag[i]-1][atom->tag[i]-1][1] += jdel[1]*fpair;
+          rho->forces[atom->tag[i]-1][atom->tag[i]-1][2] += jdel[2]*fpair;
+
+          // Forces on atom j due to atom i
+          rho->forces[atom->tag[i]-1][atom->tag[j]-1][0] -= jdel[0]*fpair;
+          rho->forces[atom->tag[i]-1][atom->tag[j]-1][1] -= jdel[1]*fpair;
+          rho->forces[atom->tag[i]-1][atom->tag[j]-1][2] -= jdel[2]*fpair;
+
+          // TODO: may need to figure out how to update forces using local tags instead
+
           if (evflag) ev_tally(i, j, atom->nlocal, force->newton_pair,
                               pair_pot, 0.0, -fpair, jdel[0], jdel[1], jdel[2]);
         }
@@ -372,8 +449,125 @@ void PairSplineTree::compute(int eflag, int vflag)
     }
   }
 
+  for (int itype=0; itype<nodes.size(); itype++) {
+
+    // Constructs a list-of-lists where each sub-list is a sub-tree for a
+    // function at a given recursion depth. The first node of a sub-tree
+    // should always be a function. If only one node in tree, it must
+    // be an SVNode.
+
+    dvec  intermediateEng;
+    dvec3 intermediateFcs;
+
+    if (nodes[itype].size() == 1) {
+      intermediateEng = nodes[itype][0]->energies;
+      intermediateFcs = nodes[itype][0]->forces;
+
+      if(eflag) {
+        for(int ii = 0; ii < listfull->inum; ii++) {
+          int i = atom->tag[ii]-1;
+          // Accumulate per-atom energies
+          if(eflag_global)
+            eng_vdwl += intermediateEng[ii];
+          if(eflag_atom)
+            eatom[i] += intermediateEng[ii];
+
+          // Accumulate per-atom forces
+          for(int jj = 0; jj < listfull->inum; jj++) {
+            int j = atom->tag[jj]-1;
+            forces[j][0] += intermediateFcs[ii][jj][0];
+            forces[j][1] += intermediateFcs[ii][jj][1];
+            forces[j][2] += intermediateFcs[ii][jj][2];
+          }
+        }
+      }
+      continue;
+    }
+    else {
+      std::vector<std::vector<Node *>> subTrees;
+
+      for (Node * node : nodes[itype]) {
+        bool isFxn = false;
+        std::string nn = node->description;
+
+        if ( arity1Functions.find(nn) != arity1Functions.end() )
+          isFxn = true;
+        else if ( arity2Functions.find(nn) != arity2Functions.end() )
+          isFxn = true;
+
+        if (isFxn) {
+          // Start a new sub-tree
+          subTrees.push_back({node});
+        } else {
+          // Grow the current deepest sub-tree
+          subTrees.back().push_back(node);
+        }
+
+        // If the sub-tree is complete, evaluate its function
+        std::vector<Node *> back = subTrees.back();
+        int stackSize = back.size();
+        while (stackSize == subTrees.back()[0]->arity + 1) {
+          back = subTrees.back();
+
+          std::vector<std::pair<dvec, dvec3>> args;
+
+          // Prepare lists of arguments to be passed to function
+          for (int i=1; i<back.size(); i++) {
+            args.push_back(std::make_pair(back[i]->energies, back[i]->forces));
+          }
+
+          // Now evaluate stuff
+          if (back[0]->arity == 1) {
+            intermediateEng = back[0]->eval(args[0]);
+            intermediateFcs = back[0]->deriv(args[0]);
+          }
+          else if (back[0]->arity == 2) {
+            intermediateEng = back[0]->eval(args[0], args[1]);
+            intermediateFcs = back[0]->deriv(args[0], args[1]);
+          }
+          
+          if (subTrees.size() != 1) {  // Still some left to evaluate
+            subTrees.pop_back();
+
+            // Append intermediate results to sub-tree
+            Node * dummyNode = new Node;
+            dummyNode->energies = intermediateEng;
+            dummyNode->forces   = intermediateFcs;
+            dummyNode->description = "dummy";
+            subTrees.back().push_back(dummyNode);
+            stackSize = subTrees.back().size();
+          } else {  // Done evaluating all sub-trees
+
+            for(int ii = 0; ii < listfull->inum; ii++) {
+              int i = atom->tag[ii]-1;
+
+              // Accumulate per-atom energies
+              if (eflag) {
+                if(eflag_global)
+                  eng_vdwl += intermediateEng[i];
+                if(eflag_atom)
+                  eatom[i] += intermediateEng[i];
+              }
+
+              // Accumulate per-atom forces
+              for(int jj = 0; jj < listfull->inum; jj++) {
+                int j = atom->tag[jj]-1;
+
+                forces[j][0] += intermediateFcs[ii][jj][0];
+                forces[j][1] += intermediateFcs[ii][jj][1];
+                forces[j][2] += intermediateFcs[ii][jj][2];
+              }
+            }
+            stackSize = -1;  // break condition
+          }
+        }
+      }
+    }
+  }
+
   if(vflag_fdotr)
     virial_fdotr_compute();
+
 }
 
 /* ---------------------------------------------------------------------- */
@@ -421,8 +615,6 @@ void PairSplineTree::coeff(int narg, char **arg)
 
   // read potential file: also sets the number of elements.
   read_file(arg, error);
-
-  printf("Finished read_file()\n");
 
   // read args that map atom types to elements in potential file
   // map[i] = which element the Ith atom type is, -1 if NULL
@@ -543,15 +735,12 @@ void PairSplineTree::read_file(char **arg, Error * error)
           sv.parse(fp, error);
           sv.svType = three;
 
-          printf("Parsed template: %s\n", sv.name.c_str());
-
           sv_templates.emplace(sv.name, sv);
         }
 
         if (line_str.substr(0,4).compare("Tree") == 0) {
 
           utils::sfgets(FLERR, line, MAXLINE, fp, filename, error);
-          printf("Parsed tree: %s\n", line);
           std::string tree_str = line;
           tree_str = tree_str.substr(0, tree_str.size()-1);  // trailing newline
 
@@ -580,21 +769,44 @@ void PairSplineTree::read_file(char **arg, Error * error)
             tree_nodes = PairSplineTree::helper_split(subtree, ' ');
             
             std::string el = tree_nodes[0];
-            nelements += 1;
 
-            nodes[el] = std::vector<Node *>();
+            // Note: nelements gets incremented at the end of the loop
+            nodes[nelements] = std::vector<Node *>();
 
             for (std::string nn: tree_nodes) {
+              bool isFxn;
+              bool isArity1 = false;
+
+              if ( arity1Functions.find(nn) != arity1Functions.end() ) {
+                isFxn = true;
+                isArity1 = true;
+              }
+              else if ( arity2Functions.find(nn) != arity2Functions.end() ) {
+                isFxn = true;
+              }
+              else {
+                isFxn = false;
+              }
+
               if (nn.compare(el) == 0) {
                 // First "node" is the element symbol
                 continue;
-              } else if (nn.compare("add") == 0) {
+              } else if (isFxn) {
                 // Add a function node
-                FunctionNode * n = new FunctionNode;
-                n->description = "add";
-                n->f = PairSplineTree::add;
+                Node * n = new Node;
+                n->description = nn;
 
-                nodes[el].push_back(n);
+                if (isArity1) {
+                  n->f1 = arity1Functions[nn].first;
+                  n->d1 = arity1Functions[nn].second;
+                  n->arity = 1;
+                } else {
+                  n->f2 = arity2Functions[nn].first;
+                  n->d2 = arity2Functions[nn].second;
+                  n->arity = 2;
+                }
+
+                nodes[nelements].push_back(n);
               } else {
                 // Try to add a StructureVectorNode
                 auto entry = sv_templates.find(nn);
@@ -616,11 +828,13 @@ void PairSplineTree::read_file(char **arg, Error * error)
                   // svnode->components = sv.components;
                   svnode->num_knots = sv.num_knots;
 
-                  nodes[el].push_back(svnode);
+                  nodes[nelements].push_back(svnode);
                   svnodes.push_back(svnode);
                 }
               }
             }
+
+            nelements += 1;
           }
 
           for (SVNode * svn : svnodes) {
@@ -631,14 +845,12 @@ void PairSplineTree::read_file(char **arg, Error * error)
 
             // +2 because of d0 and dN
             totalNumParams += svn->numParams;
-            printf("totalNumParams: %d\n", totalNumParams);
           }
         }
         else if (line_str.substr(0,10).compare("Parameters") == 0) {
           int svIdx = 0;
           int added = 0;
 
-          printf("Loading %d parameters\n", totalNumParams);
           for (int ii=0; ii<totalNumParams; ii++) {
             utils::sfgets(FLERR, line, MAXLINE, fp, filename, error);
             double k = std::stod(std::string(line));
@@ -655,8 +867,6 @@ void PairSplineTree::read_file(char **arg, Error * error)
         }
       }
     }
-
-    printf("I'm done with the read loop\n");
 
     elements = new char*[nelements];
     int el_i = 0;
@@ -1012,34 +1222,11 @@ void PairSplineTree::StructureVector::display() {
 
   printf("Cutoffs: %.2f %.2f\n", cutoffs[0], cutoffs[1]);
 
-  // printf("Components: ");
-  // for (int i=0; i < components.size(); ++i) {
-  //   printf("%s ", components[i].c_str());
-  // }
-  // printf("\n");
-
   printf("Number of knots: ");
   for (int i=0; i < num_knots.size(); ++i) {
     printf("%d ", num_knots[i]);
   }
   printf("\n");
-
-  // // printf("Restrictions: ");
-  // printf("Restrictions: ");
-
-  // int counter = 0;
-  // for (int i=0; i < restrictions_per_component.size(); ++i) {
-
-  //   printf("\t");
-  //   for (int j=0; j<restrictions_per_component[i]; ++j,++counter) {
-  //     printf("(%d, %.2f) ", restricted_knots[counter], restricted_values[counter]);
-  //   }
-
-  //   printf("| ");
-  // }
-  // printf("\n");
-
-
 }
 
 void PairSplineTree::StructureVector::splineSetup(Error * error) {

@@ -31,10 +31,14 @@ PairStyle(spline/tree,PairSplineTree)
 #include <iterator>
 #include <functional>
 #include <map>
+#include <utility>
 
 namespace LAMMPS_NS {
 
 #define SPLINE_MEAM_SUPPORT_NON_GRID_SPLINES 0
+typedef std::vector<double> dvec;
+typedef std::vector<std::vector<dvec>> dvec3;
+// typedef double ***dvec3;
 
 class PairSplineTree : public Pair
 {
@@ -176,7 +180,7 @@ protected:
         }
 
         /// Initialization of spline function.
-        void init(int _N, double inX[], std::vector<double> parameters) {
+        void init(int _N, double inX[], dvec parameters) {
           N = _N;
 
           deriv0 = parameters[N];
@@ -289,7 +293,7 @@ protected:
       double cutoffs[2];
       // std::vector<std::string> components;
       std::vector<int> num_knots;
-      std::vector<double> parameters;
+      dvec parameters;
       int numKnots;
       int numParams;
       std::vector<SplineFunction *> splines;
@@ -301,23 +305,155 @@ protected:
 
   };
 
-  static double add(double x, double y) {return x+y;}
-
   class Node {
     public:
-      Node() : description("") {}
+      Node() : description(""), energies(NULL), forces(NULL), arity(-1) {}
       std::string description;
+      dvec energies;
+      dvec3 forces;
+      int arity;
+
+      // std::vector<std::vector<int>> force_tags;  // Used for indexing forces properly
+
+      std::function<dvec (dvec)> f1;
+      std::function<dvec (dvec, dvec)> f2;
+
+      std::function<dvec3 (std::pair<dvec, dvec3>)> d1;
+      std::function<
+        dvec3 (
+          std::pair<dvec, dvec3>,
+          std::pair<dvec, dvec3>
+        )
+      > d2;
+
+      dvec eval(std::pair<dvec, dvec3> inp) {
+        // Arity=1 function evaluation
+        return f1(inp.first);
+      };
+
+      dvec eval(std::pair<dvec, dvec3> inp1, std::pair<dvec, dvec3> inp2) {
+        // Arity=2 function evaluation
+        return f2(inp1.first, inp2.first);
+      };
+
+      dvec3 deriv(std::pair<dvec, dvec3> inp) {
+        return d1(inp);
+      }
+
+      dvec3 deriv(std::pair<dvec, dvec3> inp1, std::pair<dvec, dvec3> inp2) {
+        return d2(inp1, inp2);
+      }
   };
+ 
+  /*
+  Function nodes are designed to work with 2-tuple inputs, which helps with
+  writing the code for calculating derivatives.
 
-  class FunctionNode : public Node {
-    public:
-      FunctionNode() : f(NULL) {}
-      FunctionNode(std::function<double (double, double)> func) :
-        f(func) {}
+  The first entry in the tuple is the function value (energy), while the second
+  entry is the function derivative (forces).
 
-      std::function<double (double, double)> f;
-  };
+  N = number of atoms
+  Energies should be per-atom vector with a shape of (N,)
+  Forces should be a 2D per-atom vector with a shape of (N, N, 3)
+  */
 
+  static dvec add(dvec x, dvec y) {
+    int N = x.size();
+    dvec energies(N, 0);
+
+    for (int i=0; i<N; i++) {
+      energies[i] = x[i]+y[i];
+    }
+
+    return energies;
+  }
+
+  /*
+  TODO: trying to figure out how to get forces working properly
+  */
+
+  static dvec3 _deriv_add(std::pair<dvec, dvec3> inp1, std::pair<dvec, dvec3> inp2) {
+    int N = inp1.first.size();
+    dvec3 forces;
+
+    // Initialize forces array
+    for (int i=0; i<N; i++) {
+      std::vector<dvec> tmp;
+
+      for (int j=0; j<N; j++) {
+        tmp.push_back({0, 0, 0});
+      }
+
+      forces.push_back(tmp);
+    }
+
+    // Fill forces array
+    for (int i=0; i<N; i++) {
+      for (int j=0; j<N; j++) {
+        for (int k=0; k<3; k++) {
+          forces[i][j][k] = inp1.second[i][j][k] + inp2.second[i][j][k];
+        }
+      }
+    }
+
+    return forces;
+  }
+
+
+  static dvec mul(dvec x, dvec y) {
+    int N = x.size();
+    dvec energies(N, 0);
+
+    for (int i=0; i<N; i++) {
+      energies[i] = x[i]*y[i];
+    }
+
+    return energies;
+  }
+
+  static dvec3 _deriv_mul(std::pair<dvec, dvec3> inp1, std::pair<dvec, dvec3> inp2) {
+
+    int N = inp1.first.size();
+    dvec3 forces;
+
+    // Initialize forces array
+    for (int i=0; i<N; i++) {
+      std::vector<dvec> tmp;
+
+      for (int j=0; j<N; j++) {
+        tmp.push_back({0, 0, 0});
+      }
+
+      forces.push_back(tmp);
+    }
+
+    for (int i=0; i<N; i++) {
+      for (int j=0; j<N; j++) {
+        for (int k=0; k<3;k ++) {
+          forces[i][j][k] = inp1.first[i]*inp2.second[i][j][k] + inp2.first[i]*inp1.second[i][j][k];
+        }
+      }
+    }
+
+    return forces;
+  }
+
+  std::map<
+    std::string,  // key
+    std::pair<
+      std::function<dvec (dvec)>,  // arity=1 function
+      std::function<dvec3 (std::pair<dvec, dvec3>)>>  // arity=1 deriv
+  > arity1Functions;
+
+  std::map<
+    std::string,  // key
+    std::pair<
+      std::function<dvec (dvec, dvec)>,  //arity=2 function
+      std::function<dvec3 (  // arity=2 deriv
+        std::pair<dvec, dvec3>,
+        std::pair<dvec, dvec3>
+      )>>
+  > arity2Functions;
 
   class SVNode : public StructureVector, public Node {
     public:
@@ -326,16 +462,17 @@ protected:
   };
 
   int totalNumParams;  // numKnots + 2 (boundary conditions) for all SVNodes
-  std::map<std::string, std::vector<Node *>> nodes;  // Includes function nodes
+  std::map<int, std::vector<Node *>> nodes;  // Includes function nodes
   std::vector<SVNode *> svnodes;  // Useful pointer to all SVNodes
   std::map<int, std::vector<SVNode *>> rho_nodes;  // key=host, val=Rho SVNs
   std::map<int, std::vector<SVNode *>> ffg_nodes;  // key=host, val=FFG SVNs
 
   /// Helper data structure for potential routine.
   struct MEAM2Body {
-    int tag;  // holds the index of the second atom (j)
+    int tag;  // holds the (local) index of the second atom (j)
+    int globalTag;  // holds the _global_ index of atom j
     double r;
-    std::vector<double> f, fprime;
+    dvec f, fprime;
     double del[3];
   };
 
