@@ -18,8 +18,8 @@ from dask_mpi import initialize
 # with dask.config.set({"distributed.worker.resources.GPU": 1}):
 initialize(
     nthreads=1,
-    memory_limit='3 GB',
-    # interface='ipogif0',
+    memory_limit='32 GB',
+    interface='ipogif0',
     local_directory=os.getcwd()
 )
 
@@ -72,26 +72,25 @@ def main(client, settings):
     # Setup
     with h5py.File(settings['databasePath'], 'r') as h5pyFile:
         database = SVDatabase(h5pyFile)
-        wait(database.load(h5pyFile, allSums=settings['allSums']))
+        wait(database.load(h5pyFile))
 
-        if settings['allSums']:
-            names = list(database.attrs['structNames'])
-            random.shuffle(names)
+        names = list(database.attrs['structNames'])
+        random.shuffle(names)
 
-            splits = np.array_split(names, worldSize)
+        splits = np.array_split(names, worldSize)
 
-            from svreg.database import worker_load
+        from svreg.database import worker_load
 
-            futures = client.map(
-                worker_load,
-                [settings['databasePath']]*worldSize,
-                splits,
-                [database.attrs['svNames']]*worldSize,
-                [database.attrs['elements']]*worldSize,
-                [settings['allSums']]*worldSize,
-            )
+        futures = client.map(
+            worker_load,
+            [settings['databasePath']]*worldSize,
+            splits,
+            [database.attrs['svNames']]*worldSize,
+            [database.attrs['elements']]*worldSize,
+            [settings['allSums']]*worldSize,
+        )
 
-            client.gather(client.compute(futures))
+        client.gather(client.compute(futures))
 
         evaluator = SVEvaluator(database, settings)
 
@@ -264,7 +263,7 @@ def main(client, settings):
         populationDict, rawPopulations = regressor.generatePopulationDict(N)
 
         graph, keys = evaluator.evaluate(
-            regressor.trees, populationDict, N, database,
+            regressor.trees, populationDict, N,
             worldSize, settings['allSums'], useGPU=settings['useGPU']
         )
 
@@ -325,26 +324,25 @@ def polish(client, settings):
     # Setup
     with h5py.File(settings['databasePath'], 'r') as h5pyFile:
         database = SVDatabase(h5pyFile)
-        wait(database.load(h5pyFile, allSums=settings['allSums']))
+        wait(database.load(h5pyFile))
 
-        if settings['allSums']:
-            names = list(database.attrs['structNames'])
-            random.shuffle(names)
+        names = list(database.attrs['structNames'])
+        random.shuffle(names)
 
-            splits = np.array_split(names, worldSize)
+        splits = np.array_split(names, worldSize)
 
-            from svreg.database import worker_load
+        from svreg.database import worker_load
 
-            futures = client.map(
-                worker_load,
-                [settings['databasePath']]*worldSize,
-                splits,
-                [database.attrs['svNames']]*worldSize,
-                [database.attrs['elements']]*worldSize,
-                [settings['allSums']]*worldSize,
-            )
+        futures = client.map(
+            worker_load,
+            [settings['databasePath']]*worldSize,
+            splits,
+            [database.attrs['svNames']]*worldSize,
+            [database.attrs['elements']]*worldSize,
+            [settings['allSums']]*worldSize,
+        )
 
-            client.gather(client.compute(futures))
+        client.gather(client.compute(futures))
 
         evaluator = SVEvaluator(database, settings)
 
@@ -371,10 +369,8 @@ def polish(client, settings):
         treeAl.nodes = [
             FunctionNode('add'),
             deepcopy(regressor.svNodePool[0]),
-            FunctionNode('add'),
+            FunctionNode('mul'),
             deepcopy(regressor.svNodePool[0]),
-            FunctionNode('add'),
-            deepcopy(regressor.svNodePool[1]),
             deepcopy(regressor.svNodePool[1]),
         ]
 
@@ -421,7 +417,7 @@ def polish(client, settings):
         populationDict, rawPopulations = regressor.generatePopulationDict(N)
 
         graph, keys = evaluator.evaluate(
-            regressor.trees, populationDict, N, database,
+            regressor.trees, populationDict, N,
             worldSize, settings['allSums'], useGPU=settings['useGPU']
         )
 
@@ -482,7 +478,6 @@ def polish(client, settings):
                 entry.bestParams = opt.result.xbest
                 entry.bestErrors = errors[0]
 
-            if (optStep % 10) == 0:
                 pickle.dump(
                     entry,
                     open(
@@ -495,6 +490,31 @@ def polish(client, settings):
                     opt,
                     open(
                         os.path.join(savePath, treeName, 'opt.pkl'),
+                        'wb'
+                    )
+                )
+
+                pickle.dump(
+                    energies,
+                    open(
+                        os.path.join(savePath, treeName, 'energies.pkl'),
+                        'wb'
+                    )
+                )
+
+
+                pickle.dump(
+                    forces,
+                    open(
+                        os.path.join(savePath, treeName, 'forces.pkl'),
+                        'wb'
+                    )
+                )
+
+                pickle.dump(
+                    tree,
+                    open(
+                        os.path.join(savePath, treeName, 'tree.pkl'),
                         'wb'
                     )
                 )
@@ -625,6 +645,12 @@ def computeErrors(refStruct, energies, forces, database, useDask=True):
             engErrors = abs(ediff - trueEdiff)
 
             fcsErrors = forces[structName][treeNum]
+
+            # trueForces = trueValues[structName]['forces']
+            # fcsErrors = np.average(
+            #     abs(forces[structName][treeNum] - trueForces), axis=(1,2)
+            # )
+
 
             errors.append(engErrors)
             errors.append(fcsErrors)

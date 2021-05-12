@@ -951,7 +951,7 @@ class SVTree(list):
             if evalType == 'energy':
                 return np.sum(res)
             elif evalType == 'forces':
-                return np.einsum('ijkl->kl', res[0])
+                return np.einsum('ijkl->kl', res)
 
         # Constructs a list-of-lists where each sub-list is a sub-tree for a
         # function at a given recursion depth. The first node of a sub-tree
