@@ -437,7 +437,6 @@ class FFG(Summation):
         elif evalType == 'energy':
             return totalEnergy
         elif evalType == 'forces':
-            print(forces.shape, totalEnergy.shape)
             return forces, totalEnergy
 
  
@@ -734,7 +733,6 @@ class Rho(Summation):
         elif evalType == 'energy':
             return totalEnergy
         elif evalType == 'forces':
-            print(forces.shape, totalEnergy.shape)
             return forces, totalEnergy
 
 
