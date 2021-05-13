@@ -104,13 +104,6 @@ class Summation:
         # correspond to without having to use another data structure. Note that
         # currently 
 
-        # TODO: shouldn't use sorting; might need to assume they're already
-        # sorted here. A problem came up where the database constructor didn't
-        # sort the elements alphabetically, which caused the input types to
-        # with the ones here since they're sorted here
-
-        # TODO: GA assumes sorted elements for computing errors
-
         # self.elements       = elements
         self.components     = sorted(components)
 
@@ -175,13 +168,11 @@ class FFG(Summation):
             self.fSplines[el1] = Spline(
                 knots=np.linspace(
                     self.cutoffs[0], self.cutoffs[1],
-                    self.numParams[self.components[0]]
-                    + len(self.restrictions[self.components[0]]) - 2
+                    self.numParams[self.components[0]] - 2
                 ),
                 bc_type=('natural', 'fixed')
                 if self.bc_type == 'natural'
                 else ('fixed', 'fixed')
-                # bc_type=('fixed', 'fixed')
             )
 
             for el2 in kwargs['neighborElements']:
@@ -190,8 +181,7 @@ class FFG(Summation):
                 self.gSplines[key] = Spline(
                     knots=np.linspace(
                         -1, 1,
-                        self.numParams[self.components[1]]
-                        + len(self.restrictions[self.components[1]]) - 2
+                        self.numParams[self.components[1]] - 2
                     ),
                     bc_type=('natural', 'natural')
                     if self.bc_type == 'natural'
@@ -231,7 +221,7 @@ class FFG(Summation):
 
             for bondType in self.bonds:
                 cartsize = np.prod([
-                    self.numParams[c] + len(self.restrictions[c])
+                    self.numParams[c]
                     for c in self.bonds[bondType]
                 ])
 
@@ -531,15 +521,10 @@ class FFG(Summation):
         """
 
         splits = np.cumsum([
-            self.numParams[c]+len(self.restrictions[c]) for c in self.components
+            self.numParams[c]
+            for c in self.components
         ])[:-1]
         splitParams = np.array_split(params, splits)
-
-        # fCopy = list(self.fSplines[::-1])
-        # gCopy = list([list(l[::-1]) for l in self.gSplines[::-1]])
-
-        # fCopy = deepcopy(self.fSplines)
-        # gCopy = deepcopy(self.gSplines)
 
         fIndexer  = 0
         gIndexers = [None, None]
@@ -555,8 +540,6 @@ class FFG(Summation):
                 gIndexers[fIndexer] = el1
                 fIndexer += 1
 
-                # fCopy[-1].buildDirectEvaluator(y)
-                # fCopy.pop()
             else:
                 el1 = gIndexers[0]
                 el2 = gIndexers[1]
@@ -566,11 +549,6 @@ class FFG(Summation):
                 key = '_'.join(sorted(list(set([el1, el2]))))
 
                 self.gSplines[key].buildDirectEvaluator(y)
-
-                # gCopy[-1][-1].buildDirectEvaluator(y)
-                # gCopy[-1].pop()
-                # if len(gCopy[-1]) == 0:
-                #     gCopy.pop()
 
 
 class Rho(Summation):
@@ -592,8 +570,7 @@ class Rho(Summation):
             self.splines[el] = Spline(
                 knots=np.linspace(
                     self.cutoffs[0], self.cutoffs[1],
-                    self.numParams[self.components[0]]
-                    + len(self.restrictions[self.components[0]]) - 2
+                    self.numParams[self.components[0]] - 2
                 ),
                 bc_type=('natural', 'fixed')
                 if self.bc_type == 'natural'
@@ -625,7 +602,7 @@ class Rho(Summation):
             # Prepare structure vectors
             for bondType in self.bonds:
                 totalNumParams = sum([
-                    self.numParams[c] + len(self.restrictions[c])
+                    self.numParams[c]
                     for c in self.bonds[bondType]
                 ])
 
@@ -636,6 +613,7 @@ class Rho(Summation):
         elif evalType == 'energy':
             totalEnergy = np.zeros((1, N))
         elif evalType == 'forces':
+            totalEnergy = np.zeros((1, N))
             forces = np.zeros((1, N, N, 3))
 
         # Note that double counting is always allowed, but it must be done
@@ -723,6 +701,7 @@ class Rho(Summation):
 
                     forces[:, i, i, :] += fcs
                     forces[:, i, j, :] -= fcs
+                    totalEnergy[:, i] += self.rho(rij)
 
         if evalType == 'vector':
             return energySV, forcesSV
@@ -750,9 +729,11 @@ class Rho(Summation):
     def setParams(self, params):
 
         splits = np.cumsum([
-            self.numParams[c]+len(self.restrictions[c]) for c in self.components
+            self.numParams[c]
+            for c in self.components
         ])[:-1]
         splitParams = np.array_split(params, splits)
+
 
         # A Rho Summation will only ever have one spline
         for y, cname in zip(splitParams, self.components):

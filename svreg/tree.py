@@ -910,8 +910,6 @@ class SVTree(list):
                         )
 
                 nodes.append(
-                    # _implemented_sums[node.description](
-                    #     name=node.description,
                     _implemented_sums[nodeType](
                         name=node.description,
                         allElements=allElements,
@@ -919,10 +917,9 @@ class SVTree(list):
                             node.inputTypes.values()))),
                         components=node.components,
                         inputTypes=node.inputTypes,
-                        numParams=node.numFreeParams,
+                        numParams=node.numParams,
                         restrictions=node.restrictions,
                         paramRanges=node.paramRanges,
-                        # bonds=node.bonds,
                         bonds=None,
                         bondMapping='lambda x: x',
                         numElements=nelem,
@@ -951,7 +948,7 @@ class SVTree(list):
             if evalType == 'energy':
                 return np.sum(res)
             elif evalType == 'forces':
-                return np.einsum('ijkl->kl', res)
+                return np.einsum('ijkl->kl', res[0])
 
         # Constructs a list-of-lists where each sub-list is a sub-tree for a
         # function at a given recursion depth. The first node of a sub-tree
@@ -985,6 +982,7 @@ class SVTree(list):
                     else:
                         args.append(n)
 
+                print([[el.shape if el is not None else 'None' for el in l] for l in args])
                 intermediateEng = subTrees[-1][0].function(*args)
 
                 if evalType == 'forces':
