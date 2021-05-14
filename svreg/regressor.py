@@ -433,7 +433,7 @@ def buildSVNodePool(database):
         cList = database.attrs[svName]['components'].tolist()
         for c in bondComps:
             idx = cList.index(c)
-            numParams.append(database.attrs[svName]['numParams'][idx])
+            numParams.append(database.attrs[svName]['numParams'][idx].astype(int))
             restr.append(restrictions[idx])
 
         if 'paramRanges' in database.attrs[svName]:

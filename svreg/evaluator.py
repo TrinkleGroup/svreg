@@ -224,12 +224,6 @@ class SVEvaluator:
 
                     allResults.append(treeResults)
 
-            # if useDask:
-            #     from dask.distributed import get_client
-            #     client = get_client()
-
-            #     allResults = client.gather(client.compute(allResults))
-
             allResults = np.array(allResults, dtype=np.float32)
 
             return allResults, names
@@ -239,7 +233,6 @@ class SVEvaluator:
 
         pickledTrees = [pickle.dumps(tree) for tree in trees]
 
-        perTreeResults = []
         for chunkNum in range(numTasks):
 
             key = 'worker_eval-{}'.format(chunkNum)
