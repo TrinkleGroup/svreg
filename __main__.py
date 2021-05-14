@@ -628,10 +628,10 @@ def computeErrors(refStruct, energies, forces, database, useDask=True):
     for treeNum in range(numTrees):
         for structName in sorted(keys):
 
-            structEng  = energies[structName][treeNum]
+            structEng  = energies[structName][treeNum].copy()
             structEng /= natoms[structName]
 
-            refEng  = energies[refStruct][treeNum]
+            refEng  = energies[refStruct][treeNum].copy()
             refEng /= natoms[refStruct]
 
             ediff = structEng - refEng
