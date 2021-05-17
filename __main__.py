@@ -71,7 +71,7 @@ def main(client, settings):
 
     # Setup
     with h5py.File(settings['databasePath'], 'r') as h5pyFile:
-        database = SVDatabase(h5pyFile)
+        database = SVDatabase(h5pyFile, settings['refStruct'], args.names)
         wait(database.load(h5pyFile))
 
         names = list(database.attrs['structNames'])
@@ -323,7 +323,7 @@ def polish(client, settings):
 
     # Setup
     with h5py.File(settings['databasePath'], 'r') as h5pyFile:
-        database = SVDatabase(h5pyFile)
+        database = SVDatabase(h5pyFile, settings['refStruct'], args.names)
         wait(database.load(h5pyFile))
 
         names = list(database.attrs['structNames'])
@@ -474,9 +474,11 @@ def polish(client, settings):
             if opt.result.fbest < prevBestCosts[treeName]:
                 prevBestCosts[treeName] = opt.result.fbest
 
-                entry.cost = opt.result.fbest
-                entry.bestParams = opt.result.xbest
-                entry.bestErrors = errors[0]
+                sums = np.sum(costs[0], axis=1)
+                bestIdx = np.argmin(sums)
+                entry.cost = costs[bestIdx]
+                entry.bestParams = rawPopulations[0][bestIdx]
+                entry.bestErrors = errors[0][bestIdx]
 
                 pickle.dump(
                     entry,
@@ -574,15 +576,19 @@ def buildCostFunction(settings, numStructs):
         return costs
 
     def rmse(errors):
-        
         costs = []
-        for err in errors:
-            tmp = np.array(dask.compute(err))
-            tmp[:, ::2]  *= settings['energyWeight']
-            tmp[:, 1::2] *= settings['forcesWeight']
-            costs.append(np.sqrt(np.average(tmp**2, axis=1)))
+        for treeErr in errors:
+            costs.append(np.sqrt(np.average(np.multiply(treeErr, scaler)**2, axis=1)))
 
-        return np.array(costs)
+    t = settings['huberThresh']
+    def huber(errors):
+        costs = []
+        for treeErr in errors:
+            huber = treeErr.copy()
+            huber[huber < t] = (huber[huber < t]**2)/2
+            huber[huber >= t] = t*(huber[huber >= t] - t/2)
+            costs.append(huber)
+        return costs
 
     if settings['costFxn'] == 'MAE':
         return mae

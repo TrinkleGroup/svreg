@@ -35,12 +35,20 @@ class SVDatabase(dict):
                     <evalType> ('energy' or 'forces')
     """
 
-    def __init__(self, h5pyFile):
+    def __init__(self, h5pyFile, refStruct, namesFile=None):
         # Prepare class variables
         # self['energy'] = {}
         # self['forces'] = {}
 
-        structNames = sorted(list(h5pyFile.keys()))
+        if namesFile is None:
+            structNames = sorted(list(h5pyFile.keys()))
+        else:
+            with open(namesFile, 'r') as nf:
+                structNames = [l.strip() for l in nf.readlines()]
+
+            if refStruct not in structNames:
+                structNames.append(refStruct)
+                
         svNames =  list(h5pyFile[structNames[0]].keys())
         elements = sorted(list(h5pyFile[structNames[0]][svNames[0]].keys()))
 
