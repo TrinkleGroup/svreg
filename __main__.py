@@ -593,20 +593,20 @@ def buildCostFunction(settings, numStructs, totalNumAtoms):
 
         return costs
 
-    t = settings['huberThresh']
-    def huber(errors):
-        costs = []
-        for treeErr in errors:
-            huber = treeErr.copy()
-            huber[huber < t] = (huber[huber < t]**2)/2
-            huber[huber >= t] = t*(huber[huber >= t] - t/2)
-            costs.append(huber)
-        return costs
-
     if settings['costFxn'] == 'MAE':
         return mae
     elif settings['costFxn'] == 'RMSE':
         return rmse
+    elif settings['costFxn'] == 'HUBER':
+        t = settings['huberThresh']
+        def huber(errors):
+            costs = []
+            for treeErr in errors:
+                huber = treeErr.copy()
+                huber[huber < t] = (huber[huber < t]**2)/2
+                huber[huber >= t] = t*(huber[huber >= t] - t/2)
+                costs.append(huber)
+            return costs
     else:
         raise RuntimeError("costFxn must be 'MAE' or 'RMSE'.")
 
