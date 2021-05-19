@@ -114,6 +114,13 @@ def _derivative_sigmoid(x):
     """Chain rule on sig() = sig'()*(dx/dr), where sig'() = sig()*(1-sig())"""
     return (sigmoid(x[0])*(1-sigmoid(x[0])))[:, :, np.newaxis, np.newaxis]*x[1]
 
+def splus2(x):
+    print('x:', x)
+    return np.log(1 + np.exp(-np.abs(x))) + np.maximum(x, 0)
+
+def _derivative_splus2(x):
+    expx = np.exp(-np.abs(x[0]))
+    return (-expx/(1+expx))[:, :, np.newaxis, np.newaxis]*x[1] + np.maximum(x[1], 0)
 
 #@dask.delayed
 def splus(x):
@@ -157,7 +164,7 @@ _derivative_map = {
     # 'tan': _derivative_tan,
     'exp': _derivative_exp,
     'sig': _derivative_sigmoid,
-    'softplus': _derivative_splus,
+    'softplus': _derivative_splus2,
 }
 
 
@@ -194,7 +201,7 @@ log1  = _Function(function=_protected_log, name='log', arity=1)
 # arctan1  = _Function(function=np.arctan, name='arctan', arity=1)
 exp   = _Function(function=np.exp, name='exp', arity=1)
 sig   = _Function(function=sigmoid, name='sig', arity=1)
-softplus = _Function(function=splus, name='softplus', arity=1)
+softplus = _Function(function=splus2, name='softplus', arity=1)
 
 _function_map = {
     'add': add2,

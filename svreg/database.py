@@ -48,6 +48,8 @@ class SVDatabase(dict):
 
             if refStruct not in structNames:
                 structNames.append(refStruct)
+
+        structNames = sorted(structNames)
                 
         svNames =  list(h5pyFile[structNames[0]].keys())
         elements = sorted(list(h5pyFile[structNames[0]][svNames[0]].keys()))

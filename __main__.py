@@ -97,7 +97,11 @@ def main(client, settings):
     regressor = SVRegressor(settings, database)
     archive = Archive(os.path.join(settings['outputPath'], 'archive'))
 
-    costFxn = buildCostFunction(settings, len(database.attrs['natoms']))
+    costFxn = buildCostFunction(
+        settings,
+        len(database.attrs['natoms']),
+        sum(database.attrs['natoms'].values())
+    )
 
     # Begin symbolic regression
     if args.trees is not None:
@@ -347,7 +351,12 @@ def polish(client, settings):
         evaluator = SVEvaluator(database, settings)
 
     regressor = SVRegressor(settings, database)
-    costFxn = buildCostFunction(settings, len(database.attrs['natoms']))
+
+    costFxn = buildCostFunction(
+        settings,
+        len(database.attrs['natoms']),
+        sum(database.attrs['natoms'].values())
+    )
 
     if args.trees is not None:
         with open(args.trees, 'r') as f:
@@ -394,7 +403,6 @@ def polish(client, settings):
     from svreg.archive import Entry
 
     entries = {md5Hash(t): Entry(t, savePath) for t in regressor.trees}
-    prevBestCosts = {md5Hash(t): np.inf for t in regressor.trees}
 
     import pickle
 
@@ -471,55 +479,52 @@ def polish(client, settings):
 
             entry = entries[treeName]
 
-            if opt.result.fbest < prevBestCosts[treeName]:
-                prevBestCosts[treeName] = opt.result.fbest
+            bestIdx = np.argmin(costs[0])
+            entry.bestIdx = bestIdx
+            entry.cost = costs[bestIdx]
+            entry.bestParams = rawPopulations[0][bestIdx]
+            entry.bestErrors = errors[0][bestIdx]
 
-                sums = np.sum(costs[0], axis=1)
-                bestIdx = np.argmin(sums)
-                entry.cost = costs[bestIdx]
-                entry.bestParams = rawPopulations[0][bestIdx]
-                entry.bestErrors = errors[0][bestIdx]
-
-                pickle.dump(
-                    entry,
-                    open(
-                        os.path.join(savePath, treeName, 'entry.pkl'),
-                        'wb'
-                    )
+            pickle.dump(
+                entry,
+                open(
+                    os.path.join(savePath, treeName, 'entry.pkl'),
+                    'wb'
                 )
+            )
 
-                pickle.dump(
-                    opt,
-                    open(
-                        os.path.join(savePath, treeName, 'opt.pkl'),
-                        'wb'
-                    )
+            pickle.dump(
+                opt,
+                open(
+                    os.path.join(savePath, treeName, 'opt.pkl'),
+                    'wb'
                 )
+            )
 
-                pickle.dump(
-                    energies,
-                    open(
-                        os.path.join(savePath, treeName, 'energies.pkl'),
-                        'wb'
-                    )
+            pickle.dump(
+                energies,
+                open(
+                    os.path.join(savePath, treeName, 'energies.pkl'),
+                    'wb'
                 )
+            )
 
 
-                pickle.dump(
-                    forces,
-                    open(
-                        os.path.join(savePath, treeName, 'forces.pkl'),
-                        'wb'
-                    )
+            pickle.dump(
+                forces,
+                open(
+                    os.path.join(savePath, treeName, 'forces.pkl'),
+                    'wb'
                 )
+            )
 
-                pickle.dump(
-                    tree,
-                    open(
-                        os.path.join(savePath, treeName, 'tree.pkl'),
-                        'wb'
-                    )
+            pickle.dump(
+                tree,
+                open(
+                    os.path.join(savePath, treeName, 'tree.pkl'),
+                    'wb'
                 )
+            )
 
 
 ################################################################################
@@ -547,7 +552,7 @@ def printTreeCosts(optStep, costs, penalties, startTime):
     )
 
 
-def buildCostFunction(settings, numStructs):
+def buildCostFunction(settings, numStructs, totalNumAtoms):
     """
     A function factory for building different types of cost functions. Assumes
     that the cost function will take in a list of (P, S) arrays, where P is the
@@ -571,14 +576,22 @@ def buildCostFunction(settings, numStructs):
 
         costs = []
         for treeErr in errors:
-            costs.append(np.average(np.multiply(treeErr, scaler), axis=1))
+            # costs.append(np.average(np.multiply(treeErr, scaler), axis=1))
+            cpy = treeErr.copy()
+            cpy[:, 1::2] /= totalNumAtoms
+            costs.append(np.multiply(cpy, scaler))
 
         return costs
 
     def rmse(errors):
         costs = []
         for treeErr in errors:
-            costs.append(np.sqrt(np.average(np.multiply(treeErr, scaler)**2, axis=1)))
+            # costs.append(np.sqrt(np.average(np.multiply(treeErr, scaler)**2, axis=1)))
+            cpy = treeErr.copy()
+            cpy[:, 1::2] /= totalNumAtoms
+            costs.append(np.sqrt(np.multiply(cpy, scaler)))
+
+        return costs
 
     t = settings['huberThresh']
     def huber(errors):

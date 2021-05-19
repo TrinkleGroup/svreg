@@ -232,6 +232,7 @@ class FFG(Summation):
             totalEnergy = np.zeros((1, N))
         elif evalType == 'forces':
             forces = np.zeros((1, N, N, 3))
+            totalEnergy = np.zeros((1, N))
 
         # Allows double counting bonds; needed for embedding energy calculations
         nl = NeighborList(
@@ -412,6 +413,7 @@ class FFG(Summation):
                 if evalType == 'energy':
                     totalEnergy[:, i] += fjVal*partialsum
                 elif evalType == 'forces':
+                    totalEnergy[:, i] += fjVal*partialsum
                     forces[:, i, i, :] -= jForces
                     forces[:, i, j, :] += jForces
             # end neighbor loop

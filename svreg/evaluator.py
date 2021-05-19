@@ -12,6 +12,21 @@ class SVEvaluator:
         self.database   = database
         self.settings   = settings
 
+        if settings['costFxn'] == 'MAE':
+            def f(c, t):
+                return np.average(abs(c-t), axis=(1,2))
+            self.fErr = f
+        elif settings['costFxn'] == 'RMSE':
+            def f(c, t):
+                return np.average((c-t)**2, axis=(1,2))
+            self.fErr = f
+        else:
+            raise RuntimeError(
+                "SVEvaluator hasn't implemented {} yet.".format(
+                    settings['costFx']
+                )
+            )
+
     # def evaluate(self, trees, database, fullPopDict, P, allSums=False, useDask=True, useGPU=False):
     def evaluate(self, trees, fullPopDict, P, numTasks, allSums=False, useDask=True, useGPU=False):
         if useGPU:
@@ -98,10 +113,13 @@ class SVEvaluator:
                         trueForces = worker._true_forces[struct]
 
                         engResult, fcsResult = tree.eval(useDask=False, allSums=allSums)
+                        
+                        fcsErrors = self.fErr(sum(fcsResult), trueForces)
+                        fcsErrors *= Na
 
-                        fcsErrors = np.average(
-                            abs(sum(fcsResult) - trueForces), axis=(1,2)
-                        )
+                        # fcsErrors = np.average(
+                        #     abs(sum(fcsResult) - trueForces), axis=(1,2)
+                        # )
 
                         treeResults.append([sum(engResult), fcsErrors])
 
