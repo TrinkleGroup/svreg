@@ -115,7 +115,6 @@ def _derivative_sigmoid(x):
     return (sigmoid(x[0])*(1-sigmoid(x[0])))[:, :, np.newaxis, np.newaxis]*x[1]
 
 def splus2(x):
-    print('x:', x)
     return np.log(1 + np.exp(-np.abs(x))) + np.maximum(x, 0)
 
 def _derivative_splus2(x):
