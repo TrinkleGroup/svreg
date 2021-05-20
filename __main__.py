@@ -306,9 +306,7 @@ def main(client, settings):
         ])
 
         # Update optimizers
-        regressor.updateOptimizers(
-            rawPopulations, costs, penalties
-        )
+        regressor.updateOptimizers(rawPopulations, costs, penalties)
 
         printTreeCosts(
             fxnEvals,
@@ -377,10 +375,14 @@ def polish(client, settings):
         treeAl = SVTree()
         treeAl.nodes = [
             FunctionNode('add'),
-            deepcopy(regressor.svNodePool[0]),
-            FunctionNode('mul'),
-            deepcopy(regressor.svNodePool[0]),
             deepcopy(regressor.svNodePool[1]),
+            FunctionNode('add'),
+            deepcopy(regressor.svNodePool[0]),
+            # FunctionNode('softplus'),
+            # FunctionNode('add'),
+            # deepcopy(regressor.svNodePool[0]),
+            # FunctionNode('softplus'),
+            deepcopy(regressor.svNodePool[0]),
         ]
 
         tree.chemistryTrees['Al'] = treeAl
@@ -481,9 +483,15 @@ def polish(client, settings):
 
             bestIdx = np.argmin(costs[0])
             entry.bestIdx = bestIdx
-            entry.cost = costs[bestIdx]
+            entry.cost = costs[0][bestIdx]
             entry.bestParams = rawPopulations[0][bestIdx]
             entry.bestErrors = errors[0][bestIdx]
+
+            bestEng = {}
+            bestFcs = {}
+            for s in energies:
+                bestEng[s] = energies[s][0][bestIdx]
+                bestFcs[s] = forces[s][0][bestIdx]
 
             pickle.dump(
                 entry,
@@ -502,7 +510,7 @@ def polish(client, settings):
             )
 
             pickle.dump(
-                energies,
+                bestEng,
                 open(
                     os.path.join(savePath, treeName, 'energies.pkl'),
                     'wb'
@@ -511,7 +519,7 @@ def polish(client, settings):
 
 
             pickle.dump(
-                forces,
+                bestFcs,
                 open(
                     os.path.join(savePath, treeName, 'forces.pkl'),
                     'wb'
@@ -577,9 +585,14 @@ def buildCostFunction(settings, numStructs, totalNumAtoms):
         costs = []
         for treeErr in errors:
             # costs.append(np.average(np.multiply(treeErr, scaler), axis=1))
-            cpy = treeErr.copy()
-            cpy[:, 1::2] /= totalNumAtoms
-            costs.append(np.multiply(cpy, scaler))
+
+            # Energy errors are raw errors, so must be averaged
+            c =  np.average(treeErr[:, ::2], axis=1)*settings['energyWeight']
+
+            # Force errors are weighted averages, so they're just summed
+            c += np.sum(treeErr[:, 1::2], axis=1)*settings['forcesWeight']/totalNumAtoms
+
+            costs.append(c)
 
         return costs
 
@@ -587,9 +600,12 @@ def buildCostFunction(settings, numStructs, totalNumAtoms):
         costs = []
         for treeErr in errors:
             # costs.append(np.sqrt(np.average(np.multiply(treeErr, scaler)**2, axis=1)))
-            cpy = treeErr.copy()
-            cpy[:, 1::2] /= totalNumAtoms
-            costs.append(np.sqrt(np.multiply(cpy, scaler)))
+
+            # Energy errors are raw errors, so must be averaged
+            c = np.sqrt(np.average(treeErr[:, ::2]**2, axis=1))*settings['energyWeight']
+            # Force errors are weighted averages of squared errors
+            c += np.sqrt(np.sum(treeErr[:, 1::2], axis=1)/totalNumAtoms)*settings['forcesWeight']
+            costs.append(c)
 
         return costs
 
@@ -598,6 +614,7 @@ def buildCostFunction(settings, numStructs, totalNumAtoms):
     elif settings['costFxn'] == 'RMSE':
         return rmse
     elif settings['costFxn'] == 'HUBER':
+        raise NotImplementedError("Huber loss isn't implemented yet")
         t = settings['huberThresh']
         def huber(errors):
             costs = []

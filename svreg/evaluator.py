@@ -114,6 +114,7 @@ class SVEvaluator:
 
                         engResult, fcsResult = tree.eval(useDask=False, allSums=allSums)
                         
+                        Na = fcsResult[0].shape[1]
                         fcsErrors = self.fErr(sum(fcsResult), trueForces)
                         fcsErrors *= Na
 
@@ -121,6 +122,8 @@ class SVEvaluator:
                         #     abs(sum(fcsResult) - trueForces), axis=(1,2)
                         # )
 
+                        # Here: sum(engResult) = raw energies
+                        # Here: fcsErrors = weighted MAE or MSE
                         treeResults.append([sum(engResult), fcsErrors])
 
                     allResults.append(treeResults)
