@@ -119,8 +119,13 @@ def _global_state(x):
     return x + sums[:, np.newaxis]
 
 def _derivative_global_state(x):
-    sums = x[1].sum(axis=1)
-    return x[1] + sums[:, np.newaxis, :, :]
+    if len(x[1].shape) < 4:
+        # allSums = True
+        N = x[1].shape[1]
+        return x[1] + N*x[1]
+    else:
+        sums = x[1].sum(axis=1)
+        return x[1] + sums[:, np.newaxis, :, :]
 
 def splus2(x):
     return np.log(1 + np.exp(-np.abs(x))) + np.maximum(x, 0)
