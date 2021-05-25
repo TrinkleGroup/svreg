@@ -70,7 +70,14 @@ PairSplineTree::PairSplineTree(LAMMPS *lmp) : Pair(lmp)
   comm_reverse = 0;
 
   totalNumParams = 0;
-  
+ 
+  arity1Functions.insert(
+    std::make_pair(
+      "softplus",
+      std::make_pair(PairSplineTree::splus, PairSplineTree::_deriv_splus)
+    )
+  );
+ 
   arity2Functions.insert(
     std::make_pair(
       "add",
@@ -84,7 +91,6 @@ PairSplineTree::PairSplineTree(LAMMPS *lmp) : Pair(lmp)
       std::make_pair(PairSplineTree::mul, PairSplineTree::_deriv_mul)
     )
   );
-
 
 }
 

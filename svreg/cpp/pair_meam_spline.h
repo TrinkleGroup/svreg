@@ -32,6 +32,8 @@ PairStyle(spline/tree,PairSplineTree)
 #include <functional>
 #include <map>
 #include <utility>
+#include <math.h>
+#include <cmath>
 
 namespace LAMMPS_NS {
 
@@ -429,13 +431,53 @@ protected:
 
     for (int i=0; i<N; i++) {
       for (int j=0; j<N; j++) {
-        for (int k=0; k<3;k ++) {
+        for (int k=0; k<3; k++) {
           forces[i][j][k] = inp1.first[i]*inp2.second[i][j][k] + inp2.first[i]*inp1.second[i][j][k];
         }
       }
     }
 
     return forces;
+  }
+
+  static dvec splus(dvec x) {
+    int N = x.size();
+    dvec energies(N, 0);
+
+    for (int i=0; i<N; i++) {
+      energies[i] = log(1 + exp(-std::abs(x[i]))) + std::max(x[i], 0.0);
+    }
+
+    return energies;
+  }
+
+  static dvec3 _deriv_splus(std::pair<dvec, dvec3> inp) {
+    int N = inp.first.size();
+    dvec3 forces;
+
+    // Initialize forces array
+    for (int i=0; i<N; i++) {
+      std::vector<dvec> tmp;
+
+      for (int j=0; j<N; j++) {
+        tmp.push_back({0, 0, 0});
+      }
+
+      forces.push_back(tmp);
+    }
+
+    for (int i=0; i<N; i++) {
+      double expx = exp(-std::abs(inp.first[i]));
+
+      for (int j=0; j<N; j++) {
+        for (int k=0; k<3; k++) {
+          forces[i][j][k] = (-expx/(1+expx))*inp.second[i][j][k] + std::max(inp.second[i][j][k], 0.0);
+        }
+      }
+    }
+
+    return forces;
+
   }
 
   std::map<
