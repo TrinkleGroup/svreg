@@ -116,11 +116,11 @@ def _derivative_sigmoid(x):
 
 def _global_state(x):
     sums = x.sum(axis=-1)
-    return x + sums
+    return x + sums[:, np.newaxis]
 
 def _derivative_global_state(x):
     sums = x[1].sum(axis=1)
-    return x[1] + sums
+    return x[1] + sums[:, np.newaxis, :, :]
 
 def splus2(x):
     return np.log(1 + np.exp(-np.abs(x))) + np.maximum(x, 0)
