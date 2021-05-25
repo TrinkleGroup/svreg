@@ -480,6 +480,62 @@ protected:
 
   }
 
+  static dvec global_state(dvec x) {
+    int N = x.size();
+    dvec energies(N, 0);
+
+    double etot = 0.0;
+
+    for (int i=0; i<N; i++) {
+      etot += x[i];
+    }
+
+    for (int i=0; i<N; i++) {
+      energies[i] = x[i] + etot;
+    }
+
+    return energies;
+  }
+
+  static dvec3 _deriv_global_state(std::pair<dvec, dvec3> inp) {
+    int N = inp.first.size();
+    std::vector<dvec> ftot;  // (N, 3)
+    dvec3 forces;  // (N, N, 3)
+
+    // Initialize forces array
+    for (int i=0; i<N; i++) {
+      ftot.push_back({0, 0, 0}); 
+
+      std::vector<dvec> tmp;
+
+      for (int j=0; j<N; j++) {
+        tmp.push_back({0, 0, 0});
+      }
+
+      forces.push_back(tmp);
+    }
+
+    // Compute per-atom forces
+    for (int i=0; i<N; i++) {
+      for (int j=0; j<N; j++) {
+        for (int k=0; k<3; k++) {
+          ftot[j][k] += inp.second[i][j][k];
+        }
+      }
+    }
+
+    // Add to all other forces
+    for (int i=0; i<N; i++) {
+      for (int j=0; j<N; j++) {
+        for (int k=0; k<3; k++) {
+          forces[i][j][k] = inp.second[i][j][k] + ftot[j][k];
+        }
+      }
+    }
+
+    return forces;
+  }
+
   std::map<
     std::string,  // key
     std::pair<
