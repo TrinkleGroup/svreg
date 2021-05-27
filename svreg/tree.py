@@ -1109,6 +1109,65 @@ class MultiComponentTree(SVTree):
         tree.updateSVNodes()
         return tree
 
+    
+    @classmethod
+    def from_file(cls, fileName, elements, svNodePool):
+        """
+        Reads a parameterized tree from a parameter file. The first line of
+        the file should be the string representation of the tree. Every line
+        after that should be a 2-tuple, where the first value is 0 or 1
+        (0 = knot is fixed and shouldn't be free for fitting), and the second
+        value is a knot parameter.
+
+        Note that this function is currently only intended to be used as a
+        helper function during fitting, so it's assumed that the structure
+        vector nodes (names, neighbors, cutoffs, num_knots) have already been
+        defined.
+        """
+
+        with open(fileName, 'r') as f:
+            tree = MultiComponentTree.from_str(
+                f.readline().strip(), elements, svNodePool
+            )
+
+            params = np.genfromtxt(f)
+
+        svi = 0
+        ci = 0
+        ki = 0
+        sv = tree.svNodes[svi]
+        sv.restrictions[sv.components[ci]] = []
+        for i, p in enumerate(params):
+
+            fixed, val = p
+            if fixed:
+                if ki == sv.numParams[sv.components[ci]]:
+                    # Move to next component if finished loading
+                    ci += 1
+                    ki = 0
+
+                    # if ki == sv.totalNumParams:
+                    if ci == len(sv.components):
+                        # Move to next node if finished loading
+                        svi += 1
+                        sv = tree.svNodes[svi]
+                        ci = 0
+                        ki = 0
+                        sv.restrictions[sv.components[ci]] = []
+                        sv.numFreeParams[sv.components[ci]] = 0
+                    else:
+                        sv.restrictions[sv.components[ci]] = []
+                        sv.numFreeParams[sv.components[ci]] = 0
+
+                if fixed:
+                    sv.restrictions[sv.components[ci]].append((ki, val))
+                    sv.numFreeParams[sv.components[ci]] -= 1
+
+            ki += 1
+
+        return tree
+
+
     def write_to_lammps(self, fname, y, cutoffs):
         writtenTemplates = []
 
@@ -1158,6 +1217,7 @@ class MultiComponentTree(SVTree):
             for y_i in y:
                 f.write("{}\n".format(y_i))
     
+
     def eval(self, useDask=True, allSums=False):
         vals = [
             self.chemistryTrees[el].eval(useDask=useDask, allSums=allSums)
