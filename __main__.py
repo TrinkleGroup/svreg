@@ -375,6 +375,7 @@ def polish(client, settings):
         treeAl = SVTree()
         treeAl.nodes = [
             FunctionNode('add'),
+            FunctionNode('global'),
             deepcopy(regressor.svNodePool[1]),
             FunctionNode('add'),
             deepcopy(regressor.svNodePool[0]),
@@ -382,7 +383,9 @@ def polish(client, settings):
             # FunctionNode('add'),
             # deepcopy(regressor.svNodePool[0]),
             # FunctionNode('softplus'),
+            FunctionNode('add'),
             deepcopy(regressor.svNodePool[0]),
+            deepcopy(regressor.svNodePool[1]),
         ]
 
         tree.chemistryTrees['Al'] = treeAl
@@ -432,12 +435,12 @@ def polish(client, settings):
         )
 
         perWorkerResults = client.get(graph, keys, direct=True)#, resources={'GPU': 1})
-
+        
         perStructResults, perStructNames = zip(*perWorkerResults)
 
         perStructResults    = list(itertools.chain.from_iterable(perStructResults))
         perStructNames      = list(itertools.chain.from_iterable(perStructNames))
-
+        
         perStructResults = [
             x for _, x in sorted(zip(perStructNames, perStructResults))
         ]
@@ -680,7 +683,7 @@ def computeErrors(refStruct, energies, forces, database, useDask=True):
 
             engErrors = abs(ediff - trueEdiff)
 
-            fcsErrors = forces[structName][treeNum]
+            fcsErrors = forces[structName][treeNum].copy()
 
             # trueForces = trueValues[structName]['forces']
             # fcsErrors = np.average(
