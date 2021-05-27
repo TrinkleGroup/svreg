@@ -1137,7 +1137,9 @@ class MultiComponentTree(SVTree):
         ki = 0
         sv = tree.svNodes[svi]
         sv.restrictions[sv.components[ci]] = []
-        for i, p in enumerate(params):
+        sv.numFreeParams[sv.components[ci]] = sv.numParams[sv.components[ci]]
+        sv.totalNumFreeParams = sum(sv.numFreeParams.values())
+        for p in params:
 
             fixed, val = p
             if fixed:
@@ -1148,20 +1150,24 @@ class MultiComponentTree(SVTree):
 
                     # if ki == sv.totalNumParams:
                     if ci == len(sv.components):
+                        sv.totalNumFreeParams = sum(sv.numFreeParams.values())
                         # Move to next node if finished loading
                         svi += 1
                         sv = tree.svNodes[svi]
                         ci = 0
                         ki = 0
                         sv.restrictions[sv.components[ci]] = []
-                        sv.numFreeParams[sv.components[ci]] = 0
+                        sv.numFreeParams[sv.components[ci]] = sv.numParams[sv.components[ci]]
+                        sv.totalNumFreeParams = sum(sv.numFreeParams.values())
                     else:
                         sv.restrictions[sv.components[ci]] = []
-                        sv.numFreeParams[sv.components[ci]] = 0
+                        sv.numFreeParams[sv.components[ci]] = sv.numParams[sv.components[ci]]
+                        sv.totalNumFreeParams = sum(sv.numFreeParams.values())
 
                 if fixed:
                     sv.restrictions[sv.components[ci]].append((ki, val))
                     sv.numFreeParams[sv.components[ci]] -= 1
+                    sv.totalNumFreeParams -= 1
 
             ki += 1
 

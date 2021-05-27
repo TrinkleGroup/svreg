@@ -393,6 +393,16 @@ def polish(client, settings):
 
         regressor.trees = [tree]
 
+    # tree = MCTree.from_file(
+    #     '/home/jvita/scripts/svreg/results/alznmg/al_lnames_conv/e799d5bc09fd37dba4e05f45a6c00e57/tree_file.pot',
+    #     database.attrs['elements'],
+    #     regressor.svNodePool
+    # )
+
+    # tree.updateSVNodes()
+
+    # regressor.trees = [tree]
+
     regressor.initializeOptimizers()
 
     savePath = os.path.join(settings['outputPath'], 'polished')
