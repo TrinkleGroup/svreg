@@ -70,6 +70,13 @@ PairSplineTree::PairSplineTree(LAMMPS *lmp) : Pair(lmp)
   comm_reverse = 0;
 
   totalNumParams = 0;
+  
+  arity1Functions.insert(
+    std::make_pair(
+      "global",
+      std::make_pair(PairSplineTree::global_state, PairSplineTree::_deriv_global_state)
+    )
+  );
  
   arity1Functions.insert(
     std::make_pair(

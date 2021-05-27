@@ -233,13 +233,19 @@ class SVEvaluator:
 
                         trueForces = worker._true_forces[struct]
 
+                        # engResult, fcsResult = tree.eval(useDask=False, allSums=allSums)
+
+                        # fcsErrors = sum(fcsResult)
+
+                        # fcsErrors = np.average(
+                        #     abs(sum(fcsResult) - trueForces), axis=(1,2)
+                        # )
+
                         engResult, fcsResult = tree.eval(useDask=False, allSums=allSums)
-
-                        fcsErrors = sum(fcsResult)
-
-                        fcsErrors = np.average(
-                            abs(sum(fcsResult) - trueForces), axis=(1,2)
-                        )
+                        
+                        Na = fcsResult[0].shape[1]
+                        fcsErrors = self.fErr(sum(fcsResult), trueForces)
+                        fcsErrors *= Na
 
                         treeResults.append([sum(engResult), fcsErrors])
 

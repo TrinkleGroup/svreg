@@ -114,6 +114,19 @@ def _derivative_sigmoid(x):
     """Chain rule on sig() = sig'()*(dx/dr), where sig'() = sig()*(1-sig())"""
     return (sigmoid(x[0])*(1-sigmoid(x[0])))[:, :, np.newaxis, np.newaxis]*x[1]
 
+def _global_state(x):
+    sums = x.sum(axis=-1)
+    return x + sums[:, np.newaxis]
+
+def _derivative_global_state(x):
+    if len(x[1].shape) < 4:
+        # allSums = True
+        N = x[1].shape[1]
+        return x[1] + N*x[1]
+    else:
+        sums = x[1].sum(axis=1)
+        return x[1] + sums[:, np.newaxis, :, :]
+
 def splus2(x):
     return np.log(1 + np.exp(-np.abs(x))) + np.maximum(x, 0)
 
@@ -164,6 +177,7 @@ _derivative_map = {
     'exp': _derivative_exp,
     'sig': _derivative_sigmoid,
     'softplus': _derivative_splus2,
+    'global': _derivative_global_state,
 }
 
 
@@ -201,6 +215,7 @@ log1  = _Function(function=_protected_log, name='log', arity=1)
 exp   = _Function(function=np.exp, name='exp', arity=1)
 sig   = _Function(function=sigmoid, name='sig', arity=1)
 softplus = _Function(function=splus2, name='softplus', arity=1)
+global_state = _Function(function=_global_state, name='global', arity=1)
 
 _function_map = {
     'add': add2,
@@ -214,7 +229,8 @@ _function_map = {
     # 'arctan': arctan1,
     # 'exp': exp,
     # 'sig': sig,
-    'softplus': softplus
+    'softplus': softplus,
+    'global': global_state,
 }
 
 _arities = {
@@ -229,6 +245,7 @@ _arities = {
         # 'exp',
         # 'sig',
         'softplus',
+        'global',
     ],
     2: [
         'add',
@@ -248,5 +265,6 @@ _latex = {
     'arctan': 'arctan({})',
     'exp': 'exp({})',
     'sig': 'sig({})',
-    'softplus': 'softplus({})'
+    'softplus': 'softplus({})',
+    'global': 'global({})',
 }
