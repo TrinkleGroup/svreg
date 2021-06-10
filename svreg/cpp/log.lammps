@@ -1,0 +1,73 @@
+LAMMPS (7 Aug 2019)
+units metal
+read_data ${data_file}
+read_data /tmp/trimer.data
+  orthogonal box = (0 0 0) to (203 203 200)
+  1 by 1 by 1 MPI processor grid
+  reading atoms ...
+  3 atoms
+  read_data CPU = 0.000103951 secs
+
+pair_style spline/tree
+# pair_coeff * * /home/jvita/scripts/svreg/examples/tree_write.txt Ti Mo
+pair_coeff * * tree_write.txt Al
+
+mass 1 47.87
+# mass 2 95.95
+
+neighbor 1.0 nsq
+neigh_modify once no every 1 delay 0 check yes
+
+
+fix 1 all nvt temp 100 100 $(100.0*dt)
+fix 1 all nvt temp 100 100 0.10000000000000000555
+thermo 1
+
+run 0
+Neighbor list info ...
+  update every 1 steps, delay 0 steps, check yes
+  max neighbors/atom: 2000, page size: 100000
+  master list distance cutoff = 8
+  ghost atom cutoff = 8
+  2 neighbor lists, perpetual/occasional/extra = 2 0 0
+  (1) pair spline/tree, perpetual
+      attributes: full, newton on
+      pair build: full/nsq
+      stencil: none
+      bin: none
+  (2) pair spline/tree, perpetual, half/full from (1)
+      attributes: half, newton on
+      pair build: halffull/newton
+      stencil: none
+      bin: none
+Per MPI rank memory allocation (min/avg/max) = 3.189 | 3.189 | 3.189 Mbytes
+Step Temp E_pair E_mol TotEng Press 
+       0            0    2.0794415            0    2.0794415            0 
+Loop time of 9.53674e-07 on 1 procs for 0 steps with 3 atoms
+
+0.0% CPU use with 1 MPI tasks x no OpenMP threads
+
+MPI task timing breakdown:
+Section |  min time  |  avg time  |  max time  |%varavg| %total
+---------------------------------------------------------------
+Pair    | 0          | 0          | 0          |   0.0 |  0.00
+Neigh   | 0          | 0          | 0          |   0.0 |  0.00
+Comm    | 0          | 0          | 0          |   0.0 |  0.00
+Output  | 0          | 0          | 0          |   0.0 |  0.00
+Modify  | 0          | 0          | 0          |   0.0 |  0.00
+Other   |            | 9.537e-07  |            |       |100.00
+
+Nlocal:    3 ave 3 max 3 min
+Histogram: 1 0 0 0 0 0 0 0 0 0
+Nghost:    0 ave 0 max 0 min
+Histogram: 1 0 0 0 0 0 0 0 0 0
+Neighs:    3 ave 3 max 3 min
+Histogram: 1 0 0 0 0 0 0 0 0 0
+FullNghs:  6 ave 6 max 6 min
+Histogram: 1 0 0 0 0 0 0 0 0 0
+
+Total # of neighbors = 6
+Ave neighs/atom = 2
+Neighbor list builds = 0
+Dangerous builds = 0
+Total wall time: 0:00:00

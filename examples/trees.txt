@@ -1,2 +1,0 @@
-<Mo> add(rho_A, ffg_AB) | <Ti> add(add(add(softplus(ffg_AA), ffg_BB), ffg_AB), ffg_AB)
-<Mo> add(ffg_AA, ffg_BB) | <Ti> softplus(ffg_BB)

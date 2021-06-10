@@ -7,7 +7,7 @@
 ################################################################################
 
 seed        1123
-runType     GA
+runType     POLISH
 useGPU      False
 
 ################################################################################
@@ -37,14 +37,14 @@ overwrite           True
 ################################################################################
 
 allSums                 True
-costFxn                 MAE
+costFxn                 RMSE
 
 optimizer               CMA
 
 numberOfTrees           10
 tournamentSize          5
 
-optimizerPopSize        17
+optimizerPopSize        100
 
 crossoverProb           0.2
 pointMutateProb         0.2
@@ -52,7 +52,7 @@ maxTreeDepth            2
 maxNumSVs               10
 
 numRegressorSteps       3
-maxNumOptimizerSteps    3
+maxNumOptimizerSteps    100
 
 energyWeight            10
 forcesWeight            1
