@@ -1,0 +1,62 @@
+################################################################################
+# An example input script with typical settings for svreg_data. Available
+# settings, descriptions, and default values can be seen by running
+# "python settings.py"                    
+################################################################################
+# Misc. settings
+################################################################################
+
+seed        1123
+runType     POLISH
+useGPU      False
+
+################################################################################
+# Database settings
+################################################################################
+
+# refStruct           Ground_state_crystal
+# databasePath        ../svreg_data/mlearn/Mo/Mo.hdf5-fixed-f32-noref-full
+
+# refStruct           Ti48Mo80_type1_c18
+# databasePath        ../svreg_data/hyojung/hj.hdf5-fixed-f32-mini0
+
+# refStruct           Ti48Mo80_type1_c10
+# databasePath        ../svreg_data/hyojung/hj.hdf5-fixed-f32-noref-full
+
+# refStruct           AL-step_1-data-0000.0000.0002.0000.03.h5-0
+# databasePath        /home/jvita/scripts/svreg_data/AlZnMg/AL_Al/AL_Al-full-allsums.hdf5
+
+refStruct           AL-step_14-data-003.001.012.000.000.005.h5-0
+databasePath        /home/jvita/scripts/svreg_data/AlZnMg/AL_Al/AL_Al.hdf5-fixed-f32-noref130
+
+outputPath          ./results/debug2
+overwrite           True
+
+################################################################################
+#  Regressor settings
+################################################################################
+
+allSums                 True
+costFxn                 RMSE
+
+optimizer               CMA
+
+numberOfTrees           10
+tournamentSize          5
+
+optimizerPopSize        100
+
+crossoverProb           0.2
+pointMutateProb         0.2
+maxTreeDepth            2
+maxNumSVs               10
+
+numRegressorSteps       3
+maxNumOptimizerSteps    100
+
+energyWeight            10
+forcesWeight            1
+
+ridgePenalty            0.0
+
+################################################################################

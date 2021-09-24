@@ -1,0 +1,6 @@
+results/
+results/*
+outcmaes/
+notebooks/
+notebooks/*
+*.lprof
